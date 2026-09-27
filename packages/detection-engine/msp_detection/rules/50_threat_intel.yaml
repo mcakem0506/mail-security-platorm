@@ -1,0 +1,124 @@
+# Threat Intelligence enrichment rules (ТЗ 13, 17.2).
+# Enrichment can raise risk; its absence never lowers it (NO_NEGATIVE_REPUTATION is not SAFE).
+ruleset: threat_intel
+rules:
+  - id: TI-001
+    version: 1
+    name: URL известен как вредоносный
+    category: phishing_url
+    severity: critical
+    confidence: 0.9
+    weight: 80
+    hard: true
+    conditions:
+      - ti_url_known_bad
+    evidence: [ti_url_known_bad]
+    explanation: >-
+      Ссылка из письма присутствует в источниках Threat Intelligence как вредоносная или
+      фишинговая.
+    recommendation: Не переходите по ссылке. Передайте письмо в службу ИБ.
+
+  - id: TI-002
+    version: 1
+    name: URL отмечен как подозрительный
+    category: phishing_url
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - ti_url_suspicious
+    evidence: [ti_url_suspicious]
+    explanation: Источники Threat Intelligence отмечают ссылку как подозрительную.
+
+  - id: TI-003
+    version: 1
+    name: Домен известен как вредоносный
+    category: phishing_url
+    severity: critical
+    confidence: 0.85
+    weight: 70
+    hard: true
+    conditions:
+      - ti_domain_known_bad
+    evidence: [ti_domain_known_bad]
+    explanation: Домен из письма присутствует в источниках Threat Intelligence как вредоносный.
+    recommendation: Не переходите по ссылкам письма.
+
+  - id: TI-004
+    version: 1
+    name: Домен отмечен как подозрительный
+    category: phishing_url
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - ti_domain_suspicious
+    evidence: [ti_domain_suspicious]
+    explanation: Источники Threat Intelligence отмечают домен как подозрительный.
+
+  - id: TI-005
+    version: 1
+    name: IP-адрес известен как вредоносный
+    category: phishing_url
+    severity: high
+    confidence: 0.8
+    conditions:
+      - ti_ip_known_bad
+    evidence: [ti_ip_known_bad]
+    explanation: IP-адрес, связанный с письмом, присутствует в источниках угроз.
+
+  - id: TI-006
+    version: 1
+    name: Домен недавно зарегистрирован или впервые наблюдается
+    category: lookalike_domain
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - ti_domain_recently_registered
+    evidence: [ti_domain_recently_registered]
+    explanation: >-
+      Домен из письма зарегистрирован или впервые зафиксирован недавно. Свежие домены часто
+      создаются специально под фишинговую кампанию.
+    recommendation: Отнеситесь к письму с повышенной осторожностью.
+
+  - id: TI-010
+    version: 1
+    name: Письмо относится к известной активной кампании
+    category: phishing_url
+    severity: critical
+    confidence: 0.85
+    weight: 70
+    hard: true
+    conditions:
+      - known_active_campaign
+    evidence: [known_active_campaign]
+    explanation: >-
+      Индикаторы письма совпадают с активной фишинговой кампанией, уже подтверждённой службой ИБ.
+    recommendation: Не взаимодействуйте с письмом.
+
+  - id: TI-011
+    version: 1
+    name: Индикаторы письма ранее наблюдались в инцидентах
+    category: phishing_url
+    severity: high
+    confidence: 0.75
+    conditions:
+      - indicator_seen_in_confirmed_incident
+    evidence: [indicator_seen_in_confirmed_incident]
+    explanation: >-
+      Один или несколько индикаторов письма ранее встречались в подтверждённых инцидентах
+      организации.
+
+  - id: TI-020
+    version: 1
+    name: Внешние источники Threat Intelligence недоступны
+    category: sender_spoofing
+    severity: info
+    confidence: 0.3
+    weight: 0
+    conditions:
+      - ti_providers_unavailable
+    evidence: [ti_providers_unavailable]
+    explanation: >-
+      Внешние источники Threat Intelligence были недоступны во время анализа. Локальные проверки
+      выполнены полностью, но обогащение неполно — отсутствие обнаружения не означает
+      безопасность.
+    internal: false

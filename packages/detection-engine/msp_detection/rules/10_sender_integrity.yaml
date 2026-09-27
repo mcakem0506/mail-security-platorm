@@ -1,0 +1,348 @@
+# Sender authentication, spoofing and identity rules (ТЗ 9, 15.1).
+# Note: SPF pass never lowers risk, and a missing DKIM signature is never phishing by itself.
+ruleset: sender_integrity
+rules:
+  - id: SND-001
+    version: 1
+    name: Аутентификация отправителя полностью не пройдена
+    category: sender_spoofing
+    severity: high
+    confidence: 0.8
+    weight: 40
+    conditions:
+      all:
+        - authentication_fully_failed
+        - sender_external
+    evidence: [spf_result, dkim_result, dmarc_result, from_address]
+    explanation: >-
+      Почтовая инфраструктура зафиксировала одновременный провал SPF и DMARC при отсутствии
+      действительной DKIM-подписи. Это означает, что отправитель не подтвердил право использовать
+      домен в поле From.
+    recommendation: Не отвечайте на письмо и не выполняйте содержащиеся в нём инструкции.
+
+  - id: SND-002
+    version: 1
+    name: DMARC-проверка не пройдена
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.6
+    conditions:
+      all:
+        - dmarc_fail
+        - sender_external
+      not:
+        - authentication_fully_failed
+    evidence: [dmarc_result, spf_result, dkim_result, from_address]
+    explanation: >-
+      Домен отправителя не прошёл проверку DMARC по данным почтовой инфраструктуры. Само по себе
+      это не доказывает атаку (возможна некорректная настройка легитимного сервиса), но повышает
+      риск в сочетании с другими признаками.
+    recommendation: Подтвердите легитимность письма по известному контакту отправителя.
+
+  - id: SND-003
+    version: 1
+    name: Письмо от имени корпоративного домена не прошло проверку
+    category: corporate_identity_impersonation
+    severity: critical
+    confidence: 0.85
+    weight: 60
+    conditions:
+      all:
+        - sender_internal
+        - any:
+            - dmarc_fail
+            - spf_fail
+            - authentication_fully_failed
+    evidence: [from_address, spf_result, dmarc_result, dkim_result]
+    explanation: >-
+      Письмо отправлено от имени домена организации, но аутентификация не пройдена — типичный
+      признак подделки внутреннего отправителя (spoofing корпоративного домена).
+    recommendation: Передайте письмо в службу ИБ. Внутренние письма не должны проваливать проверки.
+
+  - id: SND-010
+    version: 1
+    name: Reply-To ведёт на посторонний домен
+    category: reply_to_manipulation
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - reply_to_domain_mismatch
+    evidence: [reply_to_domain_mismatch, from_address, reply_to_address]
+    explanation: >-
+      Адрес для ответа (Reply-To) находится в другом домене, чем адрес отправителя (From). Ответ
+      уйдёт не тому, кто указан как автор письма.
+    recommendation: Проверьте, куда именно уйдёт ваш ответ, прежде чем отвечать.
+
+  - id: SND-011
+    version: 1
+    name: Внутренний отправитель с внешним адресом для ответа
+    category: reply_to_manipulation
+    severity: high
+    confidence: 0.8
+    conditions:
+      - reply_to_external_for_internal_sender
+    evidence: [reply_to_external_for_internal_sender]
+    explanation: >-
+      Письмо выглядит как внутреннее, но ответ будет отправлен на внешний адрес. Это характерно
+      для атак с перехватом переписки и BEC.
+    recommendation: Не отвечайте на письмо; свяжитесь с коллегой по внутреннему адресу.
+
+  - id: SND-012
+    version: 1
+    name: Return-Path не соответствует отправителю
+    category: sender_spoofing
+    severity: low
+    confidence: 0.45
+    conditions:
+      - return_path_mismatch
+    evidence: [return_path_mismatch]
+    explanation: >-
+      Технический адрес возврата (Return-Path) отличается от From и не относится к доверенной
+      рассылочной инфраструктуре. Часто встречается у легитимных рассылок, поэтому сигнал слабый.
+    internal: true
+
+  - id: SND-020
+    version: 1
+    name: Домен отправителя визуально похож на домен организации
+    category: lookalike_domain
+    severity: critical
+    confidence: 0.9
+    weight: 60
+    conditions:
+      - from_domain_lookalike_corporate
+    evidence: [from_domain_lookalike_corporate, from_address]
+    explanation: >-
+      Домен отправителя имитирует домен организации (похожее написание, подменённые символы или
+      домен организации вынесен в поддомен чужого домена).
+    recommendation: Считайте письмо поддельным. Передайте его в службу ИБ.
+
+  - id: SND-021
+    version: 1
+    name: Домен отправителя похож на известный сервис
+    category: lookalike_domain
+    severity: high
+    confidence: 0.75
+    conditions:
+      - from_domain_lookalike_service
+    evidence: [from_domain_lookalike_service, from_address]
+    explanation: >-
+      Домен отправителя визуально похож на домен известного сервиса (Microsoft, банк, портал и
+      т.п.), но им не является.
+    recommendation: Не переходите по ссылкам; открывайте сервис через официальный адрес.
+
+  - id: SND-022
+    version: 1
+    name: Домен отправителя использует символы-омоглифы
+    category: lookalike_domain
+    severity: high
+    confidence: 0.8
+    conditions:
+      any:
+        - from_domain_homoglyph
+        - from_domain_mixed_script
+    evidence: [from_domain_homoglyph, from_domain_mixed_script, from_domain_punycode, from_address]
+    explanation: >-
+      В домене отправителя присутствуют символы из других алфавитов, визуально неотличимые от
+      латинских. Такой приём применяют для подделки известных доменов.
+    recommendation: Не доверяйте письму; проверьте домен в его Punycode-виде.
+
+  - id: SND-023
+    version: 1
+    name: Домен отправителя записан в Punycode
+    category: lookalike_domain
+    severity: low
+    confidence: 0.4
+    conditions:
+      all:
+        - from_domain_punycode
+      not:
+        - from_domain_homoglyph
+        - from_domain_lookalike_corporate
+        - from_domain_lookalike_service
+    evidence: [from_domain_punycode]
+    explanation: >-
+      Домен отправителя является интернационализированным (IDN/Punycode). Само по себе это
+      допустимо, но требует внимания при проверке подлинности.
+
+  - id: SND-030
+    version: 1
+    name: Имя защищаемого сотрудника использовано внешним отправителем
+    category: executive_impersonation
+    severity: critical
+    confidence: 0.9
+    weight: 65
+    conditions:
+      - protected_identity_impersonation_external
+    exclusions:
+      - protected_identity_approved_delegate
+    evidence: [protected_identity_impersonation, from_address]
+    explanation: >-
+      В поле отправителя указано имя сотрудника из списка защищаемых идентичностей, но письмо
+      пришло с внешнего адреса, не связанного с этим сотрудником.
+    recommendation: Не выполняйте инструкции из письма. Подтвердите запрос лично или по телефону.
+
+  - id: SND-031
+    version: 1
+    name: Подмена имени руководителя
+    category: executive_impersonation
+    severity: critical
+    confidence: 0.85
+    conditions:
+      - executive_impersonation
+    exclusions:
+      - protected_identity_approved_delegate
+    evidence: [executive_impersonation]
+    explanation: >-
+      Письмо отправлено от имени руководителя организации с адреса, который ему не принадлежит.
+    recommendation: Проверьте запрос по независимому каналу связи, не отвечая на это письмо.
+
+  - id: SND-032
+    version: 1
+    name: Подмена имени сотрудника финансового блока
+    category: vendor_impersonation
+    severity: high
+    confidence: 0.8
+    conditions:
+      - finance_identity_impersonation
+    exclusions:
+      - protected_identity_approved_delegate
+    evidence: [finance_identity_impersonation]
+    explanation: >-
+      Имя сотрудника финансового или закупочного подразделения использовано посторонним адресом.
+    recommendation: Любые платёжные инструкции подтверждайте по регламенту, не по письму.
+
+  - id: SND-033
+    version: 1
+    name: Подмена имени сотрудника ИТ или ИБ
+    category: credential_harvesting
+    severity: high
+    confidence: 0.8
+    conditions:
+      - it_identity_impersonation
+    exclusions:
+      - protected_identity_approved_delegate
+    evidence: [it_identity_impersonation]
+    explanation: >-
+      Письмо отправлено от имени сотрудника ИТ или службы безопасности с чужого адреса. Такие
+      письма используют для получения паролей и кодов подтверждения.
+    recommendation: Никогда не сообщайте пароли и коды подтверждения по почте.
+
+  - id: SND-034
+    version: 1
+    name: Имя внутреннего сотрудника у внешнего отправителя
+    category: display_name_impersonation
+    severity: high
+    confidence: 0.75
+    conditions:
+      - internal_display_name_from_external_sender
+    evidence: [internal_display_name_from_external_sender]
+    explanation: >-
+      Отображаемое имя совпадает с сотрудником организации, но письмо отправлено с внешнего
+      адреса.
+    recommendation: Свяжитесь с сотрудником по его корпоративному адресу, чтобы проверить письмо.
+
+  - id: SND-035
+    version: 1
+    name: Отображаемое имя содержит другой адрес
+    category: display_name_impersonation
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - display_name_contains_other_address
+    evidence: [display_name_contains_other_address, display_name_claims_corporate_address]
+    explanation: >-
+      В отображаемом имени отправителя записан адрес электронной почты, отличающийся от
+      фактического адреса отправителя. Приём маскирует настоящего отправителя в почтовом клиенте.
+    recommendation: Смотрите на фактический адрес отправителя, а не на отображаемое имя.
+
+  - id: SND-036
+    version: 1
+    name: Внешний отправитель представляется организацией
+    category: corporate_identity_impersonation
+    severity: high
+    confidence: 0.7
+    conditions:
+      - display_name_claims_organization
+    evidence: [display_name_claims_organization, from_address]
+    explanation: >-
+      Внешний отправитель использует в имени название организации, не являясь её сотрудником.
+    recommendation: Проверьте отправителя; официальные письма приходят с корпоративного домена.
+
+  - id: SND-037
+    version: 1
+    name: Омоглифы в имени отправителя
+    category: display_name_impersonation
+    severity: medium
+    confidence: 0.65
+    conditions:
+      - display_name_homoglyph
+    evidence: [display_name_homoglyph]
+    explanation: >-
+      Отображаемое имя содержит символы из разных алфавитов, визуально имитирующие латиницу.
+    internal: false
+
+  - id: SND-040
+    version: 1
+    name: Несколько заголовков From
+    category: sender_spoofing
+    severity: high
+    confidence: 0.8
+    conditions:
+      - multiple_from_headers
+    evidence: [multiple_from_headers]
+    explanation: >-
+      Письмо содержит более одного заголовка From. Разные почтовые клиенты отображают разные
+      значения — приём используется для обхода проверок и обмана получателя.
+    recommendation: Передайте письмо в службу ИБ.
+
+  - id: SND-041
+    version: 1
+    name: Отсутствует Message-ID
+    category: sender_spoofing
+    severity: low
+    confidence: 0.4
+    conditions:
+      - message_id_missing
+    evidence: [message_id_missing]
+    explanation: Письмо не содержит Message-ID, что нетипично для легитимных почтовых систем.
+    internal: true
+
+  - id: SND-042
+    version: 1
+    name: Отправитель ранее не наблюдался
+    category: sender_spoofing
+    severity: info
+    confidence: 0.3
+    weight: 5
+    conditions:
+      all:
+        - sender_first_time
+        - sender_external
+    evidence: [sender_first_time]
+    explanation: Ранее письма от этого отправителя платформой не наблюдались.
+    internal: true
+
+  - id: SND-043
+    version: 1
+    name: Отправитель ранее признавался вредоносным
+    category: sender_spoofing
+    severity: critical
+    confidence: 0.9
+    hard: true
+    conditions:
+      - sender_previously_malicious
+    evidence: [sender_previously_malicious]
+    explanation: >-
+      Ранее письма от этого отправителя были подтверждены службой ИБ как вредоносные.
+    recommendation: Не взаимодействуйте с письмом; оно относится к известному источнику атак.
+
+  - id: SND-044
+    version: 1
+    name: На отправителя ранее жаловались сотрудники
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - sender_previously_reported
+    evidence: [sender_previously_reported]
+    explanation: Сотрудники ранее сообщали о письмах от этого отправителя как о подозрительных.

@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mail-security-platform"
+version = "0.9.0"
+description = "Mail Security Platform: Outlook add-in, server-side mail analysis, TI hub, incidents and controlled remediation for Exchange On-Premises"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "sqlalchemy>=2.0.30",
+  "alembic>=1.13",
+  "psycopg[binary]>=3.2",
+  "redis>=5.0",
+  "celery>=5.4",
+  "httpx>=0.27",
+  "nh3>=0.2.17",
+  "tldextract>=5.1",
+  "idna>=3.7",
+  "ldap3>=2.9",
+  "PyYAML>=6.0",
+  "argon2-cffi>=23.1",
+  "python-multipart>=0.0.9",
+  "prometheus-client>=0.20",
+  "minio>=7.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "hypothesis>=6.100",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-PyYAML",
+  "bandit>=1.7",
+  "pip-audit>=2.7",
+]
+
+[tool.setuptools.packages.find]
+where = [
+  "apps/api",
+  "apps/worker",
+  "packages/shared-contracts",
+  "packages/mail-parser",
+  "packages/detection-engine",
+  "packages/risk-engine",
+  "packages/ti-core",
+  "providers/exchange",
+  "providers/active-directory",
+  "providers/virustotal",
+  "providers/malware-scanner",
+  "providers/semantic-analysis",
+]
+include = ["msp_*"]
+
+[tool.setuptools.package-data]
+msp_detection = ["rules/*.yaml", "data/*.txt"]
+msp_api = ["migrations/*.py", "migrations/versions/*.py", "alembic.ini"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -p no:cacheprovider"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = ["apps/security-console", "apps/outlook-addin", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "C4", "SIM", "RUF"]
+ignore = [
+  "S101",   # assert is used in tests
+  "RUF001", "RUF002", "RUF003",  # Cyrillic text in strings/comments is intentional
+  "B008",   # FastAPI Depends() in defaults
+  "S311",   # random for non-crypto use in tests/fuzz
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B", "BLE"]
+"apps/api/msp_api/migrations/**" = ["E501", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+check_untyped_defs = true
+no_implicit_optional = true
+explicit_package_bases = true
+exclude = ["tests/fixtures", "apps/security-console", "apps/outlook-addin", "migrations/versions"]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "apps/security-console", "apps/outlook-addin"]
+skips = ["B101"]

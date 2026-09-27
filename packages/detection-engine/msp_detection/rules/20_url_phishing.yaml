@@ -1,0 +1,251 @@
+# URL, domain and credential-harvesting rules (ТЗ 11.3, 15.1).
+ruleset: url_phishing
+rules:
+  - id: URL-001
+    version: 1
+    name: Ссылка ведёт на домен, похожий на домен организации
+    category: phishing_url
+    severity: critical
+    confidence: 0.9
+    weight: 60
+    conditions:
+      - url_lookalike_corporate
+    evidence: [url_lookalike_corporate]
+    explanation: >-
+      В письме есть ссылка на домен, имитирующий домен организации. Такие страницы обычно
+      копируют корпоративный портал для сбора учётных данных.
+    recommendation: Не переходите по ссылке. Открывайте корпоративные сервисы из закладок.
+
+  - id: URL-002
+    version: 1
+    name: Ссылка ведёт на домен, похожий на известный сервис
+    category: phishing_url
+    severity: high
+    confidence: 0.8
+    conditions:
+      - url_lookalike_service
+    evidence: [url_lookalike_service]
+    explanation: >-
+      Ссылка ведёт на домен, визуально похожий на известный сервис, но не принадлежащий ему.
+    recommendation: Открывайте сервис только через официальный адрес или закладку.
+
+  - id: URL-003
+    version: 1
+    name: Ссылка использует символы-омоглифы
+    category: phishing_url
+    severity: high
+    confidence: 0.8
+    conditions:
+      any:
+        - url_homoglyph
+    evidence: [url_homoglyph, url_punycode]
+    explanation: >-
+      Домен в ссылке содержит символы других алфавитов, визуально неотличимые от латинских.
+    recommendation: Не переходите по ссылке.
+
+  - id: URL-004
+    version: 1
+    name: Видимый текст ссылки не соответствует адресу перехода
+    category: phishing_url
+    severity: high
+    confidence: 0.85
+    weight: 45
+    conditions:
+      - url_visible_href_mismatch
+    evidence: [url_visible_href_mismatch]
+    explanation: >-
+      В письме показан один адрес, а переход выполняется на другой домен. Это классический приём
+      маскировки фишинговой ссылки.
+    recommendation: Наводите курсор на ссылки и сверяйте фактический адрес перехода.
+
+  - id: URL-005
+    version: 1
+    name: Ссылка ведёт на IP-адрес
+    category: phishing_url
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - url_ip_literal
+    evidence: [url_ip_literal]
+    explanation: >-
+      Ссылка указывает не на доменное имя, а напрямую на IP-адрес. Легитимные сервисы так почти
+      никогда не делают.
+    recommendation: Не переходите по ссылке.
+
+  - id: URL-006
+    version: 1
+    name: Ссылка на нестандартный порт
+    category: phishing_url
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - url_non_standard_port
+    evidence: [url_non_standard_port]
+    explanation: Ссылка использует нестандартный сетевой порт, что характерно для временной инфраструктуры атак.
+
+  - id: URL-007
+    version: 1
+    name: Ссылка маскирует адрес через userinfo
+    category: phishing_url
+    severity: high
+    confidence: 0.8
+    conditions:
+      - url_misleading_userinfo
+    evidence: [url_misleading_userinfo]
+    explanation: >-
+      В ссылке используется конструкция вида "https://известный-сайт@другой-домен/". Фактический
+      переход выполняется на домен после символа @.
+    recommendation: Не переходите по ссылке.
+
+  - id: URL-008
+    version: 1
+    name: Использован сервис сокращения ссылок
+    category: phishing_url
+    severity: low
+    confidence: 0.45
+    conditions:
+      - url_shortener
+    evidence: [url_shortener]
+    explanation: >-
+      Ссылка скрыта за сервисом сокращения, поэтому конечный адрес неизвестен до перехода.
+    recommendation: Запросите у отправителя полный адрес ссылки.
+
+  - id: URL-009
+    version: 1
+    name: Избыточное число поддоменов
+    category: phishing_url
+    severity: low
+    confidence: 0.5
+    conditions:
+      - url_excessive_subdomains
+    evidence: [url_excessive_subdomains]
+    explanation: >-
+      Ссылка содержит множество поддоменов — приём, позволяющий разместить узнаваемое имя слева
+      и скрыть настоящий домен справа.
+
+  - id: URL-010
+    version: 1
+    name: Подозрительная доменная зона
+    category: phishing_url
+    severity: info
+    confidence: 0.35
+    weight: 8
+    conditions:
+      - url_suspicious_tld
+    evidence: [url_suspicious_tld]
+    explanation: >-
+      Ссылка размещена в доменной зоне, часто используемой для одноразовой инфраструктуры. Это
+      слабый признак и сам по себе ничего не доказывает.
+    internal: true
+
+  - id: URL-011
+    version: 1
+    name: Ссылка ведёт на страницу входа или подтверждения
+    category: credential_harvesting
+    severity: medium
+    confidence: 0.6
+    conditions:
+      all:
+        - url_credential_path
+        - sender_external
+    evidence: [url_credential_path]
+    explanation: >-
+      Адрес ссылки указывает на страницу аутентификации или подтверждения учётной записи.
+    recommendation: Вводите учётные данные только на сайтах, открытых вами самостоятельно.
+
+  - id: URL-012
+    version: 1
+    name: Сбор учётных данных через ссылку в письме
+    category: credential_harvesting
+    severity: critical
+    confidence: 0.85
+    weight: 55
+    conditions:
+      all:
+        - url_credential_path
+        - any:
+            - url_lookalike_corporate
+            - url_lookalike_service
+            - url_homoglyph
+            - url_ip_literal
+            - url_visible_href_mismatch
+    evidence: [url_credential_path, url_lookalike_corporate, url_lookalike_service, url_visible_href_mismatch]
+    explanation: >-
+      Письмо ведёт на страницу ввода учётных данных, размещённую на поддельном или
+      замаскированном домене.
+    recommendation: Не вводите учётные данные. Передайте письмо в службу ИБ.
+
+  - id: URL-013
+    version: 1
+    name: Опасная схема ссылки
+    category: phishing_url
+    severity: high
+    confidence: 0.8
+    conditions:
+      - url_dangerous_scheme
+    evidence: [url_dangerous_scheme]
+    explanation: >-
+      В письме присутствует ссылка со схемой javascript:, data: или file:, предназначенная для
+      исполнения кода или подмены содержимого.
+    recommendation: Не взаимодействуйте с письмом; передайте его в службу ИБ.
+
+  - id: URL-020
+    version: 1
+    name: Форма ввода пароля в теле письма
+    category: credential_harvesting
+    severity: high
+    confidence: 0.85
+    conditions:
+      - html_password_input
+    evidence: [html_password_input, html_form_posts_external]
+    explanation: >-
+      Письмо содержит HTML-форму с полем пароля. Легитимные организации не собирают пароли
+      формой внутри письма.
+    recommendation: Никогда не вводите пароль в форму, встроенную в письмо.
+
+  - id: URL-021
+    version: 1
+    name: Форма письма отправляет данные на внешний адрес
+    category: credential_harvesting
+    severity: high
+    confidence: 0.8
+    conditions:
+      - html_form_posts_external
+    evidence: [html_form_posts_external]
+    explanation: Данные из формы в письме будут отправлены на сторонний домен.
+    recommendation: Не заполняйте формы в письмах.
+
+  - id: URL-022
+    version: 1
+    name: Поддельная страница входа корпоративной почты
+    category: fake_cloud_login
+    severity: critical
+    confidence: 0.85
+    conditions:
+      all:
+        - any:
+            - url_lookalike_service
+            - url_lookalike_corporate
+            - url_credential_path
+        - any:
+            - intent_credential_request
+            - intent_fake_quota_or_expiry
+    evidence: [url_lookalike_service, url_credential_path, intent_credential_request, intent_fake_quota_or_expiry]
+    explanation: >-
+      Письмо имитирует уведомление почтового или облачного сервиса и ведёт на страницу входа на
+      неофициальном домене.
+    recommendation: Откройте почтовый сервис самостоятельно и проверьте состояние ящика.
+
+  - id: URL-023
+    version: 1
+    name: Скрипт в теле письма
+    category: phishing_url
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - html_script_present
+    evidence: [html_script_present]
+    explanation: >-
+      HTML-часть письма содержит скрипт. В безопасном просмотре он удалён, но его наличие
+      нетипично для деловой переписки.
+    internal: true

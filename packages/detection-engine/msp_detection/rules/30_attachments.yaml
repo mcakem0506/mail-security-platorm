@@ -1,0 +1,288 @@
+# Attachment static-analysis rules (ТЗ 12.2, 15.1).
+# Static signals only: nothing is executed and no verdict relies on a single external provider.
+ruleset: attachments
+rules:
+  - id: ATT-001
+    version: 1
+    name: Исполняемое вложение
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.85
+    weight: 45
+    conditions:
+      - attachment_executable
+    evidence: [attachment_executable]
+    explanation: >-
+      Во вложении находится исполняемый файл. Деловая переписка почти никогда не требует
+      пересылки исполняемых файлов.
+    recommendation: Не запускайте вложение. Передайте письмо в службу ИБ.
+
+  - id: ATT-002
+    version: 1
+    name: Скрипт во вложении
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_script
+    evidence: [attachment_script]
+    explanation: Вложение является скриптом, который при открытии выполнит код на компьютере.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-003
+    version: 1
+    name: Файл-ярлык во вложении
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_shortcut
+    evidence: [attachment_shortcut]
+    explanation: >-
+      Вложение является ярлыком (.lnk/.url). Ярлыки применяются для запуска скрытых команд и
+      загрузки вредоносного кода.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-004
+    version: 1
+    name: Двойное расширение файла
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.85
+    conditions:
+      - attachment_double_extension
+    evidence: [attachment_double_extension]
+    explanation: >-
+      Имя вложения содержит двойное расширение (например, "договор.pdf.exe"), маскирующее
+      исполняемый файл под документ.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-005
+    version: 1
+    name: Тип файла не соответствует расширению
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - attachment_extension_mismatch
+    evidence: [attachment_extension_mismatch]
+    explanation: >-
+      Фактическое содержимое вложения не соответствует заявленному расширению.
+    recommendation: Не открывайте вложение до проверки службой ИБ.
+
+  - id: ATT-006
+    version: 1
+    name: Документ с макросами
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - attachment_macro_enabled
+    evidence: [attachment_macro_enabled]
+    explanation: >-
+      Вложенный документ содержит макросы (VBA). Макросы — распространённый способ доставки
+      вредоносного кода.
+    recommendation: Не разрешайте выполнение макросов в документе.
+
+  - id: ATT-007
+    version: 1
+    name: Документ с макросами от внешнего отправителя
+    category: malicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      all:
+        - attachment_macro_enabled
+        - sender_external
+    evidence: [attachment_macro_enabled, from_address]
+    explanation: Внешний отправитель прислал документ с макросами.
+    recommendation: Не включайте макросы. Передайте письмо в службу ИБ.
+
+  - id: ATT-008
+    version: 1
+    name: Встроенные объекты в документе
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.65
+    conditions:
+      - attachment_embedded_objects
+    evidence: [attachment_embedded_objects]
+    explanation: >-
+      Документ содержит встроенные OLE-объекты или элементы ActiveX, которые могут запускать
+      внешние файлы.
+
+  - id: ATT-009
+    version: 1
+    name: Образ диска во вложении
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.75
+    conditions:
+      - attachment_disk_image
+    evidence: [attachment_disk_image]
+    explanation: >-
+      Вложение является образом диска (ISO/IMG/VHD). Такие контейнеры используют для обхода
+      предупреждений операционной системы.
+    recommendation: Не монтируйте образ.
+
+  - id: ATT-010
+    version: 1
+    name: Запароленный архив
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - attachment_encrypted_archive
+    evidence: [attachment_encrypted_archive]
+    explanation: >-
+      Вложенный архив защищён паролем, поэтому его содержимое невозможно проверить
+      автоматически. Это не доказывает вредоносность, но исключает проверку.
+    recommendation: Уточните у отправителя необходимость пароля перед распаковкой.
+
+  - id: ATT-011
+    version: 1
+    name: Опасный файл внутри архива
+    category: malicious_attachment
+    severity: high
+    confidence: 0.85
+    conditions:
+      - archive_contains_dangerous_file
+    evidence: [archive_contains_dangerous_file]
+    explanation: >-
+      Внутри вложенного архива обнаружен исполняемый файл, скрипт или ярлык.
+    recommendation: Не распаковывайте архив. Передайте письмо в службу ИБ.
+
+  - id: ATT-012
+    version: 1
+    name: Признаки архивной бомбы
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_archive_bomb
+    evidence: [attachment_archive_bomb]
+    explanation: >-
+      Архив имеет аномальные параметры сжатия или количество файлов — признак архивной бомбы,
+      предназначенной для исчерпания ресурсов при распаковке.
+    recommendation: Не распаковывайте архив.
+
+  - id: ATT-013
+    version: 1
+    name: Небезопасные пути внутри архива
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_unsafe_paths
+    evidence: [attachment_unsafe_paths]
+    explanation: >-
+      Архив содержит абсолютные пути, переходы к родительским каталогам или символические
+      ссылки, что позволяет записать файлы вне каталога распаковки.
+    recommendation: Не распаковывайте архив.
+
+  - id: ATT-014
+    version: 1
+    name: Вложенные архивы
+    category: suspicious_attachment
+    severity: low
+    confidence: 0.5
+    conditions:
+      - attachment_nested_archive
+    evidence: [attachment_nested_archive]
+    explanation: Архив содержит другие архивы — приём, затрудняющий автоматическую проверку.
+
+  - id: ATT-015
+    version: 1
+    name: HTML-вложение
+    category: credential_harvesting
+    severity: medium
+    confidence: 0.7
+    conditions:
+      - attachment_html
+    evidence: [attachment_html]
+    explanation: >-
+      Вложение является HTML-страницей. Такие вложения открывают локально поддельную страницу
+      входа, минуя проверку веб-фильтров.
+    recommendation: Не открывайте HTML-вложение.
+
+  - id: ATT-016
+    version: 1
+    name: Форма ввода пароля в HTML-вложении
+    category: credential_harvesting
+    severity: critical
+    confidence: 0.85
+    weight: 55
+    conditions:
+      - attachment_html_credential_form
+    evidence: [attachment_html_credential_form]
+    explanation: >-
+      HTML-вложение содержит форму ввода пароля — прямой признак попытки сбора учётных данных.
+    recommendation: Не открывайте вложение. Передайте письмо в службу ИБ.
+
+  - id: ATT-017
+    version: 1
+    name: Признаки HTML smuggling
+    category: malicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_html_smuggling
+    evidence: [attachment_html_smuggling]
+    explanation: >-
+      HTML-вложение содержит код, собирающий файл на стороне клиента (HTML smuggling) — приём
+      доставки вредоносного файла в обход фильтрации.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-018
+    version: 1
+    name: Имя файла с подменой направления текста
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.85
+    conditions:
+      - attachment_rtlo_filename
+    evidence: [attachment_rtlo_filename]
+    explanation: >-
+      Имя вложения содержит управляющий символ смены направления текста, визуально подменяющий
+      расширение файла.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-030
+    version: 1
+    name: Локальный антивирус обнаружил угрозу
+    category: malicious_attachment
+    severity: critical
+    confidence: 0.95
+    weight: 85
+    hard: true
+    conditions:
+      - av_detection
+    evidence: [av_detection]
+    explanation: Локальный антивирусный движок классифицировал вложение как вредоносное.
+    recommendation: Не открывайте вложение. Инцидент передан службе ИБ.
+
+  - id: ATT-031
+    version: 1
+    name: Хеш вложения известен как вредоносный
+    category: malicious_attachment
+    severity: critical
+    confidence: 0.9
+    weight: 80
+    hard: true
+    conditions:
+      - ti_file_known_bad
+    evidence: [ti_file_known_bad]
+    explanation: >-
+      Контрольная сумма вложения присутствует в источниках Threat Intelligence как вредоносная.
+    recommendation: Не открывайте вложение.
+
+  - id: ATT-032
+    version: 1
+    name: Хеш вложения отмечен как подозрительный
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - ti_file_suspicious
+    evidence: [ti_file_suspicious]
+    explanation: Источники Threat Intelligence отмечают файл как подозрительный.

@@ -1,0 +1,185 @@
+"""Enumerations shared by all components (API, worker, add-in contracts)."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class AnalysisStatus(StrEnum):
+    """User-facing status of a message check (Outlook add-in states, ТЗ 6.3)."""
+
+    NOT_ANALYZED = "NOT_ANALYZED"
+    QUEUED = "QUEUED"
+    ANALYZING = "ANALYZING"
+    LOW_RISK = "LOW_RISK"
+    SUSPICIOUS = "SUSPICIOUS"
+    HIGH_RISK = "HIGH_RISK"
+    MALICIOUS = "MALICIOUS"
+    UNKNOWN = "UNKNOWN"
+    PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+    ERROR = "ERROR"
+    REPORTED = "REPORTED"
+    UNDER_INVESTIGATION = "UNDER_INVESTIGATION"
+    CLOSED = "CLOSED"
+
+
+class JobState(StrEnum):
+    QUEUED = "QUEUED"
+    ANALYZING = "ANALYZING"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
+class TIState(StrEnum):
+    """State of asynchronous Threat Intelligence enrichment for a job."""
+
+    NOT_REQUIRED = "NOT_REQUIRED"
+    NOT_CONFIGURED = "NOT_CONFIGURED"
+    PENDING = "PENDING"
+    COMPLETED = "COMPLETED"
+    PARTIAL = "PARTIAL"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class RiskLevel(StrEnum):
+    """Final classification (ТЗ 17). There is deliberately no SAFE value."""
+
+    LOW_RISK = "LOW_RISK"
+    SUSPICIOUS = "SUSPICIOUS"
+    HIGH_RISK = "HIGH_RISK"
+    MALICIOUS = "MALICIOUS"
+    UNKNOWN = "UNKNOWN"
+
+
+RISK_ORDER: dict[RiskLevel, int] = {
+    RiskLevel.LOW_RISK: 0,
+    RiskLevel.UNKNOWN: 1,
+    RiskLevel.SUSPICIOUS: 2,
+    RiskLevel.HIGH_RISK: 3,
+    RiskLevel.MALICIOUS: 4,
+}
+
+
+class Severity(StrEnum):
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+SEVERITY_BASE_WEIGHT: dict[Severity, int] = {
+    Severity.INFO: 0,
+    Severity.LOW: 10,
+    Severity.MEDIUM: 25,
+    Severity.HIGH: 45,
+    Severity.CRITICAL: 70,
+}
+
+
+class TIStatus(StrEnum):
+    """Normalised provider verdicts (ТЗ 13.3). NO_NEGATIVE_REPUTATION is NOT safe."""
+
+    KNOWN_BAD = "KNOWN_BAD"
+    SUSPICIOUS = "SUSPICIOUS"
+    NO_NEGATIVE_REPUTATION = "NO_NEGATIVE_REPUTATION"
+    UNKNOWN = "UNKNOWN"
+    NOT_SUPPORTED = "NOT_SUPPORTED"
+    RATE_LIMITED = "RATE_LIMITED"
+    PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+    POLICY_BLOCKED = "POLICY_BLOCKED"
+    ERROR = "ERROR"
+
+
+TI_FAILURE_STATUSES = frozenset(
+    {TIStatus.RATE_LIMITED, TIStatus.PROVIDER_UNAVAILABLE, TIStatus.ERROR}
+)
+
+
+class IOCType(StrEnum):
+    SHA256 = "sha256"
+    DOMAIN = "domain"
+    URL = "url"
+    IPV4 = "ipv4"
+    IPV6 = "ipv6"
+    EMAIL = "email"
+    CERT_FINGERPRINT = "cert_fingerprint"
+
+
+class IncidentStatus(StrEnum):
+    NEW = "NEW"
+    TRIAGE = "TRIAGE"
+    INVESTIGATING = "INVESTIGATING"
+    CONFIRMED_PHISHING = "CONFIRMED_PHISHING"
+    CONFIRMED_MALWARE = "CONFIRMED_MALWARE"
+    CONFIRMED_BEC = "CONFIRMED_BEC"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    BENIGN = "BENIGN"
+    REMEDIATION_PENDING = "REMEDIATION_PENDING"
+    REMEDIATED = "REMEDIATED"
+    CLOSED = "CLOSED"
+
+
+class Role(StrEnum):
+    EMPLOYEE = "employee"
+    SECURITY_VIEWER = "security_viewer"
+    SECURITY_ANALYST = "security_analyst"
+    SECURITY_ADMIN = "security_admin"
+    PLATFORM_ADMIN = "platform_admin"
+
+
+class IntakeSource(StrEnum):
+    ADDIN = "addin"
+    ADDIN_REPORT = "addin_report"
+    SECURITY_MAILBOX = "security_mailbox"
+    SHADOW = "shadow"
+    UPLOAD = "upload"
+    API = "api"
+
+
+class RemediationType(StrEnum):
+    LOCATE = "locate"
+    QUARANTINE = "quarantine"
+    DELETE = "delete"
+    BLOCK_SENDER = "block_sender"
+    BLOCK_DOMAIN = "block_domain"
+    TRANSPORT_RULE_PROPOSAL = "transport_rule_proposal"
+    RELEASE = "release"
+
+
+class RemediationState(StrEnum):
+    PROPOSED = "PROPOSED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXECUTED = "EXECUTED"
+    DRY_RUN_EXECUTED = "DRY_RUN_EXECUTED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class ExceptionType(StrEnum):
+    TRUSTED_SENDER = "trusted_sender"
+    TRUSTED_DOMAIN = "trusted_domain"
+    TRUSTED_SENDER_DOMAIN_PAIR = "trusted_sender_domain_pair"
+    APPROVED_DELEGATED_SERVICE = "approved_delegated_service"
+    APPROVED_MARKETING_PLATFORM = "approved_marketing_platform"
+    TEMPORARY = "temporary"
+    RULE_SUPPRESSION = "rule_suppression"
+
+
+class VTMode(StrEnum):
+    DISABLED = "disabled"
+    MOCK = "mock"
+    PREMIUM = "premium"
+    PRIVATE_SCANNING = "private_scanning"
+
+
+class ProtectedCategory(StrEnum):
+    EXECUTIVE = "executive"
+    FINANCE = "finance"
+    HR = "hr"
+    ADMINISTRATOR = "administrator"
+    SECURITY = "security"
+    PROCUREMENT = "procurement"
+    VIP = "vip"

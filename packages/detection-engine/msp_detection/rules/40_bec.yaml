@@ -1,0 +1,363 @@
+# BEC and social-engineering rules (ТЗ 16.2).
+# Intent alone is a weak signal; it becomes significant in combination with identity and authentication facts.
+ruleset: bec
+rules:
+  - id: BEC-001
+    version: 1
+    name: Запрос на изменение платёжных реквизитов
+    category: invoice_payment_fraud
+    severity: high
+    confidence: 0.75
+    weight: 45
+    conditions:
+      - intent_bank_details_change
+    evidence: [intent_bank_details_change, from_address]
+    explanation: >-
+      Письмо содержит запрос на изменение банковских или платёжных реквизитов — основной сценарий
+      мошенничества с подменой платежей (BEC).
+    recommendation: >-
+      Подтвердите изменение реквизитов по ранее известному телефону контрагента, а не по данным из
+      этого письма.
+
+  - id: BEC-002
+    version: 1
+    name: Изменение реквизитов от внешнего отправителя без аутентификации
+    category: invoice_payment_fraud
+    severity: critical
+    confidence: 0.85
+    weight: 60
+    conditions:
+      all:
+        - intent_bank_details_change
+        - sender_external
+        - any:
+            - dmarc_fail
+            - spf_fail
+            - reply_to_domain_mismatch
+            - from_domain_lookalike_corporate
+            - from_domain_lookalike_service
+            - sender_first_time
+    evidence: [intent_bank_details_change, dmarc_result, reply_to_domain_mismatch, sender_first_time]
+    explanation: >-
+      Запрос на смену платёжных реквизитов пришёл от внешнего отправителя, чья подлинность не
+      подтверждена почтовой аутентификацией или чей адрес для ответа подменён.
+    recommendation: Не изменяйте реквизиты. Передайте письмо в службу ИБ.
+
+  - id: BEC-003
+    version: 1
+    name: Срочный платёж
+    category: invoice_payment_fraud
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - intent_urgent_payment
+    evidence: [intent_urgent_payment, tone_urgency]
+    explanation: >-
+      Письмо требует выполнить платёж срочно. Искусственное создание спешки — типичный элемент
+      мошеннической схемы.
+    recommendation: Соблюдайте обычный порядок согласования платежей независимо от срочности.
+
+  - id: BEC-004
+    version: 1
+    name: Срочный платёж от имени руководителя
+    category: executive_impersonation
+    severity: critical
+    confidence: 0.85
+    weight: 60
+    conditions:
+      all:
+        - any:
+            - intent_urgent_payment
+            - intent_bank_details_change
+        - any:
+            - executive_impersonation
+            - protected_identity_impersonation
+    evidence: [intent_urgent_payment, intent_bank_details_change, executive_impersonation]
+    explanation: >-
+      Срочное платёжное поручение отправлено от имени руководителя с адреса, который ему не
+      принадлежит.
+    recommendation: Не выполняйте платёж. Подтвердите запрос лично.
+
+  - id: BEC-005
+    version: 1
+    name: Запрос на покупку подарочных карт
+    category: invoice_payment_fraud
+    severity: high
+    confidence: 0.8
+    conditions:
+      - intent_gift_cards
+    evidence: [intent_gift_cards]
+    explanation: >-
+      Письмо содержит просьбу приобрести подарочные карты или сертификаты — характерный признак
+      мошенничества от имени руководства.
+    recommendation: Не приобретайте карты. Сообщите в службу ИБ.
+
+  - id: BEC-006
+    version: 1
+    name: Запрос кода подтверждения или MFA
+    category: credential_harvesting
+    severity: critical
+    confidence: 0.85
+    weight: 55
+    conditions:
+      - intent_mfa_code_request
+    evidence: [intent_mfa_code_request]
+    explanation: >-
+      В письме запрашивается одноразовый код или подтверждение многофакторной аутентификации.
+      Легитимные службы никогда не запрашивают такие коды по почте.
+    recommendation: Никогда не сообщайте коды подтверждения. Немедленно сообщите в службу ИБ.
+
+  - id: BEC-007
+    version: 1
+    name: Запрос пароля или учётных данных
+    category: credential_harvesting
+    severity: high
+    confidence: 0.8
+    conditions:
+      - intent_credential_request
+    evidence: [intent_credential_request]
+    explanation: В письме запрашиваются пароль или данные для входа.
+    recommendation: Не сообщайте учётные данные по электронной почте.
+
+  - id: BEC-008
+    version: 1
+    name: Запрос конфиденциальных документов
+    category: hr_scam
+    severity: high
+    confidence: 0.75
+    conditions:
+      all:
+        - intent_confidential_files
+        - sender_external
+    evidence: [intent_confidential_files]
+    explanation: >-
+      Внешний отправитель запрашивает конфиденциальные документы или персональные данные
+      сотрудников.
+    recommendation: Не отправляйте данные; проверьте запрос через руководителя.
+
+  - id: BEC-009
+    version: 1
+    name: Просьба обойти установленный порядок согласования
+    category: invoice_payment_fraud
+    severity: high
+    confidence: 0.8
+    conditions:
+      - intent_bypass_process
+    evidence: [intent_bypass_process, tone_secrecy]
+    explanation: >-
+      Письмо просит не сообщать о запросе коллегам или обойти обычную процедуру согласования.
+      Легитимные запросы не требуют скрытности.
+    recommendation: Сообщите о письме руководителю и в службу ИБ.
+
+  - id: BEC-010
+    version: 1
+    name: Давление от имени руководства
+    category: executive_impersonation
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - intent_executive_urgency
+    evidence: [intent_executive_urgency, tone_urgency]
+    explanation: >-
+      Письмо использует давление и недоступность руководителя для быстрой проверки запроса.
+
+  - id: BEC-011
+    version: 1
+    name: Мошенничество со счётом на оплату
+    category: invoice_payment_fraud
+    severity: medium
+    confidence: 0.6
+    conditions:
+      all:
+        - intent_invoice_fraud
+        - sender_external
+    evidence: [intent_invoice_fraud, financial_context]
+    explanation: Письмо содержит счёт или требование оплаты от внешнего отправителя.
+    recommendation: Сверьте счёт с данными договора и подтвердите его по известным контактам.
+
+  - id: BEC-012
+    version: 1
+    name: Счёт от отправителя с поддельным доменом
+    category: vendor_impersonation
+    severity: critical
+    confidence: 0.85
+    conditions:
+      all:
+        - intent_invoice_fraud
+        - any:
+            - from_domain_lookalike_corporate
+            - from_domain_lookalike_service
+            - from_domain_homoglyph
+            - reply_to_external_for_internal_sender
+    evidence: [intent_invoice_fraud, from_domain_lookalike_corporate, from_domain_homoglyph]
+    explanation: >-
+      Счёт на оплату прислан с домена, имитирующего домен контрагента или организации.
+    recommendation: Не оплачивайте счёт. Передайте письмо в службу ИБ.
+
+  - id: BEC-013
+    version: 1
+    name: Запрос на изменение зарплатных реквизитов
+    category: hr_scam
+    severity: high
+    confidence: 0.8
+    conditions:
+      - intent_payroll_change
+    evidence: [intent_payroll_change]
+    explanation: >-
+      Письмо запрашивает изменение реквизитов для выплаты заработной платы — сценарий payroll
+      diversion.
+    recommendation: Изменение зарплатных реквизитов оформляйте только через кадровую систему.
+
+  - id: BEC-014
+    version: 1
+    name: Атака без вложений и ссылок
+    category: invoice_payment_fraud
+    severity: high
+    confidence: 0.75
+    conditions:
+      all:
+        - payload_free_request
+        - sender_external
+    evidence: [payload_free_request]
+    explanation: >-
+      Письмо не содержит вложений и ссылок, но содержит финансовый или парольный запрос — такие
+      атаки не выявляются антивирусной проверкой.
+    recommendation: Проверьте запрос по независимому каналу.
+
+  - id: BEC-015
+    version: 1
+    name: Финансовый запрос адресован финансовому подразделению
+    category: invoice_payment_fraud
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - financial_request_to_finance_department
+    evidence: [financial_request_to_finance_department]
+    explanation: >-
+      Финансовый запрос направлен непосредственно сотруднику финансового подразделения — признак
+      целевого подбора получателя.
+
+  - id: BEC-016
+    version: 1
+    name: Имитация ответа на несуществующую переписку
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.65
+    conditions:
+      all:
+        - reply_pretext_without_thread
+        - sender_external
+    evidence: [reply_pretext_without_thread]
+    explanation: >-
+      Тема письма оформлена как ответ ("Re:"), но письмо не связано с существующей переписской —
+      приём для имитации продолжения диалога.
+
+  - id: BEC-017
+    version: 1
+    name: Угрозы и давление в письме
+    category: credential_harvesting
+    severity: low
+    confidence: 0.5
+    conditions:
+      all:
+        - tone_threat
+        - sender_external
+    evidence: [tone_threat, tone_urgency]
+    explanation: >-
+      Письмо содержит угрозы блокировки, удаления данных или санкций для принуждения к быстрым
+      действиям.
+
+  - id: BEC-020
+    version: 1
+    name: Поддельное уведомление о документе
+    category: fake_shared_document
+    severity: medium
+    confidence: 0.6
+    conditions:
+      all:
+        - intent_fake_document_share
+        - sender_external
+    evidence: [intent_fake_document_share]
+    explanation: >-
+      Письмо имитирует уведомление облачного сервиса о предоставлении доступа к документу.
+    recommendation: Открывайте документы через сам сервис, а не по ссылке из письма.
+
+  - id: BEC-021
+    version: 1
+    name: Поддельное уведомление о документе с подозрительной ссылкой
+    category: fake_shared_document
+    severity: high
+    confidence: 0.8
+    conditions:
+      all:
+        - intent_fake_document_share
+        - any:
+            - url_lookalike_service
+            - url_lookalike_corporate
+            - url_credential_path
+            - url_homoglyph
+            - url_visible_href_mismatch
+    evidence: [intent_fake_document_share, url_credential_path, url_lookalike_service]
+    explanation: >-
+      Уведомление о доступе к документу ведёт на неофициальный или замаскированный домен.
+    recommendation: Не переходите по ссылке.
+
+  - id: BEC-022
+    version: 1
+    name: Поддельное уведомление об истечении пароля или квоты
+    category: fake_password_expiry
+    severity: medium
+    confidence: 0.65
+    conditions:
+      all:
+        - intent_fake_quota_or_expiry
+        - sender_external
+    evidence: [intent_fake_quota_or_expiry]
+    explanation: >-
+      Письмо сообщает об истечении пароля, переполнении ящика или блокировке учётной записи, чтобы
+      побудить к переходу по ссылке.
+    recommendation: Проверьте состояние учётной записи через корпоративный портал.
+
+  - id: BEC-023
+    version: 1
+    name: Мошенничество с доставкой
+    category: delivery_scam
+    severity: low
+    confidence: 0.5
+    conditions:
+      all:
+        - intent_delivery_scam
+        - sender_external
+    evidence: [intent_delivery_scam]
+    explanation: >-
+      Письмо сообщает о проблеме с посылкой или требует оплатить доставку — распространённая
+      схема массового фишинга.
+
+  - id: BEC-024
+    version: 1
+    name: Кадровая тематика как приманка
+    category: hr_scam
+    severity: low
+    confidence: 0.5
+    conditions:
+      all:
+        - intent_hr_scam
+        - sender_external
+    evidence: [intent_hr_scam]
+    explanation: >-
+      Письмо использует кадровую тематику (политика, премия, аттестация) для побуждения к
+      переходу по ссылке или вводу данных.
+
+  - id: BEC-025
+    version: 1
+    name: Семантический анализ выявил признаки социальной инженерии
+    category: invoice_payment_fraud
+    severity: low
+    confidence: 0.45
+    conditions:
+      - semantic_social_engineering
+    evidence: [semantic_social_engineering]
+    explanation: >-
+      Дополнительный семантический анализ текста отметил признаки социальной инженерии. Результат
+      используется только как вспомогательный сигнал и не является основанием для вердикта.
+    internal: false
