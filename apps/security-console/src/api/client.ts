@@ -244,4 +244,27 @@ export const api = {
     request<Paginated<Record<string, unknown>>>(`/api/v1/admin/audit${query(params)}`),
 
   health: () => request<Record<string, unknown>>("/health/dependencies"),
+
+  reportList: () => request<{ reports: string[] }>("/api/v1/reports"),
+
+  report: (name: string, days: number) =>
+    request<{
+      report: string;
+      period: { from: string; to: string; days: string };
+      generated_at: string;
+      summary: Record<string, unknown>;
+      rows: Record<string, unknown>[];
+    }>(`/api/v1/reports/${encodeURIComponent(name)}${query({ days })}`),
+
+  /** CSV export URL. The download itself is audited server-side. */
+  reportCsvUrl: (name: string, days: number) =>
+    `/api/v1/reports/${encodeURIComponent(name)}${query({ days, format: "csv" })}`,
+
+  notifications: (unreadOnly = false) =>
+    request<{ unread: number; items: Record<string, unknown>[] }>(
+      `/api/v1/notifications${query({ unread_only: unreadOnly })}`,
+    ),
+
+  markNotificationRead: (id: string) =>
+    request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
 };

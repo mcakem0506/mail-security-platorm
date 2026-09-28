@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from msp_contracts import IncidentStatus, RiskLevel
 from sqlalchemy import desc, func, select, text
 
@@ -19,6 +19,7 @@ from ..db.models import (
     Incident,
     Indicator,
     MailMessage,
+    Notification,
 )
 from ..deps import Actor, AppSettings, DbSession, get_scanner, get_ti_hub, require_permission
 from ..observability import render_metrics
@@ -255,6 +256,66 @@ def dependencies(session: DbSession, settings: AppSettings) -> dict[str, Any]:
         "optional": optional,
         "checked_at": utcnow().isoformat(),
     }
+
+
+@router.get("/notifications")
+def list_notifications(
+    actor: Viewer,
+    session: DbSession,
+    unread_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """The dashboard notification channel (ТЗ 36).
+
+    Notifications are stored defanged: malicious URLs are never rendered as live links, so the
+    notification itself cannot become a delivery path.
+    """
+    query = select(Notification).where(
+        Notification.organization_id == actor.organization_id,
+        Notification.channel.in_(["dashboard", "email"]),
+    )
+    if unread_only:
+        query = query.where(Notification.read_at.is_(None))
+    rows = session.execute(query.order_by(desc(Notification.created_at)).limit(limit)).scalars().all()
+    unread = int(
+        session.execute(
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                Notification.organization_id == actor.organization_id,
+                Notification.read_at.is_(None),
+            )
+        ).scalar_one()
+    )
+    return {
+        "unread": unread,
+        "items": [
+            {
+                "notification_id": n.id,
+                "event": n.event,
+                "subject": n.subject,
+                "body": n.body,
+                "payload": n.payload,
+                "state": n.state,
+                "created_at": n.created_at.isoformat(),
+                "read_at": n.read_at.isoformat() if n.read_at else None,
+            }
+            for n in rows
+        ],
+    }
+
+
+@router.post("/notifications/{notification_id}/read", status_code=204)
+def mark_notification_read(notification_id: str, actor: Viewer, session: DbSession) -> Response:
+    notification = session.get(Notification, notification_id)
+    if notification is None or notification.organization_id != actor.organization_id:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+    if notification.read_at is None:
+        notification.read_at = utcnow()
+    session.commit()
+    return Response(status_code=204)
 
 
 metrics_router = APIRouter(tags=["metrics"])

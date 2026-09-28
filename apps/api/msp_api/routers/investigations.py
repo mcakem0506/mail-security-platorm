@@ -6,7 +6,7 @@ import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from msp_contracts import RiskLevel
+from msp_contracts import RiskLevel, TIResult
 from sqlalchemy import desc, func, or_, select
 
 from ..db.models import (
@@ -20,6 +20,7 @@ from ..db.models import (
     MailHeader,
     MailMessage,
     MailRecipient,
+    ProviderLookup,
 )
 from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..schemas import (
@@ -400,4 +401,66 @@ def search_indicator(ioc_type: str, value: str, actor: Viewer, session: DbSessio
         },
         "internal_sightings": indicator.sighting_count,
         "related_messages": [_summary(session, m) for m in messages],
+        "provider_results": _provider_results(session, indicator.value),
+        "related_campaigns": _related_campaigns(session, [m for m in message_ids if m]),
     }
+
+
+def _provider_results(session, indicator_value: str) -> list[dict[str, Any]]:  # type: ignore[no-untyped-def]
+    """Latest verdict per provider, with the age of the data (ТЗ 22.4).
+
+    Cache age is shown because an old verdict is weaker evidence than a fresh one — the analyst
+    must be able to see when a provider last actually looked at this indicator.
+    """
+    from msp_ti import cache_age_label
+
+    lookups = (
+        session.execute(
+            select(ProviderLookup)
+            .where(func.lower(ProviderLookup.indicator_value) == indicator_value.lower())
+            .order_by(desc(ProviderLookup.fetched_at))
+            .limit(50)
+        )
+        .scalars()
+        .all()
+    )
+    latest: dict[str, Any] = {}
+    for lookup in lookups:
+        if lookup.provider_id in latest:
+            continue
+        result = TIResult(
+            provider_id=lookup.provider_id,
+            ioc_type=lookup.ioc_type,
+            indicator=lookup.indicator_value,
+            status=lookup.status,
+            fetched_at=lookup.fetched_at,
+        )
+        latest[lookup.provider_id] = {
+            "provider_id": lookup.provider_id,
+            "status": lookup.status.value,
+            "malicious_count": lookup.malicious_count,
+            "total_count": lookup.total_count,
+            "categories": list(lookup.categories or []),
+            "summary": dict(lookup.summary or {}),
+            "from_cache": lookup.from_cache,
+            "fetched_at": lookup.fetched_at.isoformat(),
+            "cache_age": cache_age_label(result),
+            "error": lookup.error,
+        }
+    return list(latest.values())
+
+
+def _related_campaigns(session, message_ids: list[str]) -> list[str]:  # type: ignore[no-untyped-def]
+    if not message_ids:
+        return []
+    rows = (
+        session.execute(
+            select(CampaignMessage.campaign_id)
+            .where(CampaignMessage.message_id.in_(message_ids))
+            .distinct()
+            .limit(50)
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)

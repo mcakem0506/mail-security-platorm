@@ -74,7 +74,7 @@ pytest -q
 |:--:|---|:--:|---|
 | 1 | Analyst sees incidents | ✅ | `GET /api/v1/incidents`; `IncidentsPage` |
 | 2 | Can inspect evidence | ✅ | `GET /api/v1/analysis/{id}/detail` — сигналы с evidence, версиями правил, источниками |
-| 3 | Can search IOC | ✅ | `GET /api/v1/investigations/indicators/{type}/{value}`; фильтры §22.2 |
+| 3 | Can search IOC | ✅ | `GET /api/v1/investigations/indicators/{type}/{value}` — вердикты провайдеров, актуальность данных, внутренние наблюдения, связанные кампании (§22.4); страница Threat Intelligence в консоли; фильтры §22.2 |
 | 4 | Can link related messages | ✅ | `POST /api/v1/incidents/{id}/messages/{message_id}` |
 | 5 | Can classify false positive | ✅ | `POST /api/v1/messages/{id}/classify`; метрика `false_positive_total` |
 | 6 | Can create exception with expiry | ✅ | `POST /api/v1/admin/exceptions` с валидацией «срок в будущем» |

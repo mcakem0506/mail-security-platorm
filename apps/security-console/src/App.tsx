@@ -9,6 +9,8 @@ import { IncidentsPage } from "./pages/IncidentsPage";
 import { CampaignsPage } from "./pages/CampaignsPage";
 import { RemediationPage } from "./pages/RemediationPage";
 import { AdminPage } from "./pages/AdminPage";
+import { ThreatIntelPage } from "./pages/ThreatIntelPage";
+import { ReportsPage } from "./pages/ReportsPage";
 
 interface NavItem {
   to: string;
@@ -21,6 +23,8 @@ const NAV: NavItem[] = [
   { to: "/investigations", label: "Расследования", permission: "view:investigations" },
   { to: "/incidents", label: "Инциденты", permission: "view:incidents" },
   { to: "/campaigns", label: "Кампании", permission: "view:campaigns" },
+  { to: "/threat-intel", label: "Threat Intelligence", permission: "search:indicators" },
+  { to: "/reports", label: "Отчёты", permission: "view:investigations" },
   { to: "/remediation", label: "Реагирование", permission: "view:incidents" },
   { to: "/admin", label: "Администрирование", permission: "view:audit" },
 ];
@@ -101,6 +105,8 @@ export function App() {
             <Route path="/messages/:messageId" element={<MessagePage />} />
             <Route path="/incidents" element={<IncidentsPage user={user} />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/threat-intel" element={<ThreatIntelPage />} />
+            <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
             <Route path="/admin" element={<AdminPage user={user} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
