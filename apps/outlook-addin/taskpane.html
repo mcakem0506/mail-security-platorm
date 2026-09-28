@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Проверка письма</title>
+    <!--
+      No inline scripts and no third-party origins: the add-in loads only from the platform's
+      own host, and contains no secrets (ТЗ 49.4).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com"
+    />
+    <link rel="stylesheet" href="./assets/taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="./config.js"></script>
+  </head>
+  <body>
+    <main class="pane">
+      <header class="pane__header">
+        <h1 class="pane__title">Проверка письма</h1>
+        <p id="subject" class="pane__subject"></p>
+        <p id="sender" class="pane__sender"></p>
+      </header>
+
+      <div id="auth-warning" class="notice notice--warning" hidden></div>
+      <div id="limitations" class="notice notice--info" hidden></div>
+
+      <div class="actions">
+        <button id="btn-check" type="button" class="button button--primary">Проверить письмо</button>
+        <button id="btn-report" type="button" class="button button--danger">Сообщить о фишинге</button>
+        <button id="btn-refresh" type="button" class="button">Обновить результат</button>
+      </div>
+
+      <div id="spinner" class="spinner" hidden><span class="spinner__dot"></span></div>
+      <p id="progress-text" class="progress"></p>
+
+      <section id="result" class="result" hidden>
+        <div id="status-badge" class="badge"></div>
+        <p id="status-note" class="status-note" hidden></p>
+        <p id="recommendation" class="recommendation" hidden></p>
+        <section id="reasons-section" hidden>
+          <h2 class="section-title">Почему так определено</h2>
+          <ul id="reasons" class="reasons"></ul>
+        </section>
+        <p id="meta" class="meta" hidden></p>
+      </section>
+
+      <section id="fallback" class="notice notice--info" hidden></section>
+
+      <footer class="pane__footer">
+        <p>
+          Отсутствие обнаружения не гарантирует безопасность письма. При сомнениях обращайтесь
+          в службу информационной безопасности.
+        </p>
+      </footer>
+    </main>
+    <script type="module" src="./src/taskpane.js"></script>
+  </body>
+</html>

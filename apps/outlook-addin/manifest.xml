@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Outlook Add-in manifest (ТЗ 6).
+
+  Requirement set: Mailbox 1.5 is the floor, because it is available on Exchange 2016/2019
+  On-Premises with current Outlook builds. Capabilities above that floor (for example
+  getting the full MIME via Mailbox 1.8 / EWS) are probed at runtime, never assumed —
+  see compatibility.js. If a capability is missing, the add-in falls back to the security
+  mailbox flow instead of failing (ТЗ 6.5).
+
+  Replace https://mail-security.corp.example with the actual internal URL before deployment,
+  and publish the add-in centrally. The add-in contains no secrets (ТЗ 49.4).
+-->
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <Id>8f3b2c14-7d5e-4a19-9c62-1e4b7a0d5f31</Id>
+  <Version>0.9.0.0</Version>
+  <ProviderName>Служба информационной безопасности</ProviderName>
+  <DefaultLocale>ru-RU</DefaultLocale>
+  <DisplayName DefaultValue="Проверка писем"/>
+  <Description DefaultValue="Проверка подозрительных писем и передача их в службу информационной безопасности."/>
+  <IconUrl DefaultValue="https://mail-security.corp.example/addin/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://mail-security.corp.example/addin/assets/icon-128.png"/>
+  <SupportUrl DefaultValue="https://mail-security.corp.example/help"/>
+
+  <AppDomains>
+    <AppDomain>https://mail-security.corp.example</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.5"/>
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://mail-security.corp.example/addin/taskpane.html"/>
+        <RequestedHeight>420</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <!-- ReadItem only: the add-in never needs write access to the mailbox (ТЗ 6.6, 7.1). -->
+  <Permissions>ReadItem</Permissions>
+
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+  </Rule>
+
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.5">
+        <bt:Set Name="Mailbox"/>
+      </bt:Sets>
+    </Requirements>
+
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <FunctionFile resid="functionFile"/>
+
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="mspGroup">
+                <Label resid="groupLabel"/>
+
+                <Control xsi:type="Button" id="checkMessageButton">
+                  <Label resid="checkLabel"/>
+                  <Supertip>
+                    <Title resid="checkLabel"/>
+                    <Description resid="checkTip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16"/>
+                    <bt:Image size="32" resid="icon32"/>
+                    <bt:Image size="80" resid="icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="taskpaneUrl"/>
+                  </Action>
+                </Control>
+
+                <Control xsi:type="Button" id="reportPhishingButton">
+                  <Label resid="reportLabel"/>
+                  <Supertip>
+                    <Title resid="reportLabel"/>
+                    <Description resid="reportTip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="icon16"/>
+                    <bt:Image size="32" resid="icon32"/>
+                    <bt:Image size="80" resid="icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="taskpaneReportUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="icon16" DefaultValue="https://mail-security.corp.example/addin/assets/icon-16.png"/>
+        <bt:Image id="icon32" DefaultValue="https://mail-security.corp.example/addin/assets/icon-32.png"/>
+        <bt:Image id="icon80" DefaultValue="https://mail-security.corp.example/addin/assets/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="taskpaneUrl" DefaultValue="https://mail-security.corp.example/addin/taskpane.html"/>
+        <bt:Url id="taskpaneReportUrl" DefaultValue="https://mail-security.corp.example/addin/taskpane.html?action=report"/>
+        <bt:Url id="functionFile" DefaultValue="https://mail-security.corp.example/addin/commands.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="groupLabel" DefaultValue="Безопасность почты"/>
+        <bt:String id="checkLabel" DefaultValue="Проверить письмо"/>
+        <bt:String id="reportLabel" DefaultValue="Сообщить о фишинге"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="checkTip" DefaultValue="Отправить письмо на проверку и увидеть причины предупреждения."/>
+        <bt:String id="reportTip" DefaultValue="Передать письмо в службу информационной безопасности."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

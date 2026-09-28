@@ -10,3 +10,7 @@ dist/
 build/
 .env
 *.local
+
+# frontend build output
+apps/security-console/dist/
+apps/security-console/node_modules/
