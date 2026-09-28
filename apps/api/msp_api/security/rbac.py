@@ -96,6 +96,8 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.PLATFORM_ADMIN: _PLATFORM_ADMIN,
 }
 
+PRIVILEGED_ROLES_LABEL: frozenset[Role] = frozenset({Role.SECURITY_ADMIN, Role.PLATFORM_ADMIN})
+
 ROLE_LABELS: dict[Role, str] = {
     Role.EMPLOYEE: "Сотрудник",
     Role.SECURITY_VIEWER: "Наблюдатель ИБ",

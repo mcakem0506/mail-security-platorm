@@ -15,6 +15,7 @@ from .auth import (
     verify_password,
 )
 from .rbac import (
+    PRIVILEGED_ROLES_LABEL,
     ROLE_LABELS,
     ROLE_PERMISSIONS,
     Permission,
@@ -27,6 +28,7 @@ from .rbac import (
 )
 
 __all__ = [
+    "PRIVILEGED_ROLES_LABEL",
     "ROLE_LABELS",
     "ROLE_PERMISSIONS",
     "AuditAction",
