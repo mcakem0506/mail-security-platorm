@@ -1,0 +1,14 @@
+# Builds the security console; the static output is copied into a shared volume served by nginx.
+FROM node:22-alpine AS build
+
+WORKDIR /app
+COPY apps/security-console/package.json apps/security-console/package-lock.json* ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+COPY apps/security-console/ ./
+RUN npm run build
+
+FROM alpine:3.20
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+CMD ["sh", "-c", "cp -r /app/dist/. /output/"]

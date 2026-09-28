@@ -1,0 +1,193 @@
+# Mail Security Platform — On-Premises deployment (ТЗ 33).
+#
+# Network segmentation (ТЗ 29): only nginx is reachable from the user network. The database,
+# Redis and object storage sit on an internal network with no route out, and the workers that
+# talk to Threat Intelligence providers are the only components with egress.
+
+name: mail-security-platform
+
+x-python-base: &python-base
+  build:
+    context: .
+    dockerfile: infrastructure/compose/Dockerfile.python
+  restart: unless-stopped
+  env_file: [.env]
+  environment:
+    MSP_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-msp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-msp}
+    MSP_REDIS_URL: redis://redis:6379/0
+    # Storage backend: "filesystem" (default, single node) or "s3" with the s3 profile below.
+    MSP_OBJECT_STORAGE_BACKEND: ${MSP_OBJECT_STORAGE_BACKEND:-filesystem}
+    MSP_OBJECT_STORAGE_PATH: /var/lib/msp/content
+    MSP_OBJECT_STORAGE_ENDPOINT: http://object-storage:9000
+    MSP_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:-msp}
+    MSP_SECRET_KEY_FILE: /run/secrets/msp_secret_key
+    PYTHONUNBUFFERED: "1"
+  secrets: [msp_secret_key]
+  volumes:
+    - content-data:/var/lib/msp/content
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["${HTTP_PORT:-8080}:80", "${HTTPS_PORT:-8443}:443"]
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/proxy_common.conf:/etc/nginx/conf.d/proxy_common.conf:ro
+      - ./infrastructure/nginx/security_headers.conf:/etc/nginx/conf.d/security_headers.conf:ro
+      - ./infrastructure/nginx/tls:/etc/nginx/tls:ro
+      - console-dist:/usr/share/nginx/html/console:ro
+      - ./apps/outlook-addin:/usr/share/nginx/html/addin:ro
+    depends_on: [api, frontend]
+    networks: [edge, app]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    <<: *python-base
+    command: >
+      uvicorn msp_api.main:app --host 0.0.0.0 --port 8000
+      --proxy-headers --forwarded-allow-ips='*' --workers ${API_WORKERS:-2}
+    networks: [app, data]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  migrate:
+    <<: *python-base
+    restart: "no"
+    command: sh -c "cd /app/apps/api && alembic upgrade head"
+    networks: [data]
+    healthcheck: {disable: true}
+
+  worker-mail:
+    <<: *python-base
+    # Mail parsing has no outbound access: the parser must never reach the network (ТЗ 29).
+    command: celery -A msp_worker.app.celery_app worker -Q mail_parse,attachment_analysis,campaign -c ${WORKER_MAIL_CONCURRENCY:-2} -l info
+    networks: [data]
+
+  worker-ti:
+    <<: *python-base
+    # The only component with egress, and only to the provider allowlist via the proxy.
+    command: celery -A msp_worker.app.celery_app worker -Q ti_lookup,notifications -c ${WORKER_TI_CONCURRENCY:-4} -l info
+    networks: [data, egress]
+
+  worker-maintenance:
+    <<: *python-base
+    command: celery -A msp_worker.app.celery_app worker -Q maintenance -c 1 -l info
+    networks: [data, egress]
+
+  scheduler:
+    <<: *python-base
+    command: celery -A msp_worker.app.celery_app beat -l info --schedule /tmp/celerybeat-schedule
+    networks: [data]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infrastructure/compose/Dockerfile.console
+    restart: "no"
+    volumes: [console-dist:/output]
+    command: sh -c "cp -r /app/dist/. /output/"
+    networks: [app]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-msp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-msp}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/backup:/backup
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-msp} -d ${POSTGRES_DB:-msp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis is a cache and broker only, never authoritative storage (ТЗ 32).
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy allkeys-lru
+    volumes: [redis-data:/data]
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # S3-compatible storage for multi-node or larger pilots (ТЗ 5). Enable with:
+  #   MSP_OBJECT_STORAGE_BACKEND=s3 docker compose --profile s3 up -d
+  # The default filesystem backend needs no extra service and suits a single-node pilot.
+  object-storage:
+    image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+    profiles: [s3]
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-msp}
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_password
+    secrets: [minio_password]
+
+    volumes: [object-data:/data]
+    networks: [data]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Optional supplementary scanner. Not equivalent to enterprise malware protection (ТЗ 12.3).
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    profiles: [clamav]
+    volumes: [clamav-data:/var/lib/clamav]
+    networks: [data, egress]
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  postgres-data:
+  content-data:
+  redis-data:
+  object-data:
+  clamav-data:
+  console-dist:
+
+secrets:
+  msp_secret_key:
+    file: ./infrastructure/compose/secrets/msp_secret_key
+  minio_password:
+    file: ./infrastructure/compose/secrets/minio_password
+
+networks:
+  edge:
+    driver: bridge
+  app:
+    driver: bridge
+    internal: true
+  data:
+    driver: bridge
+    internal: true
+  egress:
+    driver: bridge
