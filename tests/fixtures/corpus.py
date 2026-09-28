@@ -27,6 +27,9 @@ class Fixture:
     expect_rules: tuple[str, ...] = ()
     expect_facts: tuple[str, ...] = ()
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # True when the expected level is only reachable after Threat Intelligence or a local
+    # scanner has run: local analysis alone must report UNKNOWN rather than a clean result.
+    requires_enrichment: bool = False
 
 
 def _build(
@@ -472,6 +475,7 @@ def build_corpus() -> list[Fixture]:
                 attachments=[("test.txt", EICAR, "text/plain")],
             ),
             expect_min_level="SUSPICIOUS",
+            requires_enrichment=True,
             tags=("ti", "malware"),
         )
     )

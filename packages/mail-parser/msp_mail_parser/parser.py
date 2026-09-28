@@ -11,7 +11,7 @@ import codecs
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from email import message_from_bytes, policy
 from email.header import Header, decode_header
 from email.message import Message
@@ -23,8 +23,10 @@ from .archive import inspect_archive
 from .domains import split_domain
 from .filetype import (
     ARCHIVE_TYPES,
+    category_for_extension,
     detect_type,
     extension_mismatch,
+    extensions,
     last_extension,
     normalize_filename,
 )
@@ -34,6 +36,7 @@ from .urls import dedupe_urls, extract_urls_from_html, extract_urls_from_text
 
 _ENCRYPTED_TYPES = {"multipart/encrypted", "application/pgp-encrypted"}
 _PKCS7 = {"application/pkcs7-mime", "application/x-pkcs7-mime"}
+_DANGEROUS_EXTENSION_CATEGORIES = frozenset({"executable", "script", "shortcut", "disk_image"})
 # Bidirectional formatting characters, used to disguise a file extension: a name containing
 # RIGHT-TO-LEFT OVERRIDE before "gnp.exe" is displayed to the user as "...exe.png".
 # They are built from code points rather than written literally:
@@ -130,6 +133,23 @@ def _decode_raw_bytes(data: bytes, charset: str | None) -> str:
         except (UnicodeDecodeError, LookupError):
             continue
     return data.decode("latin-1", errors="replace")
+
+
+def parse_mail_date(value: str) -> datetime | None:
+    """Parse a Date header into a timezone-aware UTC datetime.
+
+    ``parsedate_to_datetime`` returns a *naive* datetime when the header carries the "-0000"
+    zone, which RFC 5322 defines as "time zone unknown" and which real mail uses routinely.
+    The rest of the platform compares timestamps, so an unknown zone is normalised to UTC here
+    instead of leaking a naive value into storage and campaign correlation.
+    """
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if parsed is None:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def decode_header_value(value: object) -> str:
@@ -297,6 +317,9 @@ class _Walker:
                 self.r.limits_hit.append("MAX_ATTACHMENT_SIZE")
         if ext and extension_mismatch(ext, detected):
             flags.append("EXTENSION_MISMATCH")
+        exts = extensions(name)
+        if len(exts) >= 2 and category_for_extension(exts[-1]) in _DANGEROUS_EXTENSION_CATEGORIES:
+            flags.append("DOUBLE_EXTENSION")
         # Bidirectional overrides are written as escapes, never as literal characters:
         # literal bidi control characters in source are themselves a supply-chain risk.
         if any(ch in filename for ch in _BIDI_CONTROL_CHARS):
@@ -395,7 +418,7 @@ def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessa
     result.message_id = str(msg.get("Message-ID") or "").strip()[:998]
     try:
         date_raw = msg.get("Date")
-        result.date = parsedate_to_datetime(str(date_raw)) if date_raw else None
+        result.date = parse_mail_date(str(date_raw)) if date_raw else None
     except (TypeError, ValueError, IndexError):
         result.errors.append("BAD_DATE")
     result.received = [decode_header_value(v)[:4096] for v in (msg.get_all("Received") or [])][:100]

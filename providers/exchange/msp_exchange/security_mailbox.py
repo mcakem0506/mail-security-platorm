@@ -206,14 +206,16 @@ class SecurityMailboxProvider:
             warnings.append("report exceeds max_message_size and was truncated")
             raw = raw[: self.config.max_message_size]
         outer = email.message_from_bytes(raw[:65536], policy=policy.compat32)
-        from email.utils import getaddresses, parsedate_to_datetime
+        from email.utils import getaddresses
+
+        from msp_mail_parser.parser import parse_mail_date
 
         senders = getaddresses([str(v) for v in (outer.get_all("From") or [])])
         reported_by = senders[0][1].lower() if senders else ""
         reported_at: datetime | None = None
         try:
             date_raw = outer.get("Date")
-            reported_at = parsedate_to_datetime(str(date_raw)) if date_raw else None
+            reported_at = parse_mail_date(str(date_raw)) if date_raw else None
         except (TypeError, ValueError, IndexError):
             warnings.append("unparseable Date header on the report")
         original, unwrapped, note = extract_original_message(raw)
