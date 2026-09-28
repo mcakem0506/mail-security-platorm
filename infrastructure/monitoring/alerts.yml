@@ -1,0 +1,186 @@
+# Alerting rules (ТЗ 31).
+#
+# Two principles guide the severity levels:
+#  * an outage of an optional external provider is a warning, never a page — the platform keeps
+#    analysing mail without it;
+#  * anything that could make the platform silently stop protecting users is critical, even if
+#    the service still answers requests.
+
+groups:
+  - name: msp-availability
+    interval: 30s
+    rules:
+      - alert: MspApiDown
+        expr: up{job="msp-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API платформы недоступен"
+          description: "Сотрудники не могут проверить письмо и сообщить о фишинге."
+
+      - alert: MspDatabaseUnavailable
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL недоступен"
+          description: "Анализ и расследования остановлены; аудит не записывается."
+
+      - alert: MspRedisUnavailable
+        expr: up{job="redis"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis недоступен"
+          description: >-
+            Сессии и очереди недоступны. Приложение переходит на внутренние ограничения,
+            но фоновые задачи не выполняются.
+
+  - name: msp-analysis
+    interval: 30s
+    rules:
+      # The platform can look healthy while quietly failing to analyse anything.
+      - alert: MspNoAnalysesForTooLong
+        expr: |
+          sum(increase(msp_analyses_total[6h])) == 0
+          and on() hour() >= 8 and on() hour() <= 19
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "За 6 часов рабочего дня не выполнено ни одной проверки"
+          description: >-
+            Возможные причины: надстройка не работает у пользователей, опрос security mailbox
+            остановлен, либо сотрудники перестали пользоваться проверкой.
+
+      - alert: MspAnalysisSlow
+        expr: |
+          histogram_quantile(0.95, sum(rate(msp_analysis_duration_seconds_bucket{stage="local"}[15m])) by (le)) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Локальный анализ медленнее целевого показателя"
+          description: "p95 превышает 5 секунд (цель §35). Проверьте нагрузку и размер писем."
+
+      - alert: MspParserErrorRateHigh
+        expr: sum(rate(msp_parser_errors_total[15m])) > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Много ошибок разбора писем"
+          description: "Возможна атака на парсер либо неподдерживаемый формат в потоке писем."
+
+      - alert: MspQueueBacklog
+        expr: msp_queue_depth > 500
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь {{ $labels.queue }} растёт"
+          description: >-
+            Задачи не успевают обрабатываться. Локальный анализ при этом продолжает работать;
+            неполным становится обогащение.
+
+      - alert: MspEnrichmentStalled
+        expr: msp_queue_depth{queue="ti_lookup"} > 1000
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Обогащение Threat Intelligence остановилось"
+          description: >-
+            Вердикты остаются без внешней проверки. Это не ложное «безопасно» (такие письма
+            получают UNKNOWN), но полнота анализа снижена.
+
+  - name: msp-providers
+    interval: 30s
+    rules:
+      # Deliberately a warning: ТЗ 31 forbids an optional provider outage from breaking readiness.
+      - alert: MspProviderErrors
+        expr: sum(rate(msp_provider_errors_total[15m])) by (provider) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ошибки провайдера {{ $labels.provider }}"
+          description: "Обогащение неполно. Платформа продолжает работать на локальных проверках."
+
+      - alert: MspProviderRateLimited
+        expr: sum(increase(msp_provider_rate_limit_total[1h])) by (provider) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Провайдер {{ $labels.provider }} ограничивает запросы"
+          description: "Проверьте квоту лицензии и настройки лимитов."
+
+      - alert: MspProviderLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(msp_provider_latency_seconds_bucket[15m])) by (le, provider)) > 8
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Высокая задержка провайдера {{ $labels.provider }}"
+
+  - name: msp-security
+    interval: 30s
+    rules:
+      - alert: MspFalsePositiveRateRising
+        expr: |
+          sum(increase(msp_false_positive_total[24h]))
+          / clamp_min(sum(increase(msp_analyses_total[24h])), 1) > 0.2
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Доля ложных срабатываний превышает 20%"
+          description: >-
+            Требуется настройка правил или порогов. Высокая доля ложных срабатываний
+            приводит к потере доверия к вердиктам.
+
+      - alert: MspEmployeeReportsDropped
+        expr: |
+          sum(increase(msp_employee_reports_total[7d])) == 0
+          and sum(increase(msp_analyses_total[7d])) > 50
+        for: 6h
+        labels:
+          severity: info
+        annotations:
+          summary: "Сотрудники перестали сообщать о письмах"
+          description: >-
+            Проверки выполняются, но обращений нет. Возможна потеря доверия к платформе
+            или проблема с кнопкой в надстройке.
+
+      - alert: MspRemediationExecuted
+        expr: sum(increase(msp_remediation_actions_total{state="EXECUTED"}[10m])) > 0
+        labels:
+          severity: info
+        annotations:
+          summary: "Выполнено действие в Exchange"
+          description: >-
+            Информационное уведомление для контроля: изменение почтовых ящиков всегда должно
+            быть ожидаемым. Подробности — в журнале аудита.
+
+      - alert: MspRemediationFailed
+        expr: sum(increase(msp_remediation_actions_total{state="FAILED"}[15m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Действие реагирования завершилось ошибкой"
+          description: "Проверьте права сервисного аккаунта и доступность Exchange."
+
+      - alert: MspHighRiskSpike
+        expr: |
+          sum(increase(msp_analyses_total{classification="MALICIOUS"}[1h])) > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Резкий рост числа вредоносных писем"
+          description: "Возможна массовая кампания против организации. Проверьте раздел кампаний."

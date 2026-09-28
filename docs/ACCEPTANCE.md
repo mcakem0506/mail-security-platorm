@@ -102,7 +102,7 @@ pytest -q
 | Logging reviewed | ✅ | JSON-логи с correlation ID, автоматическая очистка чувствительных полей, query string не логируется |
 | No default credentials | ✅ | `bootstrap.py` отказывается создавать пароль по умолчанию; проверяется в CI |
 | All secrets rotated | ✅ | процедура в `infrastructure/compose/secrets/README.md`; поддержка `*_FILE` |
-| Security tests passed | ✅ | 218 тестов, bandit без находок medium/high, mypy без ошибок |
+| Security tests passed | ✅ | 237 тестов, bandit без находок medium/high, mypy без ошибок |
 | Rollback documented | ✅ | `docs/DEPLOYMENT.md`, раздел «Откат» |
 
 ### Пилот
@@ -119,6 +119,26 @@ pytest -q
 
 ---
 
+## §37. Отчётность
+
+| Отчёт | Статус | Эндпоинт |
+|---|:--:|---|
+| Weekly phishing summary | ✅ | `GET /api/v1/reports/phishing_summary` |
+| Incidents (со средним временем триажа и реагирования) | ✅ | `GET /api/v1/reports/incidents` |
+| Campaigns | ✅ | `GET /api/v1/reports/campaigns` |
+| Most impersonated identities | ✅ | `GET /api/v1/reports/impersonated_identities` |
+| Employee reporting (с точностью обращений) | ✅ | `GET /api/v1/reports/employee_reporting` |
+| False positives (исключения и подавленные сигналы) | ✅ | `GET /api/v1/reports/false_positives` |
+| Provider availability | ✅ | `GET /api/v1/reports/provider_availability` |
+| Экспорт CSV | ✅ | `?format=csv`, требует права `export:data`, фиксируется в аудите |
+| Экспорт JSON/API | ✅ | формат по умолчанию |
+| Экспорт PDF | ⚠️ | по ТЗ «later»; не входит в v1 |
+
+Экспорт CSV защищён от инъекции формул: значения, начинающиеся с `=`, `+`, `-`, `@`, табуляции
+или возврата каретки, экранируются — иначе содержимое письма могло бы выполниться в Excel.
+
+---
+
 ## Definition of Done по §46
 
 | Требование | Статус | Проверка |
@@ -126,7 +146,7 @@ pytest -q
 | build проходит | ✅ | `docker compose build`; образы API и консоли собираются |
 | linters проходят | ✅ | `ruff check` — без замечаний, `ruff format --check` — без изменений |
 | type checks проходят | ✅ | `mypy` — 70 файлов, без ошибок |
-| tests проходят | ✅ | `pytest` — 218 тестов |
+| tests проходят | ✅ | `pytest` — 237 тестов |
 | migrations применяются с нуля | ✅ | проверено на чистом PostgreSQL: upgrade → downgrade → upgrade; `alembic check` без расхождений |
 | Compose стартует на чистом окружении | ✅ | проверено: postgres, redis, migrate, api, frontend, nginx |
 | health endpoints green | ✅ | `/health/live`, `/health/ready`, `/health/dependencies` |
@@ -151,15 +171,16 @@ IMPLEMENTED:
   резервное копирование с restore drill, CI.
 
 TESTS:
-  218 автоматических тестов: 49 парсер, 37 детект и риск, 35 интеграционных,
-  39 безопасность API, 58 усиление защиты.
+  237 автоматических тестов: 49 парсер, 37 детект и риск, 35 интеграционных
+  (пайплайн), 16 отчётность, 39 безопасность API, 58 усиление защиты,
+  3 сквозных сценария рабочего процесса.
   Корпус из 22 synthetic EML без живого malware.
 
 MIGRATIONS:
   1 миграция, 35 таблиц. Применяется с нуля, откатывается, alembic check чист.
 
 SECURITY CHECKS:
-  bandit — без находок medium и high; mypy — без ошибок; ruff — без замечаний;
+  bandit — без находок medium и high; mypy — 72 файла без ошибок; ruff — без замечаний;
   проверка отсутствия секретов в Git и bidi-символов в исходниках в CI.
 
 MANUAL CHECKS:

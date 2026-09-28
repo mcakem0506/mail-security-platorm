@@ -14,7 +14,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import Settings, get_settings
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware, SecurityHeadersMiddleware
 from .observability import configure_logging
-from .routers import admin, analysis, auth, dashboard, incidents, investigations, remediation
+from .routers import (
+    admin,
+    analysis,
+    auth,
+    dashboard,
+    incidents,
+    investigations,
+    remediation,
+    reports,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(investigations.router, prefix=api_prefix)
     app.include_router(incidents.router, prefix=api_prefix)
     app.include_router(remediation.router, prefix=api_prefix)
+    app.include_router(reports.router, prefix=api_prefix)
     app.include_router(admin.router, prefix=f"{api_prefix}/admin")
     app.include_router(dashboard.router, prefix=api_prefix)
     app.include_router(dashboard.health_router)
