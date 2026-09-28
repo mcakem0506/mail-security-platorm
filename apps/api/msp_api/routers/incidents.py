@@ -6,7 +6,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from msp_contracts import IncidentStatus, Severity
+from msp_contracts import IncidentStatus
 from sqlalchemy import desc, func, select
 
 from ..db.base import utcnow
@@ -55,7 +55,9 @@ def _incident_out(session, incident: Incident) -> IncidentOut:  # type: ignore[n
         select(func.count()).select_from(IncidentMessage).where(IncidentMessage.incident_id == incident.id)
     ).scalar_one()
     indicator_count = session.execute(
-        select(func.count()).select_from(IncidentIndicator).where(IncidentIndicator.incident_id == incident.id)
+        select(func.count())
+        .select_from(IncidentIndicator)
+        .where(IncidentIndicator.incident_id == incident.id)
     ).scalar_one()
     return IncidentOut(
         incident_id=incident.id,
@@ -101,14 +103,14 @@ def list_campaigns(
     if confirmed_only:
         query = query.where(Campaign.confirmed_malicious.is_(True))
     total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
-    rows = session.execute(
-        query.order_by(desc(Campaign.last_seen)).limit(limit).offset(offset)
-    ).scalars().all()
+    rows = (
+        session.execute(query.order_by(desc(Campaign.last_seen)).limit(limit).offset(offset)).scalars().all()
+    )
     return PaginatedResponse(
         total=int(total),
         limit=limit,
         offset=offset,
-        items=[CampaignOut(**campaign_summary(c)) for c in rows],
+        items=[CampaignOut.model_validate(campaign_summary(c)) for c in rows],
     )
 
 
@@ -121,7 +123,7 @@ def get_campaign(
     campaign = session.get(Campaign, campaign_id)
     if campaign is None or campaign.organization_id != actor.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Кампания не найдена")
-    return CampaignOut(**campaign_summary(campaign))
+    return CampaignOut.model_validate(campaign_summary(campaign))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -142,9 +144,9 @@ def list_incidents(
     if assigned_to_me:
         query = query.where(Incident.assigned_to == actor.user_id)
     total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
-    rows = session.execute(
-        query.order_by(desc(Incident.created_at)).limit(limit).offset(offset)
-    ).scalars().all()
+    rows = (
+        session.execute(query.order_by(desc(Incident.created_at)).limit(limit).offset(offset)).scalars().all()
+    )
     return PaginatedResponse(
         total=int(total), limit=limit, offset=offset, items=[_incident_out(session, i) for i in rows]
     )
@@ -154,13 +156,16 @@ def list_incidents(
 def create_incident(
     payload: IncidentCreateRequest, request: Request, actor: Manager, session: DbSession
 ) -> IncidentOut:
-    next_number = int(
-        session.execute(
-            select(func.coalesce(func.max(Incident.number), 0)).where(
-                Incident.organization_id == actor.organization_id
-            )
-        ).scalar_one()
-    ) + 1
+    next_number = (
+        int(
+            session.execute(
+                select(func.coalesce(func.max(Incident.number), 0)).where(
+                    Incident.organization_id == actor.organization_id
+                )
+            ).scalar_one()
+        )
+        + 1
+    )
 
     incident = Incident(
         organization_id=actor.organization_id,
@@ -184,7 +189,9 @@ def create_incident(
         message_ids.extend(
             session.execute(
                 select(CampaignMessage.message_id).where(CampaignMessage.campaign_id == campaign.id)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     affected: set[str] = set()
@@ -195,11 +202,15 @@ def create_incident(
         session.add(IncidentMessage(incident_id=incident.id, message_id=message.id))
         if message.reported_by:
             affected.add(message.reported_by)
-        for indicator_id in session.execute(
-            select(IndicatorObservation.indicator_id).where(
-                IndicatorObservation.message_id == message.id
-            ).limit(100)
-        ).scalars().all():
+        for indicator_id in (
+            session.execute(
+                select(IndicatorObservation.indicator_id)
+                .where(IndicatorObservation.message_id == message.id)
+                .limit(100)
+            )
+            .scalars()
+            .all()
+        ):
             exists = session.execute(
                 select(IncidentIndicator).where(
                     IncidentIndicator.incident_id == incident.id,
@@ -207,9 +218,7 @@ def create_incident(
                 )
             ).scalar_one_or_none()
             if exists is None:
-                session.add(
-                    IncidentIndicator(incident_id=incident.id, indicator_id=indicator_id)
-                )
+                session.add(IncidentIndicator(incident_id=incident.id, indicator_id=indicator_id))
     incident.affected_users = sorted(affected)[:500]
 
     incidents_total.labels(incident.severity.value).inc()
@@ -296,16 +305,18 @@ def update_incident(
 
 def _mark_indicators_confirmed(session, incident: Incident) -> None:  # type: ignore[no-untyped-def]
     """A confirmed incident promotes its indicators, so later messages match them (ТЗ 17.2)."""
-    indicator_ids = session.execute(
-        select(IncidentIndicator.indicator_id).where(IncidentIndicator.incident_id == incident.id)
-    ).scalars().all()
+    indicator_ids = (
+        session.execute(
+            select(IncidentIndicator.indicator_id).where(IncidentIndicator.incident_id == incident.id)
+        )
+        .scalars()
+        .all()
+    )
     for indicator_id in indicator_ids:
         indicator = session.get(Indicator, indicator_id)
         if indicator is not None:
             indicator.confirmed_malicious = True
-    campaigns = session.execute(
-        select(Campaign).where(Campaign.incident_id == incident.id)
-    ).scalars().all()
+    campaigns = session.execute(select(Campaign).where(Campaign.incident_id == incident.id)).scalars().all()
     for campaign in campaigns:
         campaign.confirmed_malicious = True
 
@@ -337,9 +348,13 @@ def list_notes(incident_id: str, actor: Viewer, session: DbSession) -> list[dict
     incident = session.get(Incident, incident_id)
     if incident is None or incident.organization_id != actor.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Инцидент не найден")
-    notes = session.execute(
-        select(AnalystNote).where(AnalystNote.incident_id == incident_id).order_by(AnalystNote.created_at)
-    ).scalars().all()
+    notes = (
+        session.execute(
+            select(AnalystNote).where(AnalystNote.incident_id == incident_id).order_by(AnalystNote.created_at)
+        )
+        .scalars()
+        .all()
+    )
     return [
         {"note_id": n.id, "author": n.author_email, "body": n.body, "created_at": n.created_at.isoformat()}
         for n in notes
@@ -347,9 +362,7 @@ def list_notes(incident_id: str, actor: Viewer, session: DbSession) -> list[dict
 
 
 @router.post("/incidents/{incident_id}/messages/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
-def link_message(
-    incident_id: str, message_id: str, actor: Manager, session: DbSession
-) -> Response:
+def link_message(incident_id: str, message_id: str, actor: Manager, session: DbSession) -> Response:
     """Link a related message to an incident (ТЗ 43.4)."""
     incident = session.get(Incident, incident_id)
     message = session.get(MailMessage, message_id)
@@ -389,11 +402,13 @@ def classify_message(
     if classification == "false_positive":
         false_positive_total.inc()
     if classification == "confirmed_malicious":
-        for indicator_id in session.execute(
-            select(IndicatorObservation.indicator_id).where(
-                IndicatorObservation.message_id == message.id
+        for indicator_id in (
+            session.execute(
+                select(IndicatorObservation.indicator_id).where(IndicatorObservation.message_id == message.id)
             )
-        ).scalars().all():
+            .scalars()
+            .all()
+        ):
             indicator = session.get(Indicator, indicator_id)
             if indicator is not None:
                 indicator.confirmed_malicious = True

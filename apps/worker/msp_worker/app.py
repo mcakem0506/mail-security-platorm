@@ -12,7 +12,6 @@ import logging
 from celery import Celery
 from celery.signals import setup_logging, task_failure
 from kombu import Queue
-
 from msp_api.config import get_settings
 from msp_api.observability import configure_logging
 

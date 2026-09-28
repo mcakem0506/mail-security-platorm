@@ -16,13 +16,14 @@ from ..db.models import AuditEvent
 
 logger = logging.getLogger(__name__)
 
+
 # Actions worth auditing (ТЗ 25). Kept explicit so new code cannot silently skip the trail.
 class AuditAction:
     LOGIN = "auth.login"
     LOGIN_FAILED = "auth.login_failed"
     LOGOUT = "auth.logout"
     SESSION_REVOKED = "auth.session_revoked"
-    PASSWORD_CHANGED = "auth.password_changed"
+    PASSWORD_CHANGED = "auth.password_changed"  # noqa: S105  # nosec
     MESSAGE_VIEW = "message.view"
     MESSAGE_CONTENT_VIEW = "message.content_view"
     ATTACHMENT_ACCESS = "attachment.access"

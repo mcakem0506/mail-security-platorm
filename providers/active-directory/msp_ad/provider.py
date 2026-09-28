@@ -7,6 +7,7 @@ are not required for detection (phone, address, photo, manager chain by default)
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -207,7 +208,9 @@ class ActiveDirectoryProvider:
                         object_id=str(object_id or mail),
                         display_name=str(attrs.get("displayName") or "").strip(),
                         mail=mail,
-                        aliases=tuple(a for a in _aliases_from_proxy(attrs.get("proxyAddresses")) if a != mail),
+                        aliases=tuple(
+                            a for a in _aliases_from_proxy(attrs.get("proxyAddresses")) if a != mail
+                        ),
                         department=str(attrs.get("department") or "").strip(),
                         title=str(attrs.get("title") or "").strip(),
                         manager_dn=str(attrs.get("manager") or "").strip(),
@@ -219,10 +222,8 @@ class ActiveDirectoryProvider:
         except Exception as exc:  # noqa: BLE001 - a directory outage must not break the platform
             result.errors.append(f"search failed: {type(exc).__name__}")
         finally:
-            try:
+            with contextlib.suppress(Exception):  # an unbind failure must not mask the result
                 conn.unbind()
-            except Exception:  # noqa: BLE001
-                pass
         result.high_watermark = str(high_watermark) if high_watermark else None
         result.finished_at = utcnow()
         return result

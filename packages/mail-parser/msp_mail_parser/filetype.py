@@ -8,18 +8,89 @@ import zipfile
 from dataclasses import dataclass, field
 
 EXECUTABLE_EXT = frozenset(
-    "exe scr com pif cpl msi msp dll sys jar apk app elf bin gadget application appref-ms xll msix "
-    "appx msixbundle appxbundle ocx drv".split()
+    [
+        "exe",
+        "scr",
+        "com",
+        "pif",
+        "cpl",
+        "msi",
+        "msp",
+        "dll",
+        "sys",
+        "jar",
+        "apk",
+        "app",
+        "elf",
+        "bin",
+        "gadget",
+        "application",
+        "appref-ms",
+        "xll",
+        "msix",
+        "appx",
+        "msixbundle",
+        "appxbundle",
+        "ocx",
+        "drv",
+    ]
 )
-SCRIPT_EXT = frozenset("js jse vbs vbe wsf wsh wsc ps1 psm1 psd1 bat cmd hta sh py pl reg vb mjs".split())
-SHORTCUT_EXT = frozenset("lnk url scf website desktop library-ms searchconnector-ms settingcontent-ms".split())
-MACRO_EXT = frozenset("docm dotm xlsm xltm xlam pptm potm ppam ppsm sldm xlsb".split())
-DISK_IMAGE_EXT = frozenset("iso img vhd vhdx".split())
-ARCHIVE_EXT = frozenset("zip 7z rar gz tgz tar cab ace arj bz2 xz z lzh".split())
-HTML_EXT = frozenset("html htm shtml xhtml svg mht mhtml".split())
-OFFICE_EXT = frozenset("doc docx xls xlsx ppt pptx rtf odt ods odp one pub dot dotx xlt xltx".split())
-DOCUMENT_EXT = frozenset("pdf txt csv".split())
-IMAGE_EXT = frozenset("png jpg jpeg gif bmp webp tif tiff".split())
+SCRIPT_EXT = frozenset(
+    [
+        "js",
+        "jse",
+        "vbs",
+        "vbe",
+        "wsf",
+        "wsh",
+        "wsc",
+        "ps1",
+        "psm1",
+        "psd1",
+        "bat",
+        "cmd",
+        "hta",
+        "sh",
+        "py",
+        "pl",
+        "reg",
+        "vb",
+        "mjs",
+    ]
+)
+SHORTCUT_EXT = frozenset(
+    ["lnk", "url", "scf", "website", "desktop", "library-ms", "searchconnector-ms", "settingcontent-ms"]
+)
+MACRO_EXT = frozenset(
+    ["docm", "dotm", "xlsm", "xltm", "xlam", "pptm", "potm", "ppam", "ppsm", "sldm", "xlsb"]
+)
+DISK_IMAGE_EXT = frozenset(["iso", "img", "vhd", "vhdx"])
+ARCHIVE_EXT = frozenset(
+    ["zip", "7z", "rar", "gz", "tgz", "tar", "cab", "ace", "arj", "bz2", "xz", "z", "lzh"]
+)
+HTML_EXT = frozenset(["html", "htm", "shtml", "xhtml", "svg", "mht", "mhtml"])
+OFFICE_EXT = frozenset(
+    [
+        "doc",
+        "docx",
+        "xls",
+        "xlsx",
+        "ppt",
+        "pptx",
+        "rtf",
+        "odt",
+        "ods",
+        "odp",
+        "one",
+        "pub",
+        "dot",
+        "dotx",
+        "xlt",
+        "xltx",
+    ]
+)
+DOCUMENT_EXT = frozenset(["pdf", "txt", "csv"])
+IMAGE_EXT = frozenset(["png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff"])
 
 _SIGNATURES: list[tuple[int, bytes, str]] = [
     (0, b"MZ", "pe_executable"),

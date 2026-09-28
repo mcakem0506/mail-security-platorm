@@ -334,7 +334,8 @@ class ExceptionCreateRequest(ApiModel):
     @classmethod
     def _future(cls, value: datetime | None) -> datetime | None:
         if value is not None:
-            from datetime import UTC, datetime as dt
+            from datetime import UTC
+            from datetime import datetime as dt
 
             now = dt.now(UTC)
             if value.tzinfo is None:

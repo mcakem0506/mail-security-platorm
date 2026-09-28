@@ -6,15 +6,14 @@ import base64
 import binascii
 import hashlib
 import logging
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from msp_contracts import AnalysisStatus, IntakeSource, JobState, RiskLevel
-from sqlalchemy import desc, func, select
+from msp_contracts import AnalysisStatus, IntakeSource, JobState
+from sqlalchemy import desc, select
 
 from ..db.base import utcnow
-from ..db.models import AnalysisJob, AnalysisResult, DetectionSignal, MailMessage, User
+from ..db.models import AnalysisJob, AnalysisResult, DetectionSignal, User
 from ..deps import (
     Actor,
     AppSettings,
@@ -35,7 +34,7 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission, can_access_job
-from ..services.analysis import employee_view, run_local_analysis
+from ..services.analysis import run_local_analysis
 from ..services.storage import build_storage
 from ..tasks import enqueue_enrichment
 
@@ -120,7 +119,7 @@ def submit_analysis(
     storage = build_storage(settings)
     try:
         outcome = run_local_analysis(session, settings, job=job, raw=raw, storage=storage)
-    except Exception as exc:  # noqa: BLE001 - a backend failure must not break Outlook (ТЗ 40.9)
+    except Exception as exc:
         logger.exception("analysis.failed", extra={"analysis_job_id": job.id})
         job.state = JobState.FAILED
         job.status = AnalysisStatus.ERROR
@@ -140,7 +139,9 @@ def submit_analysis(
 
     record(
         session,
-        action=AuditAction.ANALYSIS_REPORTED if payload.report_as_phishing else AuditAction.ANALYSIS_REQUESTED,
+        action=AuditAction.ANALYSIS_REPORTED
+        if payload.report_as_phishing
+        else AuditAction.ANALYSIS_REQUESTED,
         actor_id=actor.user_id,
         actor_email=actor.email,
         actor_role=actor.role.value,
@@ -198,11 +199,15 @@ def get_analysis_detail(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Результат ещё не готов")
 
-    signals = session.execute(
-        select(DetectionSignal).where(DetectionSignal.result_id == result.id).order_by(
-            desc(DetectionSignal.weight)
+    signals = (
+        session.execute(
+            select(DetectionSignal)
+            .where(DetectionSignal.result_id == result.id)
+            .order_by(desc(DetectionSignal.weight))
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     record(
         session,
         action=AuditAction.MESSAGE_VIEW,
@@ -273,15 +278,19 @@ def list_my_analyses(
 ) -> list[AnalysisStatusResponse]:
     """An employee's own analyses (ТЗ 23)."""
     limit = max(1, min(limit, 100))
-    jobs = session.execute(
-        select(AnalysisJob)
-        .where(
-            AnalysisJob.organization_id == actor.organization_id,
-            AnalysisJob.requested_by == actor.user_id,
+    jobs = (
+        session.execute(
+            select(AnalysisJob)
+            .where(
+                AnalysisJob.organization_id == actor.organization_id,
+                AnalysisJob.requested_by == actor.user_id,
+            )
+            .order_by(desc(AnalysisJob.created_at))
+            .limit(limit)
         )
-        .order_by(desc(AnalysisJob.created_at))
-        .limit(limit)
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [_status_response(session, job) for job in jobs]
 
 

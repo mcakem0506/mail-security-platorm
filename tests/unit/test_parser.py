@@ -30,7 +30,7 @@ class TestMimeParsing:
 
     def test_repairs_raw_8bit_headers(self) -> None:
         """Unencoded UTF-8 in headers violates RFC 2047 but is common in the wild."""
-        raw = "From: \"Иван Петров\" <i@example.test>\r\nSubject: Привет\r\n\r\nbody".encode()
+        raw = 'From: "Иван Петров" <i@example.test>\r\nSubject: Привет\r\n\r\nbody'.encode()
         msg = parse_message(raw)
         assert msg.from_ is not None
         assert msg.from_.display_name == "Иван Петров"
@@ -66,7 +66,9 @@ class TestMimeParsing:
         msg["From"] = "a@b.test"
         msg.set_content("body")
         for i in range(60):
-            msg.add_attachment(b"x" * 10, maintype="application", subtype="octet-stream", filename=f"f{i}.bin")
+            msg.add_attachment(
+                b"x" * 10, maintype="application", subtype="octet-stream", filename=f"f{i}.bin"
+            )
         parsed = parse_message(msg.as_bytes(), ParserLimits(max_attachments=10))
         assert "MAX_ATTACHMENTS" in parsed.limits_hit
         assert len([a for a in parsed.attachments if a.meta.depth == 0]) <= 10
@@ -76,12 +78,12 @@ class TestHtmlSanitization:
     @pytest.mark.parametrize(
         "payload",
         [
-            '<script>alert(1)</script><p>ok</p>',
+            "<script>alert(1)</script><p>ok</p>",
             '<img src=x onerror="alert(1)">',
             '<iframe src="http://evil.test"></iframe>',
             '<a href="javascript:alert(1)">click</a>',
             '<div style="background:url(http://evil.test/x.png)">text</div>',
-            '<svg/onload=alert(1)>',
+            "<svg/onload=alert(1)>",
             '<body onload="alert(1)">text</body>',
             '<form action="http://evil.test"><input type="password"></form>',
             '<object data="http://evil.test"></object>',
@@ -195,7 +197,10 @@ class TestFileTypeDetection:
     def test_rtlo_and_control_chars_stripped(self) -> None:
         from msp_mail_parser import normalize_filename
 
-        assert "‮" not in normalize_filename("doc‮gnp.exe")
+        # RIGHT-TO-LEFT OVERRIDE, built from its code point so this source file stays free of
+        # literal bidirectional control characters.
+        rlo = chr(0x202E)
+        assert rlo not in normalize_filename(f"doc{rlo}gnp.exe")
         assert normalize_filename("../../etc/passwd") == "passwd"
 
 

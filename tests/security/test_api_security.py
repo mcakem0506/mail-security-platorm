@@ -6,20 +6,18 @@ import base64
 
 import pytest
 from fastapi.testclient import TestClient
-from msp_contracts import Role
-
 from fixtures.corpus import BY_NAME
+from msp_contracts import Role
 
 
 @pytest.fixture
 def client(engine, storage_dir, monkeypatch):  # type: ignore[no-untyped-def]
     """A TestClient bound to an isolated in-memory database and in-process session store."""
-    from sqlalchemy.orm import sessionmaker
-
     from msp_api import deps
     from msp_api.config import get_settings
     from msp_api.db.session import get_session
     from msp_api.main import create_app
+    from sqlalchemy.orm import sessionmaker
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -54,10 +52,9 @@ def client(engine, storage_dir, monkeypatch):  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def users(engine, organization):  # type: ignore[no-untyped-def]
-    from sqlalchemy.orm import sessionmaker
-
     from msp_api.db.models import User
     from msp_api.security.auth import hash_password
+    from sqlalchemy.orm import sessionmaker
 
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     password = "Correct-Horse-Battery-Staple-9"
@@ -183,7 +180,9 @@ class TestRbac:
             (Role.PLATFORM_ADMIN, "/api/v1/admin/audit", 200),
         ],
     )
-    def test_role_access_matrix(self, client, users, organization, role: Role, path: str, expected: int) -> None:
+    def test_role_access_matrix(
+        self, client, users, organization, role: Role, path: str, expected: int
+    ) -> None:
         login(client, users, role)
         assert client.get(path).status_code == expected, f"{role.value} -> {path}"
 

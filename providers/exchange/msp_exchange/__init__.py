@@ -9,7 +9,8 @@ from .base import (
     RemediationOutcome,
     RemediationRequest,
 )
-from .ews import BLOCKERS as EWS_BLOCKERS, EwsConfig, OnPremEwsExchangeProvider
+from .ews import BLOCKERS as EWS_BLOCKERS
+from .ews import EwsConfig, OnPremEwsExchangeProvider
 from .mock import MockExchangeProvider
 from .security_mailbox import (
     IngestedReport,

@@ -48,9 +48,10 @@ _DANGEROUS_TYPES = frozenset(
 
 def _summary(session, message: MailMessage) -> MessageSummary:  # type: ignore[no-untyped-def]
     result = session.execute(
-        select(AnalysisResult).where(AnalysisResult.message_id == message.id).order_by(
-            desc(AnalysisResult.created_at)
-        ).limit(1)
+        select(AnalysisResult)
+        .where(AnalysisResult.message_id == message.id)
+        .order_by(desc(AnalysisResult.created_at))
+        .limit(1)
     ).scalar_one_or_none()
     campaign_id = session.execute(
         select(CampaignMessage.campaign_id).where(CampaignMessage.message_id == message.id)
@@ -115,9 +116,7 @@ def search_messages(
         query = query.where(
             or_(
                 MailMessage.raw_sha256 == sha256.lower(),
-                MailMessage.id.in_(
-                    select(Attachment.message_id).where(Attachment.sha256 == sha256.lower())
-                ),
+                MailMessage.id.in_(select(Attachment.message_id).where(Attachment.sha256 == sha256.lower())),
             )
         )
     if url:
@@ -147,12 +146,12 @@ def search_messages(
             )
         )
 
-    total = session.execute(
-        select(func.count()).select_from(query.subquery())
-    ).scalar_one()
-    rows = session.execute(
-        query.order_by(desc(MailMessage.received_at)).limit(limit).offset(offset)
-    ).scalars().all()
+    total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
+    rows = (
+        session.execute(query.order_by(desc(MailMessage.received_at)).limit(limit).offset(offset))
+        .scalars()
+        .all()
+    )
     return PaginatedResponse(
         total=int(total), limit=limit, offset=offset, items=[_summary(session, m) for m in rows]
     )
@@ -166,15 +165,23 @@ def get_message(
     if message is None or message.organization_id != actor.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Сообщение не найдено")
 
-    headers = session.execute(
-        select(MailHeader).where(MailHeader.message_id == message.id).order_by(MailHeader.position)
-    ).scalars().all()
-    recipients = session.execute(
-        select(MailRecipient).where(MailRecipient.message_id == message.id)
-    ).scalars().all()
-    attachments = session.execute(
-        select(Attachment).where(Attachment.message_id == message.id).order_by(Attachment.depth)
-    ).scalars().all()
+    headers = (
+        session.execute(
+            select(MailHeader).where(MailHeader.message_id == message.id).order_by(MailHeader.position)
+        )
+        .scalars()
+        .all()
+    )
+    recipients = (
+        session.execute(select(MailRecipient).where(MailRecipient.message_id == message.id)).scalars().all()
+    )
+    attachments = (
+        session.execute(
+            select(Attachment).where(Attachment.message_id == message.id).order_by(Attachment.depth)
+        )
+        .scalars()
+        .all()
+    )
     urls = session.execute(
         select(Indicator.value, IndicatorObservation.context)
         .join(IndicatorObservation, IndicatorObservation.indicator_id == Indicator.id)
@@ -205,7 +212,9 @@ def get_message(
     return MessageDetailResponse(
         message=_summary(session, message),
         headers=[{"name": h.name, "value": h.value} for h in headers],
-        recipients=[{"address": r.address, "kind": r.kind, "display_name": r.display_name} for r in recipients],
+        recipients=[
+            {"address": r.address, "kind": r.kind, "display_name": r.display_name} for r in recipients
+        ],
         attachments=[
             AttachmentOut(
                 attachment_id=a.id,
@@ -294,9 +303,7 @@ def download_attachment(
     if message is None or message.organization_id != actor.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Вложение не найдено")
     if not attachment.storage_key or attachment.purged_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE, detail="Файл удалён политикой хранения"
-        )
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Файл удалён политикой хранения")
 
     dangerous = attachment.detected_type in _DANGEROUS_TYPES or bool(
         {"EXECUTABLE", "SCRIPT", "SHORTCUT", "DOUBLE_EXTENSION"} & set(attachment.flags or [])
@@ -312,7 +319,7 @@ def download_attachment(
 
     try:
         data = build_storage(settings).get(attachment.storage_key)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("attachment.read_failed", extra={"error": type(exc).__name__})
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Хранилище недоступно"
@@ -352,9 +359,7 @@ def download_attachment(
 
 
 @router.get("/indicators/{ioc_type}/{value:path}")
-def search_indicator(
-    ioc_type: str, value: str, actor: Viewer, session: DbSession
-) -> dict[str, Any]:
+def search_indicator(ioc_type: str, value: str, actor: Viewer, session: DbSession) -> dict[str, Any]:
     """Look up an indicator and the messages it was seen in (ТЗ 43.3)."""
     indicator = session.execute(
         select(Indicator).where(
@@ -366,14 +371,22 @@ def search_indicator(
     if indicator is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Индикатор не найден")
 
-    message_ids = session.execute(
-        select(IndicatorObservation.message_id)
-        .where(IndicatorObservation.indicator_id == indicator.id)
-        .limit(200)
-    ).scalars().all()
-    messages = session.execute(
-        select(MailMessage).where(MailMessage.id.in_([m for m in message_ids if m])).limit(100)
-    ).scalars().all()
+    message_ids = (
+        session.execute(
+            select(IndicatorObservation.message_id)
+            .where(IndicatorObservation.indicator_id == indicator.id)
+            .limit(200)
+        )
+        .scalars()
+        .all()
+    )
+    messages = (
+        session.execute(
+            select(MailMessage).where(MailMessage.id.in_([m for m in message_ids if m])).limit(100)
+        )
+        .scalars()
+        .all()
+    )
     return {
         "indicator": {
             "indicator_id": indicator.id,

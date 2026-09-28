@@ -17,11 +17,31 @@ message_id_var: ContextVar[str] = ContextVar("message_id", default="")
 incident_id_var: ContextVar[str] = ContextVar("incident_id", default="")
 
 _RESERVED = frozenset(
-    """
-args asctime created exc_info exc_text filename funcName levelname levelno lineno module msecs
-message msg name pathname process processName relativeCreated stack_info thread threadName
-taskName
-""".split()
+    [
+        "args",
+        "asctime",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "module",
+        "msecs",
+        "message",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+        "taskName",
+    ]
 )
 # Keys that must never reach the logs, even if a caller passes them (ТЗ 31: PII minimisation).
 _FORBIDDEN_LOG_KEYS = frozenset(
@@ -50,9 +70,7 @@ class JsonFormatter(logging.Formatter):
                 continue
             if key.lower() in _FORBIDDEN_LOG_KEYS:
                 payload[key] = "[redacted]"
-            elif isinstance(value, str | int | float | bool | type(None)):
-                payload[key] = value
-            elif isinstance(value, list | dict):
+            elif isinstance(value, str | int | float | bool | list | dict | None):
                 payload[key] = value
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)[:4000]
@@ -64,9 +82,7 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     if fmt == "json":
         handler.setFormatter(JsonFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
@@ -105,9 +121,7 @@ provider_rate_limit = Counter(
     "msp_provider_rate_limit_total", "Provider rate-limit hits", ["provider"], registry=REGISTRY
 )
 parser_errors = Counter("msp_parser_errors_total", "Parser errors", ["kind"], registry=REGISTRY)
-incidents_total = Counter(
-    "msp_incidents_total", "Incidents created", ["severity"], registry=REGISTRY
-)
+incidents_total = Counter("msp_incidents_total", "Incidents created", ["severity"], registry=REGISTRY)
 campaign_size = Histogram(
     "msp_campaign_size",
     "Messages per campaign at correlation time",

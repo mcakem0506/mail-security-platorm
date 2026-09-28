@@ -41,7 +41,16 @@ class AuthResults:
         candidates = [r for r in self.results if r.method == method]
         if not candidates:
             return None
-        order = {"fail": 0, "permerror": 1, "softfail": 2, "temperror": 3, "neutral": 4, "none": 5, "pass": 6}
+        # Ordering, not credentials: bandit flags the "pass" key as a password literal.
+        order = {
+            "fail": 0,
+            "permerror": 1,
+            "softfail": 2,
+            "temperror": 3,
+            "neutral": 4,
+            "none": 5,
+            "pass": 6,  # nosec
+        }
         return sorted(candidates, key=lambda r: order.get(r.result, 7))[0]
 
     def merge_received_spf(self, spf_results: list[MethodResult]) -> None:
@@ -58,7 +67,9 @@ class AuthResults:
             facts[f"{method}_present"] = True
             facts[f"{method}_result"] = res.result
             ev: dict[str, Any] = {"result": res.result, "authserv": res.authserv}
-            ev.update({k: v for k, v in res.properties.items() if k.startswith(("header.", "smtp.", "d", "i"))})
+            ev.update(
+                {k: v for k, v in res.properties.items() if k.startswith(("header.", "smtp.", "d", "i"))}
+            )
             self.evidence[f"{method}_result"] = ev
             if res.result in _FAIL_RESULTS:
                 facts[f"{method}_fail"] = True
@@ -101,7 +112,9 @@ def parse_authentication_results(headers: list[str]) -> AuthResults:
         for m in _METHOD_RE.finditer(header):
             method, result, rest = m.group(1).lower(), m.group(2).lower(), m.group(3) or ""
             out.results.append(
-                MethodResult(method=method, result=result, properties=_parse_props(rest), authserv=authserv[:200])
+                MethodResult(
+                    method=method, result=result, properties=_parse_props(rest), authserv=authserv[:200]
+                )
             )
     return out
 

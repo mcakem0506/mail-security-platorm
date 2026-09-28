@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import DateTime, MetaData, String, TypeDecorator, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -42,7 +42,11 @@ class UTCDateTime(TypeDecorator):
 
 class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    type_annotation_map = {dict[str, Any]: JSONType, list[Any]: JSONType, datetime: UTCDateTime}
+    type_annotation_map: ClassVar[dict[Any, Any]] = {
+        dict[str, Any]: JSONType,
+        list[Any]: JSONType,
+        datetime: UTCDateTime,
+    }
 
 
 def new_id() -> str:

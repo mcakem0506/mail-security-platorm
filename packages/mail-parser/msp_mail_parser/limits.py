@@ -25,7 +25,7 @@ class ParserLimits:
     max_compression_ratio: float = 150.0
 
 
-class LimitExceeded(Exception):  # noqa: N818 - domain wording
+class LimitExceeded(Exception):
     def __init__(self, code: str, detail: str = "") -> None:
         super().__init__(f"{code}: {detail}" if detail else code)
         self.code = code

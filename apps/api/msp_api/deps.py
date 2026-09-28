@@ -157,7 +157,7 @@ def reset_rate_limiter() -> None:
 
 
 def rate_limit(key: str, limit: int, window_seconds: int = 60) -> None:
-    allowed, remaining = _limiter.check(key, limit, window_seconds)
+    allowed, _remaining = _limiter.check(key, limit, window_seconds)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -207,18 +207,12 @@ def get_current_actor(
     cookie = request.cookies.get(get_settings().cookie_name)
     session = manager.load(cookie)
     if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Требуется аутентификация"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Требуется аутентификация")
     if request.method not in SAFE_METHODS:
-        token = request.headers.get("x-csrf-token") or request.cookies.get(
-            get_settings().csrf_cookie_name
-        )
+        token = request.headers.get("x-csrf-token") or request.cookies.get(get_settings().csrf_cookie_name)
         if not verify_csrf(session, token):
             logger.warning("auth.csrf_failed", extra={"actor": session.email})
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="CSRF-токен недействителен"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF-токен недействителен")
     manager.touch(session)
     request.state.actor_email = session.email
     request.state.actor_role = session.role.value
@@ -230,9 +224,7 @@ def require_permission(permission: Permission):  # type: ignore[no-untyped-def]
 
     def dependency(actor: Annotated[Actor, Depends(get_current_actor)]) -> Actor:
         if not actor.can(permission):
-            logger.warning(
-                "authz.denied", extra={"actor": actor.email, "permission": permission.value}
-            )
+            logger.warning("authz.denied", extra={"actor": actor.email, "permission": permission.value})
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав для этой операции"
             )

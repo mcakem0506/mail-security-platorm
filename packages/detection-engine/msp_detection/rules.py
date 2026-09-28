@@ -134,7 +134,7 @@ def parse_condition(node: Any) -> Condition:
             return Condition("all", children=[parse_condition({k: v}) for k, v in node.items()])
         if not node:
             raise RuleError("empty condition object")
-        (key, body), = node.items()
+        ((key, body),) = node.items()
         key = key.lower()
         if key in {"all", "and"}:
             return Condition("all", children=[parse_condition(n) for n in body])
@@ -272,9 +272,7 @@ class RuleSet:
                 internal=rule.internal,
                 recommendation=rule.recommendation or None,
                 suppressed=exc is not None,
-                suppressed_by=(
-                    f"{exc.exception_type.value}:{exc.exception_id}" if exc is not None else None
-                ),
+                suppressed_by=(f"{exc.exception_type.value}:{exc.exception_id}" if exc is not None else None),
             )
             signals.append(signal)
         return signals

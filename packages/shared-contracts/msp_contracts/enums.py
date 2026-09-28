@@ -92,9 +92,7 @@ class TIStatus(StrEnum):
     ERROR = "ERROR"
 
 
-TI_FAILURE_STATUSES = frozenset(
-    {TIStatus.RATE_LIMITED, TIStatus.PROVIDER_UNAVAILABLE, TIStatus.ERROR}
-)
+TI_FAILURE_STATUSES = frozenset({TIStatus.RATE_LIMITED, TIStatus.PROVIDER_UNAVAILABLE, TIStatus.ERROR})
 
 
 class IOCType(StrEnum):

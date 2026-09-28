@@ -48,15 +48,62 @@ _SCRIPT_RANGES: list[tuple[int, int, str]] = [
 ]
 
 _COMMON_SERVICE_DOMAINS: frozenset[str] = frozenset(
-    """
-microsoft.com microsoftonline.com office.com office365.com outlook.com live.com sharepoint.com
-onedrive.com windows.net azure.com google.com gmail.com googlemail.com docs.google.com
-apple.com icloud.com amazon.com aws.amazon.com paypal.com dropbox.com box.com adobe.com
-docusign.com docusign.net zoom.us slack.com atlassian.com github.com gitlab.com linkedin.com
-facebook.com instagram.com whatsapp.com telegram.org sberbank.ru vtb.ru alfabank.ru tinkoff.ru
-gosuslugi.ru nalog.ru mail.ru yandex.ru vk.com ozon.ru wildberries.ru dhl.com fedex.com ups.com
-pochta.ru cdek.ru 1c.ru kaspersky.com kaspersky.ru bitrix24.ru
-""".split()
+    [
+        "microsoft.com",
+        "microsoftonline.com",
+        "office.com",
+        "office365.com",
+        "outlook.com",
+        "live.com",
+        "sharepoint.com",
+        "onedrive.com",
+        "windows.net",
+        "azure.com",
+        "google.com",
+        "gmail.com",
+        "googlemail.com",
+        "docs.google.com",
+        "apple.com",
+        "icloud.com",
+        "amazon.com",
+        "aws.amazon.com",
+        "paypal.com",
+        "dropbox.com",
+        "box.com",
+        "adobe.com",
+        "docusign.com",
+        "docusign.net",
+        "zoom.us",
+        "slack.com",
+        "atlassian.com",
+        "github.com",
+        "gitlab.com",
+        "linkedin.com",
+        "facebook.com",
+        "instagram.com",
+        "whatsapp.com",
+        "telegram.org",
+        "sberbank.ru",
+        "vtb.ru",
+        "alfabank.ru",
+        "tinkoff.ru",
+        "gosuslugi.ru",
+        "nalog.ru",
+        "mail.ru",
+        "yandex.ru",
+        "vk.com",
+        "ozon.ru",
+        "wildberries.ru",
+        "dhl.com",
+        "fedex.com",
+        "ups.com",
+        "pochta.ru",
+        "cdek.ru",
+        "1c.ru",
+        "kaspersky.com",
+        "kaspersky.ru",
+        "bitrix24.ru",
+    ]
 )
 
 
@@ -220,7 +267,7 @@ def find_lookalike(
 
 
 def common_service_targets() -> tuple[dict[str, str], dict[str, str]]:
-    targets = {d: "known_service" for d in _COMMON_SERVICE_DOMAINS}
+    targets = dict.fromkeys(_COMMON_SERVICE_DOMAINS, "known_service")
     labels: dict[str, str] = {}
     for d in _COMMON_SERVICE_DOMAINS:
         labels.setdefault(d.split(".")[0], d)

@@ -89,7 +89,9 @@ def _ti_facts(fs: FactSet, enrichment: EnrichmentInput) -> None:
                     )
     if failures:
         fs.set("ti_providers_unavailable", True, providers=sorted(set(failures))[:6])
-        fs.missing_evidence.append("Threat Intelligence enrichment incomplete: " + ", ".join(sorted(set(failures))[:3]))
+        fs.missing_evidence.append(
+            "Threat Intelligence enrichment incomplete: " + ", ".join(sorted(set(failures))[:3])
+        )
     if not enrichment.ti_configured:
         fs.missing_evidence.append("No external Threat Intelligence provider is configured")
     elif not any_answer and enrichment.ti_results:
@@ -110,9 +112,8 @@ def _scan_facts(fs: FactSet, enrichment: EnrichmentInput) -> None:
 
 
 def _extra_facts(fs: FactSet, enrichment: EnrichmentInput) -> None:
-    for sig in enrichment.semantic_signals:
+    if enrichment.semantic_signals:
         fs.set("semantic_social_engineering", True, signals=enrichment.semantic_signals[:5])
-        break
     active = [c for c in enrichment.campaign_matches if c.get("confirmed_malicious")]
     if active:
         fs.set(

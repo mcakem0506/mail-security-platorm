@@ -13,14 +13,15 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from datetime import timedelta
 
 from msp_contracts import (
     TI_FAILURE_STATUSES,
-    IOCType,
     Indicator,
+    IOCType,
     ProviderHealth,
     TIResult,
     TIStatus,
@@ -116,7 +117,9 @@ class ThreatIntelligenceHub:
             try:
                 health = p.health()
             except Exception as exc:  # noqa: BLE001 - health must never raise upward
-                health = ProviderHealth(provider_id=p.provider_id, status="unavailable", detail=str(exc)[:200])
+                health = ProviderHealth(
+                    provider_id=p.provider_id, status="unavailable", detail=str(exc)[:200]
+                )
             if self.breaker.is_open(p.provider_id):
                 health = ProviderHealth(
                     provider_id=p.provider_id,
@@ -128,9 +131,7 @@ class ThreatIntelligenceHub:
         return out
 
     # ---- single lookup ----------------------------------------------------------------------
-    def lookup(
-        self, provider: ThreatIntelligenceProvider, ioc_type: IOCType, indicator: str
-    ) -> TIResult:
+    def lookup(self, provider: ThreatIntelligenceProvider, ioc_type: IOCType, indicator: str) -> TIResult:
         self.stats.requested += 1
         method_name = _LOOKUP_BY_TYPE.get(ioc_type)
         if method_name is None or not hasattr(provider, method_name):
@@ -251,9 +252,14 @@ class ThreatIntelligenceHub:
             if ind.ioc_type in _LOOKUP_BY_TYPE:
                 by_type[ind.ioc_type].append(ind)
         out: list[Indicator] = []
-        for ioc_type, items in by_type.items():
+        for items in by_type.values():
             seen: set[str] = set()
-            unique = [i for i in items if not (i.value in seen or seen.add(i.value))]
+            unique: list[Indicator] = []
+            for indicator in items:
+                if indicator.value in seen:
+                    continue
+                seen.add(indicator.value)
+                unique.append(indicator)
             out.extend(unique[: self.max_indicators_per_type])
         return out
 

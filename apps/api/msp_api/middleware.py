@@ -50,9 +50,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         for header, value in _SECURITY_HEADERS.items():
             response.headers.setdefault(header, value)
         if self.hsts and request.url.scheme == "https":
-            response.headers.setdefault(
-                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
-            )
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
 
 

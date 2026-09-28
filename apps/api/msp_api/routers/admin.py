@@ -49,9 +49,13 @@ AuditViewer = Annotated[Actor, Depends(require_permission(Permission.VIEW_AUDIT)
 # ---------------------------------------------------------------------------------------------
 @router.get("/protected-identities", response_model=list[ProtectedIdentityOut])
 def list_protected_identities(actor: IdentityAdmin, session: DbSession) -> list[ProtectedIdentityOut]:
-    rows = session.execute(
-        select(ProtectedIdentity).where(ProtectedIdentity.organization_id == actor.organization_id)
-    ).scalars().all()
+    rows = (
+        session.execute(
+            select(ProtectedIdentity).where(ProtectedIdentity.organization_id == actor.organization_id)
+        )
+        .scalars()
+        .all()
+    )
     return [_identity_out(row) for row in rows]
 
 
@@ -141,9 +145,7 @@ def delete_protected_identity(
 def list_exceptions(
     actor: ExceptionCreator, session: DbSession, include_inactive: bool = False
 ) -> list[ExceptionOut]:
-    query = select(DetectionException).where(
-        DetectionException.organization_id == actor.organization_id
-    )
+    query = select(DetectionException).where(DetectionException.organization_id == actor.organization_id)
     if not include_inactive:
         query = query.where(DetectionException.revoked_at.is_(None))
     rows = session.execute(query.order_by(desc(DetectionException.created_at))).scalars().all()
@@ -249,9 +251,9 @@ def revoke_exception(
 # ---------------------------------------------------------------------------------------------
 @router.get("/policies", response_model=list[PolicyOut])
 def list_policies(actor: PolicyAdmin, session: DbSession) -> list[PolicyOut]:
-    rows = session.execute(
-        select(Policy).where(Policy.organization_id == actor.organization_id)
-    ).scalars().all()
+    rows = (
+        session.execute(select(Policy).where(Policy.organization_id == actor.organization_id)).scalars().all()
+    )
     return [
         PolicyOut(
             key=r.key, value=r.value, version=r.version, updated_by=r.updated_by, updated_at=r.updated_at
@@ -300,7 +302,11 @@ def update_policy(
     )
     session.commit()
     return PolicyOut(
-        key=row.key, value=row.value, version=row.version, updated_by=row.updated_by, updated_at=row.updated_at
+        key=row.key,
+        value=row.value,
+        version=row.version,
+        updated_by=row.updated_by,
+        updated_at=row.updated_at,
     )
 
 
@@ -423,9 +429,7 @@ def update_provider(
         )
     ).scalar_one_or_none()
     if row is None:
-        row = ProviderConfig(
-            organization_id=actor.organization_id, provider_id=provider_id[:64], settings={}
-        )
+        row = ProviderConfig(organization_id=actor.organization_id, provider_id=provider_id[:64], settings={})
         session.add(row)
         session.flush()
     row.enabled = bool(payload.get("enabled", row.enabled))
@@ -473,9 +477,11 @@ def list_audit(
     if object_id:
         query = query.where(AuditEvent.object_id == object_id)
     total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
-    rows = session.execute(
-        query.order_by(desc(AuditEvent.created_at)).limit(limit).offset(offset)
-    ).scalars().all()
+    rows = (
+        session.execute(query.order_by(desc(AuditEvent.created_at)).limit(limit).offset(offset))
+        .scalars()
+        .all()
+    )
     return PaginatedResponse(
         total=int(total),
         limit=limit,
@@ -503,9 +509,13 @@ def list_audit(
 def list_users(
     actor: Annotated[Actor, Depends(require_permission(Permission.MANAGE_USERS))], session: DbSession
 ) -> list[dict[str, Any]]:
-    rows = session.execute(
-        select(User).where(User.organization_id == actor.organization_id).order_by(User.email)
-    ).scalars().all()
+    rows = (
+        session.execute(
+            select(User).where(User.organization_id == actor.organization_id).order_by(User.email)
+        )
+        .scalars()
+        .all()
+    )
     return [
         {
             "user_id": u.id,

@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -221,10 +221,12 @@ class Settings(BaseSettings):
             if self.debug:
                 raise ValueError("debug must be disabled in production")
         if self.vt_allow_file_upload and self.vt_mode != "private_scanning":
-            raise ValueError(
-                "VirusTotal file upload requires VT_MODE=private_scanning (ТЗ 14.5)"
-            )
-        if self.semantic_enabled and self.semantic_backend == "external" and not self.semantic_external_dpa_approved:
+            raise ValueError("VirusTotal file upload requires VT_MODE=private_scanning (ТЗ 14.5)")
+        if (
+            self.semantic_enabled
+            and self.semantic_backend == "external"
+            and not self.semantic_external_dpa_approved
+        ):
             raise ValueError("external semantic analysis requires an explicit DPA approval flag")
         return self
 

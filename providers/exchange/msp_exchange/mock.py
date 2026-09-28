@@ -26,7 +26,9 @@ class MockExchangeProvider:
     remediation_enabled: bool = False
     executed_actions: list[RemediationOutcome] = field(default_factory=list)
 
-    def add_message(self, mailbox: str, raw: bytes, *, message_id: str = "", subject: str = "", sender: str = "") -> ExchangeMessageRef:
+    def add_message(
+        self, mailbox: str, raw: bytes, *, message_id: str = "", subject: str = "", sender: str = ""
+    ) -> ExchangeMessageRef:
         key = message_id or f"mock-{uuid.uuid4().hex[:12]}"
         self.mailboxes.setdefault(mailbox.lower(), {})[key] = raw
         return ExchangeMessageRef(
@@ -82,7 +84,13 @@ class MockExchangeProvider:
     def submit_report(self, ref: ExchangeMessageRef, reported_by: str, note: str = "") -> str:
         report_id = f"report-{uuid.uuid4().hex[:12]}"
         self.reports.append(
-            {"report_id": report_id, "mailbox": ref.mailbox, "key": ref.key(), "by": reported_by, "note": note}
+            {
+                "report_id": report_id,
+                "mailbox": ref.mailbox,
+                "key": ref.key(),
+                "by": reported_by,
+                "note": note,
+            }
         )
         return report_id
 

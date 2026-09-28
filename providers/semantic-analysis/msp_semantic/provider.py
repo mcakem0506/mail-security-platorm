@@ -68,9 +68,7 @@ class SemanticConfig:
 
     def validate(self) -> None:
         if self.enabled and self.backend == "external" and not self.external_dpa_approved:
-            raise ValueError(
-                "external semantic analysis requires an explicit DPA/security approval flag"
-            )
+            raise ValueError("external semantic analysis requires an explicit DPA/security approval flag")
 
 
 @dataclass

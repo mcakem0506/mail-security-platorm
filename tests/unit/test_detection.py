@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from msp_contracts import RISK_ORDER, IOCType, RiskLevel, Severity, TIStatus, TIResult
+from fixtures.corpus import BY_NAME, CORPUS
+from msp_contracts import RISK_ORDER, IOCType, RiskLevel, Severity, TIResult, TIStatus
 from msp_detection import EnrichmentInput, ScanFinding, analyze
 from msp_detection.similarity import compare_labels, name_similarity, skeleton
 from msp_mail_parser import parse_message
 from msp_risk import RiskThresholds, employee_reasons, evaluate
-
-from fixtures.corpus import BY_NAME, CORPUS
 
 
 def run(raw: bytes, context, ruleset, enrichment=None):  # type: ignore[no-untyped-def]
@@ -140,7 +139,9 @@ class TestRiskEngine:
     def test_hard_signal_raises_classification_and_keeps_source(self, context, ruleset) -> None:
         enrichment = EnrichmentInput(
             scan_findings=[
-                ScanFinding(sha256="a" * 64, filename="test.txt", malicious=True, signature="Eicar", scanner="mock")
+                ScanFinding(
+                    sha256="a" * 64, filename="test.txt", malicious=True, signature="Eicar", scanner="mock"
+                )
             ],
             ti_configured=False,
         )
@@ -289,5 +290,5 @@ class TestRuleIntegrity:
         """The DSL is interpreted, never eval'd: an injection attempt is inert."""
         from msp_detection.rules import parse_condition
 
-        condition = parse_condition("some_fact == '__import__(\"os\").system(\"echo pwned\")'")
+        condition = parse_condition('some_fact == \'__import__("os").system("echo pwned")\'')
         assert condition.evaluate({"some_fact": "harmless"}) is False

@@ -192,9 +192,7 @@ def correlate(
         )
     ).scalar_one_or_none()
     if link is None:
-        session.add(
-            CampaignMessage(campaign_id=existing.id, message_id=message.id, similarity=similarity)
-        )
+        session.add(CampaignMessage(campaign_id=existing.id, message_id=message.id, similarity=similarity))
         existing.message_count += 1
         existing.recipient_count += max(message.recipient_count, 1)
         if message.reported_by:
@@ -246,7 +244,13 @@ def _update_campaign_aggregates(
     distribution[classification] = int(distribution.get(classification, 0)) + 1
     campaign.verdict_distribution = distribution
 
-    indicators = list(dict.fromkeys(list(campaign.indicators or []) + list(fingerprint.domain_set) + list(fingerprint.attachment_hashes)))
+    indicators = list(
+        dict.fromkeys(
+            list(campaign.indicators or [])
+            + list(fingerprint.domain_set)
+            + list(fingerprint.attachment_hashes)
+        )
+    )
     campaign.indicators = indicators[:100]
     if message.subject:
         subjects = list(dict.fromkeys([*(campaign.subjects or []), message.subject[:200]]))

@@ -48,7 +48,10 @@ def main() -> int:
     settings = get_settings()
     email = (args.email or settings.bootstrap_admin_email or "").strip().lower()
     if not email or "@" not in email:
-        print("error: an administrator email is required (--email or MSP_BOOTSTRAP_ADMIN_EMAIL)", file=sys.stderr)
+        print(
+            "error: an administrator email is required (--email or MSP_BOOTSTRAP_ADMIN_EMAIL)",
+            file=sys.stderr,
+        )
         return 2
 
     if args.generate_password:
@@ -78,9 +81,7 @@ def main() -> int:
         else:
             print(f"using existing organisation '{org.name}' ({org.id})")
 
-        existing = session.execute(
-            select(User).where(func.lower(User.email) == email)
-        ).scalar_one_or_none()
+        existing = session.execute(select(User).where(func.lower(User.email) == email)).scalar_one_or_none()
         if existing is not None:
             print(f"error: user {email} already exists", file=sys.stderr)
             return 1
@@ -97,12 +98,15 @@ def main() -> int:
         session.add(user)
         session.flush()
 
-        if session.execute(
-            select(MailboxIdentity).where(
-                MailboxIdentity.organization_id == org.id,
-                func.lower(MailboxIdentity.address) == email,
-            )
-        ).scalar_one_or_none() is None:
+        if (
+            session.execute(
+                select(MailboxIdentity).where(
+                    MailboxIdentity.organization_id == org.id,
+                    func.lower(MailboxIdentity.address) == email,
+                )
+            ).scalar_one_or_none()
+            is None
+        ):
             session.add(
                 MailboxIdentity(
                     organization_id=org.id,

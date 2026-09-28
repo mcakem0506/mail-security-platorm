@@ -11,6 +11,7 @@ no add-in capability — a single mailbox account with read access to its own ma
 
 from __future__ import annotations
 
+import contextlib
 import email
 import imaplib
 import logging
@@ -137,20 +138,22 @@ class SecurityMailboxProvider:
     def health(self) -> ProviderHealth:
         if not self.config.host or not self.config.username:
             return ProviderHealth(
-                provider_id=self.provider_id, status="not_configured", detail="security mailbox not configured"
+                provider_id=self.provider_id,
+                status="not_configured",
+                detail="security mailbox not configured",
             )
         try:
             conn = self._connect()
             try:
                 status, _ = conn.select(self.config.folder, readonly=True)
             finally:
-                try:
+                with contextlib.suppress(imaplib.IMAP4.error, OSError):
                     conn.logout()
-                except (imaplib.IMAP4.error, OSError):
-                    pass
             if status != "OK":
                 return ProviderHealth(
-                    provider_id=self.provider_id, status="degraded", detail=f"cannot select {self.config.folder}"
+                    provider_id=self.provider_id,
+                    status="degraded",
+                    detail=f"cannot select {self.config.folder}",
                 )
             self._last_error = None
             return ProviderHealth(provider_id=self.provider_id, status="ok", mode="imap")
@@ -175,7 +178,7 @@ class SecurityMailboxProvider:
             status, _ = conn.select(self.config.folder, readonly=False)
             if status != "OK":
                 raise RuntimeError(f"cannot select folder {self.config.folder}")
-            status, data = conn.uid("SEARCH", None, "UNSEEN")
+            status, data = conn.uid("SEARCH", None, "UNSEEN")  # type: ignore[arg-type]
             if status != "OK" or not data or not data[0]:
                 return out
             uids = data[0].split()[:limit]
@@ -215,9 +218,7 @@ class SecurityMailboxProvider:
             warnings.append("unparseable Date header on the report")
         original, unwrapped, note = extract_original_message(raw)
         if not unwrapped:
-            warnings.append(
-                "original message was not attached as message/rfc822; headers may be incomplete"
-            )
+            warnings.append("original message was not attached as message/rfc822; headers may be incomplete")
         return IngestedReport(
             uid=uid,
             raw_mime=original,
@@ -243,4 +244,6 @@ class SecurityMailboxProvider:
                 conn.logout()
             except (imaplib.IMAP4.error, OSError):
                 pass
-        return FetchedMessage(ref=ref, raw_mime=raw if isinstance(raw, bytes) else b"", source=self.provider_id)
+        return FetchedMessage(
+            ref=ref, raw_mime=raw if isinstance(raw, bytes) else b"", source=self.provider_id
+        )

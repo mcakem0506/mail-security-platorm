@@ -97,7 +97,7 @@ def _score(signals: list[Signal]) -> tuple[int, float]:
     # Saturating curve: sum -> 0..100 without letting noise accumulate to certainty.
     score = 100.0 * (1.0 - pow(2.718281828, -total / 55.0))
     confidence = (weighted_conf / total) if total > 0 else 0.0
-    return int(round(min(score, 99.0))), confidence
+    return round(min(score, 99.0)), confidence
 
 
 def _confidence_label(value: float, signals: list[Signal], hard: bool) -> str:
@@ -133,7 +133,11 @@ def evaluate(
 
     # Hard signals set a floor on the classification and keep their provenance.
     if hard_signals:
-        floor = RiskLevel.MALICIOUS if any(s.severity == Severity.CRITICAL for s in hard_signals) else RiskLevel.HIGH_RISK
+        floor = (
+            RiskLevel.MALICIOUS
+            if any(s.severity == Severity.CRITICAL for s in hard_signals)
+            else RiskLevel.HIGH_RISK
+        )
         if RISK_ORDER[floor] > RISK_ORDER[classification]:
             classification = floor
         score = max(score, thresholds.malicious if floor is RiskLevel.MALICIOUS else thresholds.high_risk)

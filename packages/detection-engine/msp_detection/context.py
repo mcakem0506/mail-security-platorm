@@ -110,7 +110,7 @@ class AnalysisContext:
     # ---- derived lookups (built lazily and cached) -----------------------------------------
     def __post_init__(self) -> None:
         self._corp_ascii = {to_ascii(d) for d in self.corporate_domains if d}
-        self._corp_targets: dict[str, str] = {d: "organization" for d in self._corp_ascii}
+        self._corp_targets: dict[str, str] = dict.fromkeys(self._corp_ascii, "organization")
         self._corp_labels: dict[str, str] = {}
         for d in self._corp_ascii:
             self._corp_labels.setdefault(split_domain(d).label, d)
@@ -219,12 +219,14 @@ class AnalysisContext:
                     return exc
                 case ExceptionType.TRUSTED_SENDER_DOMAIN_PAIR if value == f"{sender}|{domain}":
                     return exc
-                case (
-                    ExceptionType.APPROVED_DELEGATED_SERVICE | ExceptionType.APPROVED_MARKETING_PLATFORM
-                ) if value in {sender, sender_domain, domain}:
+                case ExceptionType.APPROVED_DELEGATED_SERVICE | ExceptionType.APPROVED_MARKETING_PLATFORM if (
+                    value in {sender, sender_domain, domain}
+                ):
                     return exc
-                case ExceptionType.RULE_SUPPRESSION if exc.rule_id and rule_id == exc.rule_id and (
-                    not value or value in {sender, sender_domain, domain}
+                case ExceptionType.RULE_SUPPRESSION if (
+                    exc.rule_id
+                    and rule_id == exc.rule_id
+                    and (not value or value in {sender, sender_domain, domain})
                 ):
                     return exc
                 case ExceptionType.TEMPORARY if value in {sender, sender_domain, domain}:

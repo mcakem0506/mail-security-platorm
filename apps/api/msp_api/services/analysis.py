@@ -29,11 +29,13 @@ from msp_detection import (
     DetectionResult,
     DirectoryUser,
     EnrichmentInput,
-    ProtectedIdentity as ProtectedIdentitySpec,
     ScanFinding,
     SenderHistory,
     analyze,
     default_ruleset,
+)
+from msp_detection import (
+    ProtectedIdentity as ProtectedIdentitySpec,
 )
 from msp_detection.auth import parse_authentication_results, parse_received_spf
 from msp_detection.rules import RuleSet
@@ -78,14 +80,14 @@ _RULESET: RuleSet | None = None
 
 
 def get_ruleset() -> RuleSet:
-    global _RULESET  # noqa: PLW0603 - cached rule set, reloaded explicitly on rule changes
+    global _RULESET
     if _RULESET is None:
         _RULESET = default_ruleset()
     return _RULESET
 
 
 def reload_ruleset() -> RuleSet:
-    global _RULESET  # noqa: PLW0603
+    global _RULESET
     _RULESET = default_ruleset()
     return _RULESET
 
@@ -108,11 +110,15 @@ def build_context(
     corporate = tuple(org.corporate_domains or ()) if org else settings.corporate_domain_list
     trusted = tuple(org.trusted_infrastructure_domains or ()) if org else settings.trusted_infrastructure_list
 
-    identities = session.execute(
-        select(ProtectedIdentity).where(
-            ProtectedIdentity.organization_id == organization_id, ProtectedIdentity.enabled.is_(True)
+    identities = (
+        session.execute(
+            select(ProtectedIdentity).where(
+                ProtectedIdentity.organization_id == organization_id, ProtectedIdentity.enabled.is_(True)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     protected = tuple(
         ProtectedIdentitySpec(
             identity_id=pi.id,
@@ -129,12 +135,18 @@ def build_context(
         for pi in identities
     )
 
-    directory = session.execute(
-        select(MailboxIdentity).where(
-            MailboxIdentity.organization_id == organization_id,
-            MailboxIdentity.enabled.is_(True),
-        ).limit(5000)
-    ).scalars().all()
+    directory = (
+        session.execute(
+            select(MailboxIdentity)
+            .where(
+                MailboxIdentity.organization_id == organization_id,
+                MailboxIdentity.enabled.is_(True),
+            )
+            .limit(5000)
+        )
+        .scalars()
+        .all()
+    )
     users = tuple(
         DirectoryUser(
             email=d.address,
@@ -148,12 +160,16 @@ def build_context(
     )
 
     now = utcnow()
-    exceptions = session.execute(
-        select(DetectionException).where(
-            DetectionException.organization_id == organization_id,
-            DetectionException.revoked_at.is_(None),
+    exceptions = (
+        session.execute(
+            select(DetectionException).where(
+                DetectionException.organization_id == organization_id,
+                DetectionException.revoked_at.is_(None),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     active_exceptions = tuple(
         ActiveException(
             exception_id=e.id,
@@ -380,7 +396,10 @@ def persist_message(
         if storage is not None and att.content is not None and meta.depth == 0:
             try:
                 key = build_key(
-                    "attachment", meta.sha256, organization_id=organization_id, extension=meta.extension or "bin"
+                    "attachment",
+                    meta.sha256,
+                    organization_id=organization_id,
+                    extension=meta.extension or "bin",
                 )
                 storage.put(key, att.content)
                 record.storage_key = key
@@ -468,26 +487,26 @@ def persist_result(
     result.ruleset_fingerprint = detection.ruleset_fingerprint[:4000]
     result.risk_engine_version = RISK_ENGINE_VERSION
 
-    for signal in detection.signals:
+    for detected in detection.signals:
         session.add(
             DetectionSignal(
                 result_id=result.id,
-                signal_id=signal.id,
-                rule_id=signal.rule_id,
-                rule_version=signal.rule_version,
-                category=signal.category,
-                title=signal.title,
-                explanation=signal.explanation,
-                severity=signal.severity,
-                confidence=signal.confidence,
-                weight=signal.weight,
-                source=signal.source,
-                evidence=signal.evidence,
-                hard=signal.hard,
-                internal=signal.internal,
-                suppressed=signal.suppressed,
-                suppressed_by=signal.suppressed_by,
-                observed_at=signal.observed_at,
+                signal_id=detected.id,
+                rule_id=detected.rule_id,
+                rule_version=detected.rule_version,
+                category=detected.category,
+                title=detected.title,
+                explanation=detected.explanation,
+                severity=detected.severity,
+                confidence=detected.confidence,
+                weight=detected.weight,
+                source=detected.source,
+                evidence=detected.evidence,
+                hard=detected.hard,
+                internal=detected.internal,
+                suppressed=detected.suppressed,
+                suppressed_by=detected.suppressed_by,
+                observed_at=detected.observed_at,
             )
         )
     return result
@@ -659,11 +678,17 @@ def apply_enrichment(
     previous_classification = previous.classification if previous else None
     persist_result(session, job=job, message=message, detection=updated, verdict=verdict)
 
-    failed = any(r.status.value in {"RATE_LIMITED", "PROVIDER_UNAVAILABLE", "ERROR"} for r in enrichment.ti_results)
+    failed = any(
+        r.status.value in {"RATE_LIMITED", "PROVIDER_UNAVAILABLE", "ERROR"} for r in enrichment.ti_results
+    )
     job.ti_state = (
-        TIState.PARTIAL if failed and enrichment.ti_results else
-        TIState.COMPLETED if enrichment.ti_results else
-        TIState.NOT_CONFIGURED if not enrichment.ti_configured else TIState.UNAVAILABLE
+        TIState.PARTIAL
+        if failed and enrichment.ti_results
+        else TIState.COMPLETED
+        if enrichment.ti_results
+        else TIState.NOT_CONFIGURED
+        if not enrichment.ti_configured
+        else TIState.UNAVAILABLE
     )
     job.state = JobState.COMPLETED
     job.status = _STATUS_BY_RISK[verdict.classification]

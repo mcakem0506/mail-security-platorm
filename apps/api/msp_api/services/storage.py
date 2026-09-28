@@ -140,7 +140,7 @@ class S3ObjectStorage:
         try:
             response = self._client.get_object(self.bucket, key)
             return response.read()
-        except Exception as exc:  # noqa: BLE001 - minio raises provider-specific errors
+        except Exception as exc:
             raise StorageError(f"object not readable: {key}") from exc
         finally:
             if response is not None:

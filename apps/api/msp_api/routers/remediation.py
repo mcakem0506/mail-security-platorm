@@ -71,7 +71,9 @@ def _resolve_targets(session, actor: Actor, payload: RemediationProposeRequest) 
         ids.extend(
             session.execute(
                 select(CampaignMessage.message_id).where(CampaignMessage.campaign_id == campaign.id)
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
     for message_id in dict.fromkeys(ids):
         message = session.get(MailMessage, message_id)
@@ -81,9 +83,11 @@ def _resolve_targets(session, actor: Actor, payload: RemediationProposeRequest) 
 
 
 def _out(session, action: RemediationAction) -> RemediationOut:  # type: ignore[no-untyped-def]
-    approvals = session.execute(
-        select(Approval).where(Approval.action_id == action.id).order_by(Approval.decided_at)
-    ).scalars().all()
+    approvals = (
+        session.execute(select(Approval).where(Approval.action_id == action.id).order_by(Approval.decided_at))
+        .scalars()
+        .all()
+    )
     return RemediationOut(
         action_id=action.id,
         action_type=action.action_type,
@@ -126,16 +130,14 @@ def propose(
         RemediationType.BLOCK_DOMAIN,
         RemediationType.TRANSPORT_RULE_PROPOSAL,
     }:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Не выбрано ни одного сообщения"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не выбрано ни одного сообщения")
 
     mailboxes: set[str] = set()
     for message in messages:
         mailboxes.update(
-            session.execute(
-                select(MailRecipient.address).where(MailRecipient.message_id == message.id)
-            ).scalars().all()
+            session.execute(select(MailRecipient.address).where(MailRecipient.message_id == message.id))
+            .scalars()
+            .all()
         )
         if message.source_mailbox:
             mailboxes.add(message.source_mailbox)
@@ -193,9 +195,7 @@ def propose(
         },
         affected_message_count=len(messages),
         affected_mailboxes=sorted(mailboxes)[:500],
-        required_approvals=required_approvals(
-            len(mailboxes), settings.remediation_second_approver_threshold
-        ),
+        required_approvals=required_approvals(len(mailboxes), settings.remediation_second_approver_threshold),
         rollback_supported=dry_run.rollback_supported,
         dry_run_report={
             "affected_messages": dry_run.affected_messages,
@@ -252,9 +252,7 @@ def approve(
             detail=f"Запрос в состоянии {action.state.value} не может быть согласован",
         )
 
-    approvals = session.execute(
-        select(Approval).where(Approval.action_id == action.id)
-    ).scalars().all()
+    approvals = session.execute(select(Approval).where(Approval.action_id == action.id)).scalars().all()
     allowed, reason = can_approve(
         role=actor.role,
         approver_id=actor.user_id,
@@ -294,13 +292,11 @@ def approve(
         action.state = RemediationState.REJECTED
         audit_action = AuditAction.REMEDIATION_REJECTED
     else:
-        approved_count = (
-            session.execute(
-                select(func.count())
-                .select_from(Approval)
-                .where(Approval.action_id == action.id, Approval.decision == "approved")
-            ).scalar_one()
-        )
+        approved_count = session.execute(
+            select(func.count())
+            .select_from(Approval)
+            .where(Approval.action_id == action.id, Approval.decision == "approved")
+        ).scalar_one()
         if int(approved_count) >= action.required_approvals:
             action.state = RemediationState.APPROVED
         audit_action = AuditAction.REMEDIATION_APPROVED
@@ -392,11 +388,15 @@ def execute(
                     item_id=message.exchange_item_id,
                 )
             )
-    approvers = session.execute(
-        select(Approval.approver_email).where(
-            Approval.action_id == action.id, Approval.decision == "approved"
+    approvers = (
+        session.execute(
+            select(Approval.approver_email).where(
+                Approval.action_id == action.id, Approval.decision == "approved"
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     outcome = provider.request_remediation(
         RemediationRequest(
@@ -457,9 +457,11 @@ def list_actions(
     if state is not None:
         query = query.where(RemediationAction.state == state)
     total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
-    rows = session.execute(
-        query.order_by(desc(RemediationAction.created_at)).limit(limit).offset(offset)
-    ).scalars().all()
+    rows = (
+        session.execute(query.order_by(desc(RemediationAction.created_at)).limit(limit).offset(offset))
+        .scalars()
+        .all()
+    )
     return PaginatedResponse(
         total=int(total), limit=limit, offset=offset, items=[_out(session, a) for a in rows]
     )

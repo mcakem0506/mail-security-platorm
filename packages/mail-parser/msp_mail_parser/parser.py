@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import codecs
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from email import message_from_bytes, policy
@@ -33,6 +34,25 @@ from .urls import dedupe_urls, extract_urls_from_html, extract_urls_from_text
 
 _ENCRYPTED_TYPES = {"multipart/encrypted", "application/pgp-encrypted"}
 _PKCS7 = {"application/pkcs7-mime", "application/x-pkcs7-mime"}
+# Bidirectional formatting characters, used to disguise a file extension: a name containing
+# RIGHT-TO-LEFT OVERRIDE before "gnp.exe" is displayed to the user as "...exe.png".
+# They are built from code points rather than written literally:
+# literal bidi controls in source code are themselves a supply-chain hazard, because they can
+# make reviewed code read differently from what the interpreter executes.
+_BIDI_CONTROL_CHARS = tuple(
+    chr(code)
+    for code in (
+        0x202A,  # LEFT-TO-RIGHT EMBEDDING
+        0x202B,  # RIGHT-TO-LEFT EMBEDDING
+        0x202C,  # POP DIRECTIONAL FORMATTING
+        0x202D,  # LEFT-TO-RIGHT OVERRIDE
+        0x202E,  # RIGHT-TO-LEFT OVERRIDE
+        0x2066,  # LEFT-TO-RIGHT ISOLATE
+        0x2067,  # RIGHT-TO-LEFT ISOLATE
+        0x2068,  # FIRST STRONG ISOLATE
+        0x2069,  # POP DIRECTIONAL ISOLATE
+    )
+)
 
 
 @dataclass
@@ -149,7 +169,7 @@ def _make_address(name: str, addr: str) -> Address:
     )
 
 
-def parse_address_list(raw_values: list[object]) -> list[Address]:
+def parse_address_list(raw_values: Sequence[object]) -> list[Address]:
     """Decode each header value before address parsing: RFC 2047 words and raw 8-bit headers."""
     decoded = [decode_header_value(v) for v in raw_values if v is not None]
     out: list[Address] = []
@@ -253,12 +273,11 @@ class _Walker:
                 self.html_parts.append(text[: self.limits.max_html_size])
             return
         try:
-            data = part.get_payload(decode=True)
+            payload_raw = part.get_payload(decode=True)
         except (ValueError, TypeError, AssertionError):
             self.r.errors.append("ATTACHMENT_DECODE_ERROR")
-            data = b""
-        if not isinstance(data, bytes):
-            data = b""
+            payload_raw = None
+        data = payload_raw if isinstance(payload_raw, bytes) else b""
         self._add_attachment(filename or f"part-{self.r.part_count}", ctype, data, depth)
 
     def _add_attachment(self, filename: str, declared: str, data: bytes, depth: int) -> None:
@@ -278,7 +297,9 @@ class _Walker:
                 self.r.limits_hit.append("MAX_ATTACHMENT_SIZE")
         if ext and extension_mismatch(ext, detected):
             flags.append("EXTENSION_MISMATCH")
-        if "‮" in filename or "‭" in filename:
+        # Bidirectional overrides are written as escapes, never as literal characters:
+        # literal bidi control characters in source are themselves a supply-chain risk.
+        if any(ch in filename for ch in _BIDI_CONTROL_CHARS):
             flags.append("RTLO_FILENAME")
         meta = AttachmentMeta(
             filename=filename[:255],

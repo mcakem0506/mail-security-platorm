@@ -101,9 +101,7 @@ class ProtectedIdentity(Base, IdMixin, TimestampMixin):
     __tablename__ = "protected_identities"
 
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
-    mailbox_identity_id: Mapped[str | None] = mapped_column(
-        ForeignKey("mailbox_identities.id"), default=None
-    )
+    mailbox_identity_id: Mapped[str | None] = mapped_column(ForeignKey("mailbox_identities.id"), default=None)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     categories: Mapped[list[Any]] = mapped_column(default=list)
@@ -159,9 +157,7 @@ class MailMessage(Base, IdMixin, TimestampMixin):
     recipients: Mapped[list[MailRecipient]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
-    headers: Mapped[list[MailHeader]] = relationship(
-        back_populates="message", cascade="all, delete-orphan"
-    )
+    headers: Mapped[list[MailHeader]] = relationship(back_populates="message", cascade="all, delete-orphan")
     attachments: Mapped[list[Attachment]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
@@ -193,9 +189,7 @@ class MailRecipient(Base, IdMixin):
     __tablename__ = "mail_recipients"
     __table_args__ = (Index("ix_mail_recipients_address", "address"),)
 
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     address: Mapped[str] = mapped_column(String(320), default="")
     display_name: Mapped[str] = mapped_column(String(512), default="")
     kind: Mapped[str] = mapped_column(String(8), default="to")  # to|cc|bcc
@@ -207,9 +201,7 @@ class MailRecipient(Base, IdMixin):
 class MailHeader(Base, IdMixin):
     __tablename__ = "mail_headers"
 
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), default="")
     value: Mapped[str] = mapped_column(Text, default="")
     position: Mapped[int] = mapped_column(Integer, default=0)
@@ -220,9 +212,7 @@ class MailHeader(Base, IdMixin):
 class Attachment(Base, IdMixin, TimestampMixin):
     __tablename__ = "attachments"
 
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(512), default="")
     normalized_filename: Mapped[str] = mapped_column(String(512), default="")
     declared_mime: Mapped[str] = mapped_column(String(255), default="")
@@ -250,9 +240,7 @@ class Attachment(Base, IdMixin, TimestampMixin):
 # ---------------------------------------------------------------------------------------------
 class Indicator(Base, IdMixin, TimestampMixin):
     __tablename__ = "indicators"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "ioc_type", "value", name="uq_indicator_value"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "ioc_type", "value", name="uq_indicator_value"),)
 
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     ioc_type: Mapped[IOCType] = mapped_column(_enum(IOCType, "ioc_type_enum"), index=True)
@@ -319,7 +307,9 @@ class AnalysisJob(Base, IdMixin, TimestampMixin):
     requested_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), default=None, index=True)
     requester_mailbox: Mapped[str] = mapped_column(String(320), default="", index=True)
     source: Mapped[IntakeSource] = mapped_column(_enum(IntakeSource, "intake_source_enum"))
-    state: Mapped[JobState] = mapped_column(_enum(JobState, "job_state_enum"), default=JobState.QUEUED, index=True)
+    state: Mapped[JobState] = mapped_column(
+        _enum(JobState, "job_state_enum"), default=JobState.QUEUED, index=True
+    )
     ti_state: Mapped[TIState] = mapped_column(_enum(TIState, "ti_state_enum"), default=TIState.NOT_REQUIRED)
     status: Mapped[AnalysisStatus] = mapped_column(
         _enum(AnalysisStatus, "analysis_status_enum"), default=AnalysisStatus.QUEUED, index=True
@@ -372,9 +362,7 @@ class DetectionSignal(Base, IdMixin):
     __tablename__ = "detection_signals"
     __table_args__ = (Index("ix_signals_rule", "rule_id", "rule_version"),)
 
-    result_id: Mapped[str] = mapped_column(
-        ForeignKey("analysis_results.id", ondelete="CASCADE"), index=True
-    )
+    result_id: Mapped[str] = mapped_column(ForeignKey("analysis_results.id", ondelete="CASCADE"), index=True)
     signal_id: Mapped[str] = mapped_column(String(64), index=True)
     rule_id: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
     rule_version: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -400,9 +388,7 @@ class RiskVerdictHistory(Base, IdMixin):
 
     __tablename__ = "risk_verdicts"
 
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     classification: Mapped[RiskLevel] = mapped_column(_enum(RiskLevel, "risk_level_enum"))
     score: Mapped[int] = mapped_column(Integer, default=0)
     reason: Mapped[str] = mapped_column(String(255), default="")
@@ -415,9 +401,7 @@ class RiskVerdictHistory(Base, IdMixin):
 # ---------------------------------------------------------------------------------------------
 class Campaign(Base, IdMixin, TimestampMixin):
     __tablename__ = "campaigns"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "fingerprint", name="uq_campaign_fingerprint"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "fingerprint", name="uq_campaign_fingerprint"),)
 
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -443,9 +427,7 @@ class CampaignMessage(Base, IdMixin):
     __table_args__ = (UniqueConstraint("campaign_id", "message_id", name="uq_campaign_message"),)
 
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True)
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     similarity: Mapped[float] = mapped_column(Float, default=1.0)
     added_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
@@ -490,9 +472,7 @@ class IncidentMessage(Base, IdMixin):
     __table_args__ = (UniqueConstraint("incident_id", "message_id", name="uq_incident_message"),)
 
     incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), index=True)
-    message_id: Mapped[str] = mapped_column(
-        ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True
-    )
+    message_id: Mapped[str] = mapped_column(ForeignKey("mail_messages.id", ondelete="CASCADE"), index=True)
     added_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
@@ -590,9 +570,7 @@ class RemediationAction(Base, IdMixin, TimestampMixin):
     result: Mapped[dict[str, Any]] = mapped_column(default=dict)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), default=None)
 
-    approvals: Mapped[list[Approval]] = relationship(
-        back_populates="action", cascade="all, delete-orphan"
-    )
+    approvals: Mapped[list[Approval]] = relationship(back_populates="action", cascade="all, delete-orphan")
 
 
 class Approval(Base, IdMixin):

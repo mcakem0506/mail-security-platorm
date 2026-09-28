@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from msp_contracts import IOCType, Indicator
+from msp_contracts import Indicator, IOCType
 from msp_mail_parser import ParsedMessage, category_for_extension, split_domain, to_ascii
 from msp_mail_parser.filetype import MACRO_EXT, SHORTCUT_EXT
 
@@ -28,16 +28,71 @@ from .similarity import (
 )
 
 _URL_SHORTENERS = frozenset(
-    """
-bit.ly tinyurl.com goo.gl t.co ow.ly is.gd buff.ly adf.ly bitly.com cutt.ly rebrand.ly shorturl.at
-tiny.cc rb.gy s.id clck.ru vk.cc u.to qps.ru gg.gg lnkd.in t.ly shorte.st soo.gd v.gd x.co
-""".split()
+    [
+        "bit.ly",
+        "tinyurl.com",
+        "goo.gl",
+        "t.co",
+        "ow.ly",
+        "is.gd",
+        "buff.ly",
+        "adf.ly",
+        "bitly.com",
+        "cutt.ly",
+        "rebrand.ly",
+        "shorturl.at",
+        "tiny.cc",
+        "rb.gy",
+        "s.id",
+        "clck.ru",
+        "vk.cc",
+        "u.to",
+        "qps.ru",
+        "gg.gg",
+        "lnkd.in",
+        "t.ly",
+        "shorte.st",
+        "soo.gd",
+        "v.gd",
+        "x.co",
+    ]
 )
 _SUSPICIOUS_TLDS = frozenset(
-    """
-zip mov top xyz tk ml ga cf gq buzz click link work live icu rest cam surf monster bar
-quest cyou sbs shop online store site space website fun pw cc ws
-""".split()
+    [
+        "zip",
+        "mov",
+        "top",
+        "xyz",
+        "tk",
+        "ml",
+        "ga",
+        "cf",
+        "gq",
+        "buzz",
+        "click",
+        "link",
+        "work",
+        "live",
+        "icu",
+        "rest",
+        "cam",
+        "surf",
+        "monster",
+        "bar",
+        "quest",
+        "cyou",
+        "sbs",
+        "shop",
+        "online",
+        "store",
+        "site",
+        "space",
+        "website",
+        "fun",
+        "pw",
+        "cc",
+        "ws",
+    ]
 )
 _CREDENTIAL_PATH_RE = re.compile(
     r"(?i)(?:^|/)(?:login|signin|sign-in|log-in|auth|authenticate|sso|oauth|verify|verification|"
@@ -171,9 +226,13 @@ def _sender_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> None
         rp_domain = msg.return_path.rsplit("@", 1)[1] if "@" in msg.return_path else ""
         if to_ascii(rp_domain) != to_ascii(frm.domain) and not ctx.is_trusted_infrastructure(rp_domain):
             fs.flag("return_path_mismatch", from_address=frm.address, return_path=msg.return_path)
-    if msg.sender and msg.sender.address and msg.sender.address != frm.address:
-        if not ctx.is_trusted_infrastructure(msg.sender.domain):
-            fs.flag("sender_header_mismatch", from_address=frm.address, sender=msg.sender.address)
+    if (
+        msg.sender
+        and msg.sender.address
+        and msg.sender.address != frm.address
+        and not ctx.is_trusted_infrastructure(msg.sender.domain)
+    ):
+        fs.flag("sender_header_mismatch", from_address=frm.address, sender=msg.sender.address)
 
     # header-level anomalies
     if len(msg.header_all("From")) > 1 or "MULTIPLE_FROM" in msg.errors:
@@ -308,9 +367,7 @@ def _url_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> None:
         dom = split_domain(u.host_ascii)
         fs.add_indicator(IOCType.URL, u.normalized, f"url:{u.source}")
         if u.is_ip_literal:
-            fs.add_indicator(
-                IOCType.IPV6 if ":" in u.host_ascii else IOCType.IPV4, u.host_ascii, "url_host"
-            )
+            fs.add_indicator(IOCType.IPV6 if ":" in u.host_ascii else IOCType.IPV4, u.host_ascii, "url_host")
             finding.flags.append("IP_LITERAL")
             fs.flag("url_ip_literal", url=u.redacted, host=u.host_ascii)
         else:
@@ -336,9 +393,7 @@ def _url_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> None:
         if dom.suffix and dom.suffix.split(".")[-1] in _SUSPICIOUS_TLDS:
             finding.flags.append("SUSPICIOUS_TLD")
             fs.flag("url_suspicious_tld", url=u.redacted, tld=dom.suffix)
-        if _CREDENTIAL_PATH_RE.search(u.path) or any(
-            _CREDENTIAL_PATH_RE.search(k) for k in u.query_keys
-        ):
+        if _CREDENTIAL_PATH_RE.search(u.path) or any(_CREDENTIAL_PATH_RE.search(k) for k in u.query_keys):
             finding.flags.append("CREDENTIAL_PATH")
             fs.flag("url_credential_path", url=u.redacted)
         if u.source in {"form", "attachment:form"}:
@@ -468,9 +523,7 @@ def _attachment_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> 
             fs.flag("attachment_html_credential_form", **ev)
         if "HTML_SMUGGLING_PATTERN" in m.flags:
             fs.flag("attachment_html_smuggling", **ev)
-        if m.depth > 0 and any(
-            f in flags for f in ("EXECUTABLE", "SCRIPT", "SHORTCUT", "DOUBLE_EXTENSION")
-        ):
+        if m.depth > 0 and any(f in flags for f in ("EXECUTABLE", "SCRIPT", "SHORTCUT", "DOUBLE_EXTENSION")):
             fs.flag("archive_contains_dangerous_file", **ev, depth=m.depth)
         if flags:
             fs.attachment_flags[m.sha256] = sorted(set(flags))

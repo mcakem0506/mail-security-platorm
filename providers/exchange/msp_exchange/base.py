@@ -99,5 +99,7 @@ class CapabilityUnavailable(RuntimeError):
     """Raised when a capability is not available in the connected Exchange configuration."""
 
     def __init__(self, capability: ExchangeCapability, detail: str = "") -> None:
-        super().__init__(f"capability '{capability.value}' unavailable: {detail}" if detail else capability.value)
+        super().__init__(
+            f"capability '{capability.value}' unavailable: {detail}" if detail else capability.value
+        )
         self.capability = capability

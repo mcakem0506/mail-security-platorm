@@ -20,7 +20,7 @@ from ..security.auth import (
     next_lockout,
     verify_password,
 )
-from ..security.rbac import ROLE_LABELS, PRIVILEGED_ROLES_LABEL, permissions_for
+from ..security.rbac import PRIVILEGED_ROLES_LABEL, ROLE_LABELS, permissions_for
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -136,7 +136,9 @@ def login(
         user_agent=request.headers.get("user-agent", "")[:255],
     )
     ttl = int((sess.expires_at - sess.created_at).total_seconds())
-    _set_session_cookies(response, settings, manager.issue_cookie_value(sess.session_id), sess.csrf_token, ttl)
+    _set_session_cookies(
+        response, settings, manager.issue_cookie_value(sess.session_id), sess.csrf_token, ttl
+    )
 
     record(
         session,

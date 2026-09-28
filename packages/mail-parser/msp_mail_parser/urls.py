@@ -53,13 +53,15 @@ def normalize_url(raw: str, source: str = "text", visible_text: str | None = Non
     raw = "".join(ch for ch in raw if ch not in "\r\n\t")
     if raw.lower().startswith("www."):
         raw = "http://" + raw
-    base = {"raw": original[:4096], "source": source, "visible_text": visible_text}
+    raw_value = original[:4096]
     try:
         parts = urlsplit(raw)
         scheme = (parts.scheme or "").lower()
         if scheme in _SPECIAL_SCHEMES:
             return ExtractedUrl(
-                **base,
+                raw=raw_value,
+                source=source,
+                visible_text=visible_text,
                 normalized=f"{scheme}:[content]",
                 redacted=f"{scheme}:[content]",
                 scheme=scheme,
@@ -91,7 +93,9 @@ def normalize_url(raw: str, source: str = "text", visible_text: str | None = Non
         if parts.query:
             redacted += "?" + "&".join(f"{k}=…" for k in query_keys) if query_keys else "?…"
         return ExtractedUrl(
-            **base,
+            raw=raw_value,
+            source=source,
+            visible_text=visible_text,
             normalized=normalized[:4096],
             redacted=redacted[:1024],
             scheme=scheme,
@@ -109,7 +113,9 @@ def normalize_url(raw: str, source: str = "text", visible_text: str | None = Non
         )
     except (ValueError, UnicodeError) as exc:
         return ExtractedUrl(
-            **base,
+            raw=raw_value,
+            source=source,
+            visible_text=visible_text,
             normalized=raw[:4096],
             redacted="[unparseable-url]",
             scheme="",
@@ -198,7 +204,11 @@ def extract_urls_from_html(html: str, limit: int = 500) -> tuple[list[ExtractedU
         low = url.lower()
         if low.startswith(("mailto:", "tel:", "cid:", "#")) or not low:
             continue
-        if not re.match(r"^[a-z][a-z0-9+.\-]*:", low) and not low.startswith("//") and not low.startswith("www."):
+        if (
+            not re.match(r"^[a-z][a-z0-9+.\-]*:", low)
+            and not low.startswith("//")
+            and not low.startswith("www.")
+        ):
             continue  # relative link without base, nothing to analyse
         if low.startswith("//"):
             url = "https:" + url

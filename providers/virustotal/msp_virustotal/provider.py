@@ -136,8 +136,6 @@ def normalize_response(payload: dict, ioc_type: IOCType, indicator: str) -> TIRe
     for source_categories in (attributes.get("categories") or {}).values():
         if isinstance(source_categories, str):
             categories.append(source_categories[:64])
-    for name in (attributes.get("popular_threat_classification") or {}).get("suggested_threat_label", "") or "":
-        break
     label = (attributes.get("popular_threat_classification") or {}).get("suggested_threat_label")
     if isinstance(label, str) and label:
         categories.append(label[:64])
@@ -249,9 +247,7 @@ class VirusTotalProvider:
             per_day_limit=self.config.per_day_limit,
             used_minute=minute_used,
             used_day=day_used,
-            backoff_until=(
-                utcnow() if backoff > time.monotonic() else None
-            ),
+            backoff_until=(utcnow() if backoff > time.monotonic() else None),
         )
 
     def lookup_file_hash(self, sha256: str) -> TIResult:
@@ -286,9 +282,10 @@ class VirusTotalProvider:
         )
 
     def _lookup(self, path: str, ioc_type: IOCType, indicator: str) -> TIResult:
-        if self.config.mode is VTMode.DISABLED or not self.config.api_key:
-            if self.config.mode is not VTMode.MOCK:
-                return self._disabled_result(ioc_type, indicator)
+        if (self.config.mode is VTMode.DISABLED or not self.config.api_key) and (
+            self.config.mode is not VTMode.MOCK
+        ):
+            return self._disabled_result(ioc_type, indicator)
         if self.config.mode is VTMode.MOCK:
             return mock_result(ioc_type, indicator)
 
@@ -406,7 +403,8 @@ class MockVirusTotalProvider:
         return QuotaInfo(provider_id=self.provider_id, per_minute_limit=None, per_day_limit=None)
 
     def _maybe_fail(self, ioc_type: IOCType, indicator: str) -> TIResult | None:
-        if self.fail_rate > 0 and self._rng.random() < self.fail_rate:
+        # Deterministic pseudo-randomness for outage simulation only, never security.
+        if self.fail_rate > 0 and self._rng.random() < self.fail_rate:  # nosec
             return TIResult(
                 provider_id=self.provider_id,
                 ioc_type=ioc_type,

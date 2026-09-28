@@ -46,10 +46,9 @@ def settings():  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def engine(storage_dir: str):  # type: ignore[no-untyped-def]
+    from msp_api.db.models import Base
     from sqlalchemy import create_engine
     from sqlalchemy.pool import StaticPool
-
-    from msp_api.db.models import Base
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",

@@ -142,7 +142,8 @@ _INTENTS: tuple[IntentPattern, ...] = (
             r"(?i)(?:не\s+оплачен\w*|ожида\w+\s+оплат\w+)[^.\n]{0,40}(?:сч[её]т|инвойс|№\s*\d)",
             r"(?i)\b(?:attached|enclosed|please find)\b[^.\n]{0,40}\b(?:invoice|statement|remittance|"
             r"purchase order|proforma)\b",
-            r"(?i)\b(?:overdue|outstanding|unpaid|past due)\b[^.\n]{0,40}\b(?:invoice|balance|payment|account)\b",
+            r"(?i)\b(?:overdue|outstanding|unpaid|past due)\b[^.\n]{0,40}"
+            r"\b(?:invoice|balance|payment|account)\b",
         ),
     ),
     IntentPattern(
@@ -264,9 +265,12 @@ def bec_facts(
         out.append(("financial_context", True, {"terms": sorted({f.lower() for f in financial})[:6]}))
 
     # A reply pretext with no References/In-Reply-To is a thread-hijack tell.
-    if any(f == "intent_thread_hijack_pretext" for f, _, _ in out):
-        if not msg.header("In-Reply-To") and not msg.header("References"):
-            out.append(("reply_pretext_without_thread", True, {"subject": subject_only[:200]}))
+    if (
+        any(f == "intent_thread_hijack_pretext" for f, _, _ in out)
+        and not msg.header("In-Reply-To")
+        and not msg.header("References")
+    ):
+        out.append(("reply_pretext_without_thread", True, {"subject": subject_only[:200]}))
 
     no_links = not msg.urls
     no_attachments = not msg.attachments
@@ -292,8 +296,18 @@ def bec_facts(
         out.append(("payload_free_request", True, {"intents": sorted(intent_keys)}))
 
     dept = (ctx.recipient_department or "").lower()
-    if dept and financial_intents and any(k in dept for k in ("financ", "бухгал", "финанс", "account", "treasur")):
-        out.append(("financial_request_to_finance_department", True, {"department": ctx.recipient_department}))
-    if dept and credential_intents and any(k in dept for k in ("it", "helpdesk", "support", "секьюр", "безопас")):
+    if (
+        dept
+        and financial_intents
+        and any(k in dept for k in ("financ", "бухгал", "финанс", "account", "treasur"))
+    ):
+        out.append(
+            ("financial_request_to_finance_department", True, {"department": ctx.recipient_department})
+        )
+    if (
+        dept
+        and credential_intents
+        and any(k in dept for k in ("it", "helpdesk", "support", "секьюр", "безопас"))
+    ):
         out.append(("credential_request_to_it_department", True, {"department": ctx.recipient_department}))
     return out

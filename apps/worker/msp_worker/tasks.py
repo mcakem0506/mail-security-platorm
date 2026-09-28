@@ -11,18 +11,6 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-from msp_contracts import (
-    AnalysisStatus,
-    IntakeSource,
-    JobState,
-    RiskLevel,
-    TIState,
-    TIStatus,
-)
-from msp_detection import EnrichmentInput, ScanFinding
-from msp_mail_parser import parse_message
-from sqlalchemy import delete, func, select
-
 from msp_api.config import get_settings
 from msp_api.db.base import utcnow
 from msp_api.db.models import (
@@ -60,6 +48,17 @@ from msp_api.services.analysis import (
     run_local_analysis,
 )
 from msp_api.services.storage import build_storage
+from msp_contracts import (
+    AnalysisStatus,
+    IntakeSource,
+    JobState,
+    RiskLevel,
+    TIState,
+    TIStatus,
+)
+from msp_detection import EnrichmentInput, ScanFinding
+from msp_mail_parser import parse_message
+from sqlalchemy import delete, func, select
 
 from .app import celery_app
 
@@ -147,11 +146,13 @@ def enrich_analysis(self, job_id: str) -> dict[str, Any]:  # type: ignore[no-unt
             analysis_duration.labels("enriched").observe(job.duration_ms / 1000)
 
         if verdict.classification in _MALICIOUS_LEVELS:
+            analysed = session.get(MailMessage, job.message_id)
+            subject = (analysed.subject if analysed else "")[:120]
             _queue_notification(
                 session,
                 organization_id=job.organization_id,
                 event="high_risk" if verdict.classification is RiskLevel.HIGH_RISK else "malicious",
-                subject=f"[{verdict.classification.value}] {(session.get(MailMessage, job.message_id).subject or '')[:120]}",
+                subject=f"[{verdict.classification.value}] {subject}",
                 recipient=settings.security_team_email,
                 payload={"job_id": job.id, "message_id": job.message_id, "score": verdict.score},
             )
@@ -170,13 +171,17 @@ def _scan_attachments(session, job: AnalysisJob, settings) -> list[ScanFinding]:
     if scanner.health().status not in {"ok", "degraded"}:
         return findings
     storage = build_storage(settings)
-    attachments = session.execute(
-        select(Attachment).where(
-            Attachment.message_id == job.message_id,
-            Attachment.storage_key.is_not(None),
-            Attachment.purged_at.is_(None),
+    attachments = (
+        session.execute(
+            select(Attachment).where(
+                Attachment.message_id == job.message_id,
+                Attachment.storage_key.is_not(None),
+                Attachment.purged_at.is_(None),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for attachment in attachments:
         try:
             data = storage.get(attachment.storage_key)
@@ -229,13 +234,17 @@ def _incident_indicator_hits(session, job: AnalysisJob, detection) -> list[str]:
     values = [i.value for i in detection.indicators[:100]]
     if not values:
         return []
-    rows = session.execute(
-        select(Indicator.value).where(
-            Indicator.organization_id == job.organization_id,
-            Indicator.value.in_(values),
-            Indicator.confirmed_malicious.is_(True),
+    rows = (
+        session.execute(
+            select(Indicator.value).where(
+                Indicator.organization_id == job.organization_id,
+                Indicator.value.in_(values),
+                Indicator.confirmed_malicious.is_(True),
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)[:10]
 
 
@@ -291,7 +300,7 @@ def poll_security_mailbox() -> dict[str, Any]:
                     session, settings, job=job, raw=report.raw_mime, storage=build_storage(settings)
                 )
                 processed += 1
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.exception("worker.mailbox_analysis_failed", extra={"analysis_job_id": job.id})
                 job.state = JobState.FAILED
                 job.status = AnalysisStatus.ERROR
@@ -410,16 +419,20 @@ def run_retention() -> dict[str, Any]:
     with session_scope() as session:
         # raw EML
         cutoff = now - timedelta(days=settings.retention_raw_eml_days)
-        contents = session.execute(
-            select(MailContent)
-            .join(MailMessage, MailMessage.id == MailContent.message_id)
-            .where(
-                MailMessage.received_at < cutoff,
-                MailContent.raw_eml_key.is_not(None),
-                MailContent.raw_eml_purged_at.is_(None),
+        contents = (
+            session.execute(
+                select(MailContent)
+                .join(MailMessage, MailMessage.id == MailContent.message_id)
+                .where(
+                    MailMessage.received_at < cutoff,
+                    MailContent.raw_eml_key.is_not(None),
+                    MailContent.raw_eml_purged_at.is_(None),
+                )
+                .limit(1000)
             )
-            .limit(1000)
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for content in contents:
             try:
                 storage.delete(content.raw_eml_key or "")
@@ -428,22 +441,24 @@ def run_retention() -> dict[str, Any]:
             content.raw_eml_key = None
             content.raw_eml_purged_at = now
         summary["raw_eml"] = len(contents)
-        session.add(
-            RetentionRun(category="raw_eml", deleted_count=len(contents), cutoff=cutoff)
-        )
+        session.add(RetentionRun(category="raw_eml", deleted_count=len(contents), cutoff=cutoff))
 
         # attachments
         cutoff = now - timedelta(days=settings.retention_attachment_days)
-        attachments = session.execute(
-            select(Attachment)
-            .join(MailMessage, MailMessage.id == Attachment.message_id)
-            .where(
-                MailMessage.received_at < cutoff,
-                Attachment.storage_key.is_not(None),
-                Attachment.purged_at.is_(None),
+        attachments = (
+            session.execute(
+                select(Attachment)
+                .join(MailMessage, MailMessage.id == Attachment.message_id)
+                .where(
+                    MailMessage.received_at < cutoff,
+                    Attachment.storage_key.is_not(None),
+                    Attachment.purged_at.is_(None),
+                )
+                .limit(2000)
             )
-            .limit(2000)
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         kept_samples = 0
         sample_cutoff = now - timedelta(days=settings.retention_malicious_sample_days)
         for attachment in attachments:
@@ -471,12 +486,16 @@ def run_retention() -> dict[str, Any]:
 
         # normalised bodies (metadata itself is kept longer)
         cutoff = now - timedelta(days=settings.retention_metadata_days)
-        bodies = session.execute(
-            select(MailContent)
-            .join(MailMessage, MailMessage.id == MailContent.message_id)
-            .where(MailMessage.received_at < cutoff, MailContent.normalized_purged_at.is_(None))
-            .limit(2000)
-        ).scalars().all()
+        bodies = (
+            session.execute(
+                select(MailContent)
+                .join(MailMessage, MailMessage.id == MailContent.message_id)
+                .where(MailMessage.received_at < cutoff, MailContent.normalized_purged_at.is_(None))
+                .limit(2000)
+            )
+            .scalars()
+            .all()
+        )
         for content in bodies:
             content.normalized_text = None
             content.sanitized_html = None
@@ -486,13 +505,9 @@ def run_retention() -> dict[str, Any]:
 
         # audit
         cutoff = now - timedelta(days=settings.retention_audit_days)
-        deleted_audit = session.execute(
-            delete(AuditEvent).where(AuditEvent.created_at < cutoff)
-        ).rowcount
+        deleted_audit = session.execute(delete(AuditEvent).where(AuditEvent.created_at < cutoff)).rowcount
         summary["audit"] = int(deleted_audit or 0)
-        session.add(
-            RetentionRun(category="audit", deleted_count=summary["audit"], cutoff=cutoff)
-        )
+        session.add(RetentionRun(category="audit", deleted_count=summary["audit"], cutoff=cutoff))
 
         # provider lookups follow the analysis retention
         cutoff = now - timedelta(days=settings.retention_analysis_days)
@@ -522,11 +537,15 @@ def recheck_indicators() -> dict[str, Any]:
     rechecked = 0
     with session_scope() as session:
         stale_cutoff = utcnow() - timedelta(days=7)
-        indicators = session.execute(
-            select(Indicator)
-            .where(Indicator.worst_status == TIStatus.KNOWN_BAD, Indicator.last_seen >= stale_cutoff)
-            .limit(100)
-        ).scalars().all()
+        indicators = (
+            session.execute(
+                select(Indicator)
+                .where(Indicator.worst_status == TIStatus.KNOWN_BAD, Indicator.last_seen >= stale_cutoff)
+                .limit(100)
+            )
+            .scalars()
+            .all()
+        )
         for indicator in indicators:
             hub.cache.invalidate(hub.providers[0].provider_id, indicator.ioc_type, indicator.value)
             rechecked += 1
@@ -538,14 +557,18 @@ def expire_exceptions() -> dict[str, Any]:
     """Report exceptions that have just expired so their owner is aware (ТЗ 15.3)."""
     now = utcnow()
     with session_scope() as session:
-        expiring = session.execute(
-            select(DetectionException).where(
-                DetectionException.revoked_at.is_(None),
-                DetectionException.expires_at.is_not(None),
-                DetectionException.expires_at <= now,
-                DetectionException.expires_at > now - timedelta(hours=2),
+        expiring = (
+            session.execute(
+                select(DetectionException).where(
+                    DetectionException.revoked_at.is_(None),
+                    DetectionException.expires_at.is_not(None),
+                    DetectionException.expires_at <= now,
+                    DetectionException.expires_at > now - timedelta(hours=2),
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for exception in expiring:
             _queue_notification(
                 session,
@@ -656,9 +679,13 @@ def refresh_campaign(campaign_id: str) -> dict[str, Any]:
             return {"skipped": "campaign not found"}
         from msp_api.db.models import CampaignMessage
 
-        message_ids = session.execute(
-            select(CampaignMessage.message_id).where(CampaignMessage.campaign_id == campaign.id)
-        ).scalars().all()
+        message_ids = (
+            session.execute(
+                select(CampaignMessage.message_id).where(CampaignMessage.campaign_id == campaign.id)
+            )
+            .scalars()
+            .all()
+        )
         distribution: dict[str, int] = {}
         for message_id in message_ids:
             result = session.execute(

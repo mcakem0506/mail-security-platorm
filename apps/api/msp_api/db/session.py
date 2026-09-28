@@ -23,6 +23,7 @@ def get_engine(url: str | None = None) -> Engine:
         kwargs.update(pool_size=settings.db_pool_size, max_overflow=settings.db_max_overflow)
     engine = create_engine(dsn, echo=False, **kwargs)
     if dsn.startswith("sqlite"):
+
         @event.listens_for(engine, "connect")
         def _fk_on(dbapi_connection, _record):  # type: ignore[no-untyped-def]
             cursor = dbapi_connection.cursor()
