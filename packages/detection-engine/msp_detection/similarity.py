@@ -141,6 +141,9 @@ def damerau_levenshtein(a: str, b: str, max_distance: int = 4) -> int:
     return d[la][lb]
 
 
+_MIN_TYPOSQUAT_LENGTH = 6
+
+
 def _allowed_distance(length: int) -> int:
     if length <= 5:
         return 1
@@ -171,9 +174,13 @@ def compare_labels(candidate: str, target: str) -> LookalikeMatch | None:
     # target embedded with extra tokens: "microsoft-login", "secure-sberbank"
     if len(targ) >= 5 and (sk_t in sk_c) and len(sk_c) <= len(sk_t) + 12:
         return LookalikeMatch(target, "containment", len(sk_c) - len(sk_t), 0.7, f"contains '{targ}'")
+    # Short labels are excluded from edit-distance matching: one edit on a 4-5 character name
+    # ("mail" vs "gmail") is ordinary similarity, not evidence of typosquatting.
+    if len(sk_t) < _MIN_TYPOSQUAT_LENGTH:
+        return None
     limit = _allowed_distance(len(sk_t))
     dist = damerau_levenshtein(sk_c, sk_t, limit)
-    if 0 < dist <= limit and len(sk_t) >= 4:
+    if 0 < dist <= limit:
         confidence = 0.85 if dist == 1 else 0.7 if dist == 2 else 0.55
         return LookalikeMatch(target, "typosquat", dist, confidence, f"edit distance {dist} from '{targ}'")
     return None

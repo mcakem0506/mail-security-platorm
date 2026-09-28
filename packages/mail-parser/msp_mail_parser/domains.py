@@ -86,6 +86,23 @@ def split_domain(host: str) -> DomainParts:
             is_ip=False,
             is_idn="xn--" in host_a,
         )
+    # No public suffix: an internal or reserved TLD (corp.local, corp.lan, host.example).
+    # On-premises deployments use these routinely, so the last two labels are treated as the
+    # registrable domain — otherwise every subdomain would look like a separate organisation.
+    labels = host_a.split(".")
+    if len(labels) >= 2:
+        reg_a = ".".join(labels[-2:])
+        return DomainParts(
+            host=host_u,
+            host_ascii=host_a,
+            registrable=to_unicode(reg_a),
+            registrable_ascii=reg_a,
+            subdomain=".".join(labels[:-2]),
+            suffix=labels[-1],
+            label=to_unicode(labels[-2]),
+            is_ip=False,
+            is_idn="xn--" in host_a,
+        )
     return DomainParts(host_u, host_a, host_u, host_a, "", "", host_u.split(".")[0], False, "xn--" in host_a)
 
 

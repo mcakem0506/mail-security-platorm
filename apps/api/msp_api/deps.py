@@ -110,10 +110,11 @@ def get_scanner() -> MalwareScannerProvider:
 
 
 def reset_provider_cache() -> None:
-    get_ti_hub.cache_clear()
-    get_scanner.cache_clear()
-    get_session_manager.cache_clear()
-    _redis_client.cache_clear()
+    """Drop cached providers so configuration changes take effect (and tests stay isolated)."""
+    for factory in (get_ti_hub, get_scanner, get_session_manager, _redis_client):
+        clear = getattr(factory, "cache_clear", None)
+        if clear is not None:  # a test may have substituted a plain function
+            clear()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -148,6 +149,11 @@ class SlidingWindowLimiter:
 
 
 _limiter = SlidingWindowLimiter()
+
+
+def reset_rate_limiter() -> None:
+    """Clear in-process rate-limit state (used by tests and after a configuration reload)."""
+    _limiter._local.clear()
 
 
 def rate_limit(key: str, limit: int, window_seconds: int = 60) -> None:

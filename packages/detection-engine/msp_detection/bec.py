@@ -136,6 +136,10 @@ _INTENTS: tuple[IntentPattern, ...] = (
             r"(?i)(?:вложени\w+|прикрепл\w+|прилага\w+)[^.\n]{0,40}(?:сч[её]т\w*\s+(?:на\s+оплату|"
             r"фактур\w*)|инвойс\w*|акт\w*\s+сверк\w*)",
             r"(?i)(?:просроч\w+|неоплаченн\w+|задолженност\w+)[^.\n]{0,50}(?:сч[её]т|оплат|плат[её]ж)",
+            # "счёт №… до сих пор не оплачен" — the most common invoice-pressure phrasing
+            r"(?i)(?:сч[её]т\w*|инвойс\w*|плат[её]ж\w*)[^.\n]{0,40}(?:не\s+оплачен|"
+            r"до\s+сих\s+пор\s+не\s+оплач)",
+            r"(?i)(?:не\s+оплачен\w*|ожида\w+\s+оплат\w+)[^.\n]{0,40}(?:сч[её]т|инвойс|№\s*\d)",
             r"(?i)\b(?:attached|enclosed|please find)\b[^.\n]{0,40}\b(?:invoice|statement|remittance|"
             r"purchase order|proforma)\b",
             r"(?i)\b(?:overdue|outstanding|unpaid|past due)\b[^.\n]{0,40}\b(?:invoice|balance|payment|account)\b",
