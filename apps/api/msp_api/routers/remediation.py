@@ -45,17 +45,30 @@ _DESTRUCTIVE = {RemediationType.DELETE, RemediationType.QUARANTINE}
 
 
 def _exchange_provider(settings):  # type: ignore[no-untyped-def]
-    """Only the mock provider is wired in v1; EWS requires the environment inventory (ТЗ 51)."""
+    """Build the configured Exchange provider.
+
+    The EWS adapter is universal: the endpoint comes from configuration or Autodiscover, the
+    authentication method is negotiated, and the mailbox scope bounds everything it may touch.
+    """
     if settings.exchange_provider == "ews":
-        from msp_exchange import EwsConfig, OnPremEwsExchangeProvider
+        from msp_exchange.ews import EwsAccessMode, EwsAuthMethod, EwsConfig, OnPremEwsExchangeProvider
 
         return OnPremEwsExchangeProvider(
             EwsConfig(
                 endpoint=settings.ews_endpoint,
+                autodiscover=settings.ews_autodiscover,
+                primary_smtp_address=settings.ews_primary_smtp_address or settings.ews_username,
                 username=settings.ews_username,
                 password=settings.ews_password,
+                auth_method=EwsAuthMethod(settings.ews_auth_method),
+                auth_preference=tuple(EwsAuthMethod(method) for method in settings.ews_auth_preference_list),
+                access_mode=EwsAccessMode(settings.ews_access_mode),
+                verify_tls=settings.ews_verify_tls,
                 ca_file=settings.ews_ca_file,
+                timeout_seconds=settings.ews_timeout_seconds,
+                mailbox_scope=settings.ews_mailbox_scope_list,
                 remediation_account_enabled=settings.remediation_enabled,
+                quarantine_folder=settings.ews_quarantine_folder,
             )
         )
     return MockExchangeProvider(remediation_enabled=settings.remediation_enabled)

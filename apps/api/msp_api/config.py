@@ -135,11 +135,26 @@ class Settings(BaseSettings):
     security_mailbox_folder: str = "INBOX"
     security_mailbox_ssl: bool = True
     security_mailbox_ca_file: str | None = None
+    # EWS is configured either by an explicit endpoint or through Autodiscover, so the module
+    # fits any deployment without a hard-coded URL (ТЗ 7).
     ews_endpoint: str = ""
+    ews_autodiscover: bool = True
+    ews_primary_smtp_address: str = ""
     ews_username: str = ""
     ews_password: str = ""
     ews_password_file: str | None = None
     ews_ca_file: str | None = None
+    ews_verify_tls: bool = True
+    # auto | ntlm | kerberos | basic | sspi — "auto" tries the preference list below in order.
+    ews_auth_method: Literal["auto", "ntlm", "kerberos", "basic", "sspi"] = "auto"
+    ews_auth_preference: str = "ntlm,kerberos,basic"
+    # impersonation reaches any mailbox in scope; delegate only explicitly shared ones.
+    ews_access_mode: Literal["impersonation", "delegate"] = "delegate"
+    # Mailboxes this deployment may touch: addresses or "@domain". Empty means the service
+    # account's own mailbox only, so a scope is always granted deliberately.
+    ews_mailbox_scope: str = ""
+    ews_timeout_seconds: float = 30.0
+    ews_quarantine_folder: str = "MSP Quarantine"
     remediation_enabled: bool = False  # ТЗ 7.1 — remediation account off by default
     remediation_dry_run_only: bool = True
     remediation_second_approver_threshold: int = 10  # ТЗ 20.1
@@ -246,6 +261,18 @@ class Settings(BaseSettings):
             and not self.semantic_external_dpa_approved
         ):
             raise ValueError("external semantic analysis requires an explicit DPA approval flag")
+        if self.exchange_provider == "ews":
+            if not self.ews_username:
+                raise ValueError("MSP_EXCHANGE_PROVIDER=ews requires MSP_EWS_USERNAME")
+            if not self.ews_endpoint and not self.ews_autodiscover:
+                raise ValueError("EWS needs either MSP_EWS_ENDPOINT or MSP_EWS_AUTODISCOVER=true")
+            if self.environment == "production" and not self.ews_verify_tls:
+                raise ValueError("MSP_EWS_VERIFY_TLS must stay enabled in production")
+            if self.remediation_enabled and not self.ews_mailbox_scope_list:
+                raise ValueError(
+                    "remediation over EWS requires MSP_EWS_MAILBOX_SCOPE: an unscoped "
+                    "deployment could act on any mailbox in the organisation"
+                )
         if self.auth_backend == "ldap":
             if not self.ad_server:
                 raise ValueError("MSP_AUTH_BACKEND=ldap requires MSP_AD_SERVER")
@@ -266,6 +293,14 @@ class Settings(BaseSettings):
     @property
     def trusted_infrastructure_list(self) -> tuple[str, ...]:
         return tuple(d.strip().lower() for d in self.trusted_infrastructure_domains.split(",") if d.strip())
+
+    @property
+    def ews_mailbox_scope_list(self) -> tuple[str, ...]:
+        return tuple(m.strip().lower() for m in self.ews_mailbox_scope.split(",") if m.strip())
+
+    @property
+    def ews_auth_preference_list(self) -> tuple[str, ...]:
+        return tuple(a.strip().lower() for a in self.ews_auth_preference.split(",") if a.strip())
 
     @property
     def trusted_gateway_list(self) -> tuple[str, ...]:
