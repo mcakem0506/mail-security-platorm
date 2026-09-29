@@ -109,6 +109,12 @@ def build_context(
     org = session.get(Organization, organization_id)
     corporate = tuple(org.corporate_domains or ()) if org else settings.corporate_domain_list
     trusted = tuple(org.trusted_infrastructure_domains or ()) if org else settings.trusted_infrastructure_list
+    # Which upstream gateways the organisation actually runs. Per-organisation settings win over
+    # the deployment default, because only the organisation knows what sits in front of Exchange.
+    org_gateways = (org.settings or {}).get("trusted_gateways") if org else None
+    trusted_gateways = (
+        tuple(str(g).lower() for g in org_gateways) if org_gateways else settings.trusted_gateway_list
+    )
 
     identities = (
         session.execute(
@@ -212,6 +218,7 @@ def build_context(
         organization_name=org.name if org else settings.organization_name,
         corporate_domains=corporate,
         trusted_infrastructure_domains=trusted,
+        trusted_gateways=trusted_gateways,
         protected_identities=protected,
         directory_users=users,
         exceptions=active_exceptions,

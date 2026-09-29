@@ -96,6 +96,9 @@ class AnalysisContext:
     organization_name: str = ""
     corporate_domains: tuple[str, ...] = ()
     trusted_infrastructure_domains: tuple[str, ...] = ()
+    # Gateways the organisation runs itself (ksmg, eop, spamassassin, virus_scanner). Only their
+    # headers are trusted: any sender can claim their message was already scanned.
+    trusted_gateways: tuple[str, ...] = ()
     protected_identities: tuple[ProtectedIdentity, ...] = ()
     directory_users: tuple[DirectoryUser, ...] = ()
     exceptions: tuple[ActiveException, ...] = ()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
+from msp_ad import AuthOutcome
 from sqlalchemy import func, select
 
 from ..config import get_settings
@@ -21,6 +22,8 @@ from ..security.auth import (
     verify_password,
 )
 from ..security.rbac import PRIVILEGED_ROLES_LABEL, ROLE_LABELS, permissions_for
+from ..services.directory_auth import authenticate as directory_authenticate
+from ..services.directory_auth import is_directory_managed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -91,7 +94,36 @@ def login(
             detail="Учётная запись временно заблокирована из-за неудачных попыток входа",
         )
 
-    password_ok = verify_password(payload.password, user.password_hash if user else None)
+    directory_outcome: str | None = None
+    if settings.auth_backend == "ldap" and not (user is not None and user.auth_source == "local"):
+        # The directory is authoritative. A locally-created account (the bootstrap administrator,
+        # an emergency account) keeps working, so a directory outage cannot lock everyone out.
+        user, outcome, detail = directory_authenticate(session, settings, payload.email, payload.password)
+        directory_outcome = outcome.value
+        password_ok = outcome is AuthOutcome.SUCCESS
+        if outcome is AuthOutcome.DIRECTORY_UNAVAILABLE:
+            record(
+                session,
+                action=AuditAction.LOGIN_FAILED,
+                actor_email=payload.email,
+                outcome="directory_unavailable",
+                detail={"reason": detail[:200]},
+                ip_address=ip,
+                user_agent=request.headers.get("user-agent", ""),
+                request_id=getattr(request.state, "request_id", ""),
+            )
+            session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Служба каталогов недоступна. Повторите попытку позже.",
+            )
+    elif is_directory_managed(user):
+        # An AD-managed account must never fall back to a local password.
+        password_ok = False
+        directory_outcome = "local_login_refused_for_directory_account"
+    else:
+        password_ok = verify_password(payload.password, user.password_hash if user else None)
+
     if user is None or not password_ok or not user.is_active:
         if user is not None:
             user.failed_logins += 1
@@ -106,7 +138,10 @@ def login(
             actor_email=payload.email,
             organization_id=user.organization_id if user else None,
             outcome="failure",
-            detail={"reason": "invalid credentials" if user else "unknown user"},
+            detail={
+                "reason": directory_outcome or ("invalid credentials" if user else "unknown user"),
+                "backend": settings.auth_backend,
+            },
             ip_address=ip,
             user_agent=request.headers.get("user-agent", ""),
             request_id=getattr(request.state, "request_id", ""),
@@ -118,7 +153,9 @@ def login(
     if settings.require_mfa_for_privileged and user.role in PRIVILEGED_ROLES_LABEL and not user.mfa_enabled:
         logger.warning("auth.privileged_without_mfa", extra={"actor": user.email})
 
-    if needs_rehash(user.password_hash or ""):
+    # Only a locally-managed account keeps a password hash. A directory password must never be
+    # written into the platform, even as a hash: the directory stays the only place it lives.
+    if not is_directory_managed(user) and user.password_hash and needs_rehash(user.password_hash):
         user.password_hash = hash_password(payload.password)
 
     user.failed_logins = 0
@@ -210,6 +247,11 @@ def change_password(
     session: DbSession,
 ) -> Response:
     user = session.get(User, actor.user_id)
+    if is_directory_managed(user):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Пароль этой учётной записи управляется службой каталогов организации",
+        )
     if user is None or not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Текущий пароль неверен")
     if payload.new_password == payload.current_password:

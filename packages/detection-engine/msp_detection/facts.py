@@ -17,6 +17,7 @@ from msp_mail_parser.filetype import MACRO_EXT, SHORTCUT_EXT
 from .auth import AuthResults, parse_authentication_results, parse_received_spf, received_chain_facts
 from .bec import bec_facts
 from .context import AnalysisContext
+from .gateway import gateway_facts
 from .similarity import (
     find_lookalike,
     has_homoglyph,
@@ -562,6 +563,11 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
     _url_facts(msg, ctx, fs)
     _attachment_facts(msg, ctx, fs)
     for key, value, ev in bec_facts(msg, ctx, fs.facts):
+        fs.set(key, value, **ev)
+
+    # Verdicts from an upstream gateway (KSMG and others) are an additional source, never the
+    # final word: a clean gateway verdict does not lower the platform's own risk (ТЗ 2.1).
+    for key, value, ev in gateway_facts(msg.headers, ctx.trusted_gateways):
         fs.set(key, value, **ev)
 
     hist = ctx.sender_history

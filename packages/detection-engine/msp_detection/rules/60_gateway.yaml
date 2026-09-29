@@ -1,0 +1,87 @@
+# Verdicts from an existing Secure Email Gateway (ТЗ 2.1, 21).
+#
+# The platform works alongside a gateway such as KSMG rather than replacing it. The gateway has
+# a full antivirus engine, which this platform deliberately does not; its detection is therefore
+# a strong signal. The reverse does not hold: a clean gateway verdict is never a reason to lower
+# risk, because the attacks this platform targets — BEC, impersonation, payload-free social
+# engineering — are precisely the ones a gateway passes through.
+ruleset: gateway
+rules:
+  - id: GW-001
+    version: 1
+    name: Почтовый шлюз организации обнаружил вредоносное вложение
+    category: malicious_attachment
+    severity: critical
+    confidence: 0.9
+    weight: 80
+    hard: true
+    conditions:
+      - gateway_detected_malware
+    evidence: [gateway_detected_malware]
+    explanation: >-
+      Существующий почтовый шлюз организации классифицировал содержимое письма как вредоносное.
+      Это независимый от платформы источник с собственным антивирусным движком.
+    recommendation: Не открывайте вложения. Передайте письмо в службу информационной безопасности.
+
+  - id: GW-002
+    version: 1
+    name: Почтовый шлюз организации отметил письмо как спам
+    category: delivery_scam
+    severity: low
+    confidence: 0.5
+    conditions:
+      - gateway_detected_spam
+    evidence: [gateway_detected_spam]
+    explanation: >-
+      Почтовый шлюз организации отнёс письмо к нежелательной почте. Само по себе это не означает
+      атаку, но повышает внимание к остальным признакам.
+
+  - id: GW-003
+    version: 1
+    name: Почтовый шлюз организации отметил письмо как подозрительное
+    category: phishing_url
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - gateway_marked_suspicious
+    evidence: [gateway_marked_suspicious]
+    explanation: >-
+      Почтовый шлюз организации присвоил письму промежуточную оценку: явных признаков не найдено,
+      но письмо отличается от обычной переписки.
+
+  - id: GW-010
+    version: 1
+    name: Письмо содержит заголовки чужого почтового шлюза
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - untrusted_gateway_header
+    evidence: [untrusted_gateway_header]
+    explanation: >-
+      В письме присутствуют заголовки почтового шлюза, который не используется организацией.
+      Отправитель может добавить такие заголовки самостоятельно, чтобы письмо выглядело уже
+      проверенным. Платформа такие заголовки не учитывает.
+    recommendation: Оценивайте письмо по остальным признакам; «проверку» в заголовках не учитывайте.
+
+  - id: GW-011
+    version: 1
+    name: Письмо прошло почтовый шлюз организации без обнаружения
+    category: sender_spoofing
+    severity: info
+    confidence: 0.3
+    weight: 0
+    conditions:
+      - upstream_gateway_present
+    exclusions:
+      any:
+        - gateway_detected_malware
+        - gateway_detected_spam
+        - gateway_marked_suspicious
+    evidence: [upstream_gateway_present]
+    explanation: >-
+      Письмо было проверено почтовым шлюзом организации, и он не обнаружил угроз. Это не является
+      подтверждением безопасности: атаки без вложений и ссылок — подмена отправителя, BEC,
+      социальная инженерия — проходят шлюз штатно. Вес сигнала нулевой, он приведён только для
+      полноты картины.
+    internal: false

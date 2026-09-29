@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     organization_name: str = "Организация"
     corporate_domains: str = ""
     trusted_infrastructure_domains: str = ""
+    # Gateways the organisation operates itself: ksmg, eop, spamassassin, virus_scanner.
+    # Only their headers are trusted — any sender can forge a "already scanned" header (ТЗ 2.1).
+    trusted_gateways: str = ""
 
     # -- detection thresholds
     suspicious_threshold: int = 25
@@ -153,6 +156,21 @@ class Settings(BaseSettings):
     ad_ca_file: str | None = None
     ad_sync_interval_minutes: int = 360
     ad_include_optional_attributes: bool = False
+    ad_start_tls: bool = False
+    ad_verify_tls: bool = True
+    ad_timeout_seconds: float = 10.0
+    # Authentication against AD (ТЗ 24). The directory layout is not assumed: the base DN is
+    # discovered from RootDSE when empty, and the login filter is configurable.
+    ad_user_filter: str = (
+        "(&(objectCategory=person)(objectClass=user)"
+        "(|(mail={login})(userPrincipalName={login})(sAMAccountName={login})))"
+    )
+    # Lets the platform bind directly as the user without a service account, e.g. "{login}".
+    ad_user_principal_template: str = ""
+    # "CN=SOC Admins,OU=Groups,DC=corp,DC=example=security_admin;SOC Analysts=security_analyst"
+    ad_group_role_map: str = ""
+    ad_default_role: str = "employee"
+    ad_require_group_match: bool = False
 
     # -- semantic analysis (ТЗ 16.4)
     semantic_enabled: bool = False
@@ -228,6 +246,16 @@ class Settings(BaseSettings):
             and not self.semantic_external_dpa_approved
         ):
             raise ValueError("external semantic analysis requires an explicit DPA approval flag")
+        if self.auth_backend == "ldap":
+            if not self.ad_server:
+                raise ValueError("MSP_AUTH_BACKEND=ldap requires MSP_AD_SERVER")
+            if not self.ad_use_ssl and not self.ad_start_tls:
+                raise ValueError(
+                    "LDAP authentication without TLS would send passwords in clear text: "
+                    "enable MSP_AD_USE_SSL or MSP_AD_START_TLS"
+                )
+            if self.environment == "production" and not self.ad_verify_tls:
+                raise ValueError("MSP_AD_VERIFY_TLS must stay enabled in production")
         return self
 
     # -- helpers
@@ -239,6 +267,10 @@ class Settings(BaseSettings):
     def trusted_infrastructure_list(self) -> tuple[str, ...]:
         return tuple(d.strip().lower() for d in self.trusted_infrastructure_domains.split(",") if d.strip())
 
+    @property
+    def trusted_gateway_list(self) -> tuple[str, ...]:
+        return tuple(g.strip().lower() for g in self.trusted_gateways.split(",") if g.strip())
+
     def public_config(self) -> dict[str, Any]:
         """Configuration safe to expose to the frontend: never includes secrets (ТЗ 28)."""
         return {
@@ -247,6 +279,7 @@ class Settings(BaseSettings):
             "vt_configured": self.vt_mode not in {"disabled"},
             "vt_mode": self.vt_mode if self.vt_mode != "disabled" else None,
             "ad_enabled": self.ad_enabled,
+            "auth_backend": self.auth_backend,
             "remediation_enabled": self.remediation_enabled and not self.remediation_dry_run_only,
             "url_fetch_enabled": self.url_fetch_enabled,
             "semantic_enabled": self.semantic_enabled,
