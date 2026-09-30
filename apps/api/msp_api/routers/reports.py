@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
@@ -31,6 +31,56 @@ def list_reports(actor: Viewer) -> dict[str, list[str]]:
     if actor.can(Permission.VIEW_AUDIT):
         available.extend(sorted(_AUDIT_ONLY))
     return {"reports": available}
+
+
+@router.get("/pilot-metrics")
+def pilot_metrics(
+    request: Request,
+    actor: Viewer,
+    session: DbSession,
+    days: Annotated[int, Query(ge=1, le=400)] = 14,
+) -> dict[str, Any]:
+    """Detection quality metrics for the shadow pilot (ТЗ 1.0.1 §11).
+
+    Two of the numbers here need reading carefully, and the field names say so:
+
+    * ``precision_estimate`` is ``null`` for a rule no analyst has triaged. An unexamined rule
+      has no precision, rather than a perfect one.
+    * ``false_negative_discovered`` counts only the misses somebody found afterwards. The
+      platform cannot know what it never saw, so this is a lower bound and not recall.
+    """
+    from ..services.pilot_metrics import Period, collect, rule_quality
+
+    period = Period.last_days(days)
+    metrics = collect(session, actor.organization_id, period)
+    record(
+        session,
+        action=AuditAction.EXPORT,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="report",
+        object_id="pilot-metrics",
+        detail={"days": days},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {
+        **metrics,
+        "rules": rule_quality(session, actor.organization_id),
+        "notes": {
+            "precision_estimate": (
+                "null означает, что правило ещё не разбиралось аналитиком. "
+                "Непроверенное правило не имеет precision, а не имеет идеальную."
+            ),
+            "false_negative_discovered": (
+                "нижняя оценка: учитываются только пропуски, которые кто-то обнаружил. "
+                "Это не recall — платформа не знает, чего она не видела."
+            ),
+        },
+    }
 
 
 @router.get("/{name}")

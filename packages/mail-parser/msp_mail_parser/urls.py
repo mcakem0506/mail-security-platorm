@@ -126,7 +126,21 @@ def normalize_url(raw: str, source: str = "text", visible_text: str | None = Non
         )
 
 
+def count_urls_in_text(text: str) -> int:
+    """How many URLs the text contains, regardless of any extraction limit.
+
+    Needed so the caller can tell "this message has five links" from "this message has five
+    hundred and we looked at five" — the second has to produce a signal (ТЗ 1.0.1 §4.2).
+    """
+    return sum(1 for m in _TEXT_URL_RE.finditer(text or "") if len(_strip_trailing(m.group(0))) >= 8)
+
+
 def extract_urls_from_text(text: str, source: str = "text", limit: int = 500) -> list[ExtractedUrl]:
+    """Extract up to ``limit`` URLs.
+
+    Hitting the limit is *not* reported here, because a truncated list looks exactly like a
+    short one; the caller compares the result against :func:`count_urls_in_text` instead.
+    """
     out: list[ExtractedUrl] = []
     for m in _TEXT_URL_RE.finditer(text or ""):
         url = _strip_trailing(m.group(0))
@@ -145,6 +159,7 @@ class _LinkCollector(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.limit = limit
         self.items: list[tuple[str, str, str | None]] = []  # (url, source, visible_text)
+        self.truncated = False
         self._anchor_stack: list[tuple[str, list[str]]] = []
         self.password_inputs = 0
         self.forms = 0
@@ -152,6 +167,10 @@ class _LinkCollector(HTMLParser):
         self.scripts = 0
 
     def _add(self, url: str | None, source: str, visible: str | None = None) -> None:
+        if url and len(self.items) >= self.limit:
+            # Recorded rather than silently dropped: a truncated link list looks exactly like a
+            # short one, and "we stopped looking" must reach the verdict (ТЗ 1.0.1 §4.2).
+            self.truncated = True
         if url and len(self.items) < self.limit:
             self.items.append((url.strip(), source, visible))
 
@@ -217,6 +236,7 @@ def extract_urls_from_html(html: str, limit: int = 500) -> tuple[list[ExtractedU
         "forms": collector.forms,
         "password_inputs": collector.password_inputs,
         "scripts": collector.scripts,
+        "links_truncated": int(collector.truncated),
     }
     return urls, stats
 

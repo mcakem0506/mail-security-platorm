@@ -16,6 +16,7 @@ from msp_contracts import (
     ExceptionType,
     IncidentStatus,
     IntakeSource,
+    IntakeState,
     IOCType,
     JobState,
     RemediationState,
@@ -111,6 +112,13 @@ class ProtectedIdentity(Base, IdMixin, TimestampMixin):
     approved_external_systems: Mapped[list[Any]] = mapped_column(default=list)
     department: Mapped[str] = mapped_column(String(255), default="")
     title: Mapped[str] = mapped_column(String(255), default="")
+    # How much damage impersonating this identity could do: critical|high|medium|low. Kept
+    # separate from `categories` because a finance clerk and the CFO share a category but not
+    # a blast radius (ТЗ 1.0.1 §5).
+    risk_class: Mapped[str] = mapped_column(String(16), default="medium", index=True)
+    vip: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    protected: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # manual|directory
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str | None] = mapped_column(String(320), default=None)
 
@@ -322,6 +330,9 @@ class AnalysisJob(Base, IdMixin, TimestampMixin):
     duration_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     error: Mapped[str | None] = mapped_column(String(500), default=None)
     warnings: Mapped[list[Any]] = mapped_column(default=list)
+    # COMPLETE|LIMIT_EXCEEDED|UNSCANNABLE|PARTIAL. A job that could not examine the whole
+    # message must never be presented as one that found nothing (ТЗ 1.0.1 §4.2).
+    scan_completeness: Mapped[str] = mapped_column(String(16), default="COMPLETE", index=True)
 
     result: Mapped[AnalysisResult | None] = relationship(
         back_populates="job", cascade="all, delete-orphan", uselist=False
@@ -351,6 +362,7 @@ class AnalysisResult(Base, IdMixin, TimestampMixin):
     engine_version: Mapped[str] = mapped_column(String(32), default="")
     ruleset_fingerprint: Mapped[str] = mapped_column(Text, default="")
     risk_engine_version: Mapped[str] = mapped_column(String(32), default="")
+    scan_completeness: Mapped[str] = mapped_column(String(16), default="COMPLETE")
 
     job: Mapped[AnalysisJob] = relationship(back_populates="result")
     signals: Mapped[list[DetectionSignal]] = relationship(
@@ -682,4 +694,311 @@ class RetentionRun(Base, IdMixin):
     deleted_count: Mapped[int] = mapped_column(Integer, default=0)
     cutoff: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     detail: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Durable intake (ТЗ 1.0.1 §4.1)
+# ---------------------------------------------------------------------------------------------
+class IntakeRecord(Base, IdMixin, TimestampMixin):
+    """One message pulled from the security mailbox, tracked until it is safely handed over.
+
+    The record exists so that a worker crash cannot lose a report. It is written *before* the
+    message is acknowledged in the mailbox, and the mailbox flag is only changed once the
+    analysis job is committed — so the worst outcome of a crash is that the same message is
+    fetched again, which the deduplication keys below make harmless.
+    """
+
+    __tablename__ = "intake_records"
+    __table_args__ = (
+        # Three independent identities, because none alone is sufficient: a UID is unique only
+        # within one mailbox generation, a Message-ID can be absent or forged, and the content
+        # hash cannot distinguish two genuine reports of the same message by different people.
+        UniqueConstraint("organization_id", "source_id", "mailbox_uid", name="uq_intake_uid"),
+        Index("ix_intake_content", "organization_id", "content_sha256"),
+        Index("ix_intake_state", "organization_id", "state"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    source: Mapped[IntakeSource] = mapped_column(_enum(IntakeSource, "intake_source_enum"))
+    #: Which mailbox/folder this came from, so the same UID in two mailboxes does not collide.
+    source_id: Mapped[str] = mapped_column(String(320), default="")
+    mailbox_uid: Mapped[str] = mapped_column(String(128), default="", index=True)
+    internet_message_id: Mapped[str] = mapped_column(String(998), default="", index=True)
+    content_sha256: Mapped[str] = mapped_column(String(64), default="", index=True)
+    reported_by: Mapped[str] = mapped_column(String(320), default="")
+    state: Mapped[IntakeState] = mapped_column(
+        _enum(IntakeState, "intake_state_enum"), default=IntakeState.FETCHED, index=True
+    )
+    raw_storage_key: Mapped[str | None] = mapped_column(String(512), default=None)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    #: True when the message exceeded a limit and was deliberately not analysed (§4.2).
+    oversized: Mapped[bool] = mapped_column(Boolean, default=False)
+    analysis_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("analysis_jobs.id", ondelete="SET NULL"), default=None, index=True
+    )
+    #: The record this one duplicates, when the same report arrived twice.
+    duplicate_of_id: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(500), default=None)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    warnings: Mapped[list[Any]] = mapped_column(default=list)
+
+
+# ---------------------------------------------------------------------------------------------
+# Mail gateway topology and evidence (ТЗ 1.0.2 §16, §22, §23, §28)
+# ---------------------------------------------------------------------------------------------
+class MailGateway(Base, IdMixin, TimestampMixin):
+    """A configured upstream gateway. Having none is a valid deployment (ТЗ 1.0.2 §31)."""
+
+    __tablename__ = "mail_gateways"
+    __table_args__ = (UniqueConstraint("organization_id", "provider_id", name="uq_mail_gateway"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    provider_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    provider_type: Mapped[str] = mapped_column(String(32), default="generic_header")
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    vendor: Mapped[str] = mapped_column(String(64), default="")
+    direction: Mapped[str] = mapped_column(String(16), default="inbound")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Header mappings, syslog settings, API settings — never a credential value (ТЗ 28).
+    settings: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    last_event_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    last_error: Mapped[str | None] = mapped_column(String(500), default=None)
+    last_error_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    updated_by: Mapped[str | None] = mapped_column(String(320), default=None)
+
+    nodes: Mapped[list[MailGatewayNode]] = relationship(
+        back_populates="gateway", cascade="all, delete-orphan"
+    )
+    hops: Mapped[list[TrustedHop]] = relationship(back_populates="gateway", cascade="all, delete-orphan")
+
+
+class MailGatewayNode(Base, IdMixin, TimestampMixin):
+    """A physical node of a gateway cluster (KSMG-01, KSMG-02, and so on)."""
+
+    __tablename__ = "mail_gateway_nodes"
+
+    gateway_id: Mapped[str] = mapped_column(ForeignKey("mail_gateways.id", ondelete="CASCADE"), index=True)
+    hostname: Mapped[str] = mapped_column(String(255), default="", index=True)
+    ip_networks: Mapped[list[Any]] = mapped_column(default=list)
+    role: Mapped[str] = mapped_column(String(32), default="gateway")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    gateway: Mapped[MailGateway] = relationship(back_populates="nodes")
+
+
+class TrustedHop(Base, IdMixin, TimestampMixin):
+    """A hop whose headers may be believed, once the chain proves the message passed it.
+
+    This is the ``TrustedMailHop`` entity of ТЗ 1.0.1 §4.3. It exists separately from
+    :class:`MailGatewayNode` because not every trusted hop belongs to a gateway: the Exchange
+    edge and mailbox servers are trusted hops with no gateway behind them.
+    """
+
+    __tablename__ = "trusted_mail_hops"
+    __table_args__ = (Index("ix_trusted_hops_org", "organization_id", "enabled"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    gateway_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_gateways.id", ondelete="CASCADE"), default=None, index=True
+    )
+    hop_type: Mapped[str] = mapped_column(String(32), default="gateway")
+    hostname: Mapped[str] = mapped_column(String(255), default="", index=True)
+    ip_networks: Mapped[list[Any]] = mapped_column(default=list)
+    expected_headers: Mapped[list[Any]] = mapped_column(default=list)
+    authserv_ids: Mapped[list[Any]] = mapped_column(default=list)
+    position_in_chain: Mapped[int | None] = mapped_column(Integer, default=None)
+    direction: Mapped[str] = mapped_column(String(16), default="inbound")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str | None] = mapped_column(String(320), default=None)
+
+    gateway: Mapped[MailGateway | None] = relationship(back_populates="hops")
+
+
+class MailRoute(Base, IdMixin, TimestampMixin):
+    """An expected delivery path, as an ordered list of hop ids (ТЗ 1.0.2 §22)."""
+
+    __tablename__ = "mail_routes"
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    direction: Mapped[str] = mapped_column(String(16), default="inbound")
+    #: Ordered from the Internet inwards, for example ksmg-01, exch-edge-01, exch-mbx-01.
+    hop_sequence: Mapped[list[Any]] = mapped_column(default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class GatewayCredential(Base, IdMixin, TimestampMixin):
+    """A reference to a gateway API credential. The value never reaches this table (ТЗ 28)."""
+
+    __tablename__ = "gateway_credentials"
+    __table_args__ = (UniqueConstraint("gateway_id", "purpose", name="uq_gateway_credential"),)
+
+    gateway_id: Mapped[str] = mapped_column(ForeignKey("mail_gateways.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(32), default="api")
+    auth_scheme: Mapped[str] = mapped_column(String(32), default="bearer")
+    username: Mapped[str] = mapped_column(String(255), default="")
+    #: Where the secret lives: a file path, a Vault path or a Docker secret name.
+    secret_ref: Mapped[str] = mapped_column(String(255), default="")
+    rotated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    rotated_by: Mapped[str | None] = mapped_column(String(320), default=None)
+
+
+class GatewayCapabilityState(Base, IdMixin, TimestampMixin):
+    """What a gateway was last *observed* to support (ТЗ 1.0.2 §22).
+
+    Capabilities are probed, never inferred from the product name, so this table records the
+    result of probing together with when it was established.
+    """
+
+    __tablename__ = "gateway_capability_states"
+    __table_args__ = (UniqueConstraint("gateway_id", "capability", name="uq_gateway_capability"),)
+
+    gateway_id: Mapped[str] = mapped_column(ForeignKey("mail_gateways.id", ondelete="CASCADE"), index=True)
+    capability: Mapped[str] = mapped_column(String(32), index=True)
+    available: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    checked_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class GatewayEvidenceRecord(Base, IdMixin):
+    """One normalised gateway observation about one message (ТЗ 1.0.2 §16)."""
+
+    __tablename__ = "gateway_evidence"
+    __table_args__ = (
+        Index("ix_gateway_evidence_message", "message_id", "provider_id"),
+        Index("ix_gateway_evidence_time", "organization_id", "observed_at"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="CASCADE"), default=None, index=True
+    )
+    provider_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider_type: Mapped[str] = mapped_column(String(32), default="")
+    verdict: Mapped[str] = mapped_column(String(32), default="UNKNOWN", index=True)
+    category: Mapped[str] = mapped_column(String(32), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    score: Mapped[float | None] = mapped_column(Float, default=None)
+    threat_name: Mapped[str] = mapped_column(String(255), default="")
+    engine: Mapped[str] = mapped_column(String(128), default="")
+    policy: Mapped[str] = mapped_column(String(255), default="")
+    evidence_source: Mapped[str] = mapped_column(String(16), default="header")
+    trusted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    trust_state: Mapped[str] = mapped_column(String(32), default="unverified_chain")
+    trust_reason: Mapped[str] = mapped_column(String(500), default="")
+    #: A pointer to the original — a header name, syslog id or request id — not the payload.
+    raw_reference: Mapped[str] = mapped_column(String(255), default="")
+    normalized_detail: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    observed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class GatewayConflict(Base, IdMixin):
+    """A disagreement between sources, kept visible until an analyst resolves it (§28)."""
+
+    __tablename__ = "gateway_conflicts"
+    __table_args__ = (Index("ix_gateway_conflicts_open", "organization_id", "resolved_at"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="CASCADE"), default=None, index=True
+    )
+    incident_id: Mapped[str | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), default=None, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(48), index=True)
+    summary: Mapped[str] = mapped_column(String(1000), default="")
+    providers: Mapped[list[Any]] = mapped_column(default=list)
+    detail: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    detected_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    resolved_by: Mapped[str | None] = mapped_column(String(320), default=None)
+    resolution: Mapped[str] = mapped_column(String(500), default="")
+
+
+class MessageTraceRecord(Base, IdMixin):
+    """Correlated delivery path across gateway, Exchange and the platform (ТЗ 1.0.2 §23)."""
+
+    __tablename__ = "message_traces"
+    __table_args__ = (
+        Index("ix_message_traces_correlation", "organization_id", "internet_message_id"),
+        Index("ix_message_traces_queue", "organization_id", "queue_id"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="CASCADE"), default=None, index=True
+    )
+    provider_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    internet_message_id: Mapped[str] = mapped_column(String(998), default="")
+    queue_id: Mapped[str] = mapped_column(String(64), default="")
+    sender: Mapped[str] = mapped_column(String(320), default="")
+    recipient: Mapped[str] = mapped_column(String(320), default="")
+    subject_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    content_sha256: Mapped[str] = mapped_column(String(64), default="", index=True)
+    events: Mapped[list[Any]] = mapped_column(default=list)
+    final_action: Mapped[str] = mapped_column(String(32), default="")
+    complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class SyslogDeadLetter(Base, IdMixin):
+    """A gateway event that could not be accepted, kept with its reason (ТЗ 1.0.2 §20).
+
+    Dropping an unparseable line silently would hide an integration gap behind an apparently
+    quiet gateway.
+    """
+
+    __tablename__ = "syslog_dead_letters"
+
+    organization_id: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    provider_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    source_ip: Mapped[str] = mapped_column(String(64), default="")
+    reason: Mapped[str] = mapped_column(String(64), index=True)
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    raw: Mapped[str] = mapped_column(Text, default="")
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Detection quality (ТЗ 1.0.1 §11)
+# ---------------------------------------------------------------------------------------------
+class RuleStatistic(Base, IdMixin, TimestampMixin):
+    """Per-rule quality counters, so noisy rules can be found rather than guessed at."""
+
+    __tablename__ = "rule_statistics"
+    __table_args__ = (UniqueConstraint("organization_id", "rule_id", name="uq_rule_statistic"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    trigger_count: Mapped[int] = mapped_column(Integer, default=0)
+    confirmed_tp: Mapped[int] = mapped_column(Integer, default=0)
+    confirmed_fp: Mapped[int] = mapped_column(Integer, default=0)
+    suppressed_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None, index=True)
+
+    @property
+    def precision_estimate(self) -> float | None:
+        """Confirmed precision only.
+
+        Untriaged triggers are deliberately excluded rather than assumed correct: assuming
+        would make every new rule look perfect on the day it ships.
+        """
+        confirmed = self.confirmed_tp + self.confirmed_fp
+        return round(self.confirmed_tp / confirmed, 3) if confirmed else None
+
+
+class PilotMetricSnapshot(Base, IdMixin):
+    """A daily roll-up of pilot quality metrics (ТЗ 1.0.1 §11)."""
+
+    __tablename__ = "pilot_metric_snapshots"
+    __table_args__ = (UniqueConstraint("organization_id", "period_start", name="uq_pilot_metric_period"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    period_start: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    period_end: Mapped[datetime] = mapped_column(UTCDateTime)
+    metrics: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)

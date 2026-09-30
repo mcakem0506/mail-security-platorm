@@ -12,6 +12,7 @@ from datetime import datetime
 from msp_contracts import ExceptionType, IntakeSource, ProtectedCategory, utcnow
 from msp_mail_parser import split_domain, to_ascii
 
+from .gateway import GatewayFindings
 from .similarity import common_service_targets, name_tokens, skeleton
 
 
@@ -27,6 +28,11 @@ class ProtectedIdentity:
     approved_external_systems: tuple[str, ...] = ()  # domains allowed to use this identity
     department: str = ""
     title: str = ""
+    # How much damage impersonating this identity would do: critical|high|medium|low. Derived
+    # from directory group membership (ТЗ 1.0.1 §5) and weighted separately from the category,
+    # because a finance clerk and the CFO share a category but not a blast radius.
+    risk_class: str = "medium"
+    vip: bool = False
     enabled: bool = True
 
     @property
@@ -96,9 +102,13 @@ class AnalysisContext:
     organization_name: str = ""
     corporate_domains: tuple[str, ...] = ()
     trusted_infrastructure_domains: tuple[str, ...] = ()
-    # Gateways the organisation runs itself (ksmg, eop, spamassassin, virus_scanner). Only their
-    # headers are trusted: any sender can claim their message was already scanned.
+    # Gateways the organisation runs itself (ksmg, eop, spamassassin, generic_av). Naming one
+    # here is necessary but not sufficient: since 1.0.1 its headers are believed only when the
+    # Received chain proves the message actually traversed that hop (ТЗ 1.0.1 §4.3).
     trusted_gateways: tuple[str, ...] = ()
+    # Normalised, trust-checked evidence from ``msp_mail_gateway``. Assembled by the caller so
+    # the detection engine keeps no dependency on any gateway implementation.
+    gateway_findings: GatewayFindings | None = None
     protected_identities: tuple[ProtectedIdentity, ...] = ()
     directory_users: tuple[DirectoryUser, ...] = ()
     exceptions: tuple[ActiveException, ...] = ()

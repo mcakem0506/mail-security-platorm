@@ -211,6 +211,25 @@ rules:
       Имя сотрудника финансового или закупочного подразделения использовано посторонним адресом.
     recommendation: Любые платёжные инструкции подтверждайте по регламенту, не по письму.
 
+  - id: SND-038
+    version: 1
+    name: Подмена идентичности критического класса риска
+    category: executive_impersonation
+    severity: critical
+    confidence: 0.9
+    weight: 70
+    conditions:
+      - critical_identity_impersonation
+    exclusions:
+      - protected_identity_approved_delegate
+    evidence: [critical_identity_impersonation, impersonated_identity_risk_class]
+    explanation: >-
+      Имя принадлежит идентичности с критическим классом риска: от её имени можно санкционировать
+      платёж, изменить реквизиты или получить доступ к системам. Класс риска берётся из членства
+      в группах каталога, а не из списка, который ведётся вручную.
+    recommendation: >-
+      Подтвердите запрос лично или по телефону по заранее известному номеру, не отвечая на письмо.
+
   - id: SND-033
     version: 1
     name: Подмена имени сотрудника ИТ или ИБ

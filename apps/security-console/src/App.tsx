@@ -10,6 +10,7 @@ import { CampaignsPage } from "./pages/CampaignsPage";
 import { RemediationPage } from "./pages/RemediationPage";
 import { AdminPage } from "./pages/AdminPage";
 import { ThreatIntelPage } from "./pages/ThreatIntelPage";
+import { GatewaysPage } from "./pages/GatewaysPage";
 import { ReportsPage } from "./pages/ReportsPage";
 
 interface NavItem {
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   { to: "/threat-intel", label: "Threat Intelligence", permission: "search:indicators" },
   { to: "/reports", label: "Отчёты", permission: "view:investigations" },
   { to: "/remediation", label: "Реагирование", permission: "view:incidents" },
+  { to: "/gateways", label: "Почтовые шлюзы", permission: "view:investigations" },
   { to: "/admin", label: "Администрирование", permission: "view:audit" },
 ];
 
@@ -108,6 +110,7 @@ export function App() {
             <Route path="/threat-intel" element={<ThreatIntelPage />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
+            <Route path="/gateways" element={<GatewaysPage user={user} />} />
             <Route path="/admin" element={<AdminPage user={user} />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

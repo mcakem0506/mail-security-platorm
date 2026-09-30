@@ -47,6 +47,18 @@ class AuditAction:
     USER_CHANGED = "user.changed"
     DIRECTORY_SYNC = "directory.sync"
     RETENTION_RUN = "retention.run"
+    # Mail gateway lifecycle (ТЗ 1.0.2 §33). Trust changes are audited separately from
+    # configuration changes, because a trusted-hop edit changes which headers are believed.
+    GATEWAY_ADDED = "gateway.added"
+    GATEWAY_UPDATED = "gateway.updated"
+    GATEWAY_DISABLED = "gateway.disabled"
+    GATEWAY_CAPABILITY_CHANGED = "gateway.capability_changed"
+    GATEWAY_CREDENTIAL_ROTATED = "gateway.credential_rotated"  # nosec
+    GATEWAY_CONFLICT_RESOLVED = "gateway.conflict_resolved"
+    TRUSTED_HOP_CHANGED = "gateway.trusted_hop_changed"
+    # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
+    INTAKE_DEAD_LETTER = "intake.dead_letter"
+    MESSAGE_UNSCANNABLE = "intake.unscannable"
 
 
 _SENSITIVE_KEY_RE = re.compile(

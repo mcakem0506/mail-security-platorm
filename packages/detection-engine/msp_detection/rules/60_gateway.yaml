@@ -1,14 +1,18 @@
-# Verdicts from an existing Secure Email Gateway (ТЗ 2.1, 21).
+# Verdicts from an upstream Secure Email Gateway (ТЗ 2.1, 21, ТЗ 1.0.2 §17, §27).
 #
-# The platform works alongside a gateway such as KSMG rather than replacing it. The gateway has
-# a full antivirus engine, which this platform deliberately does not; its detection is therefore
-# a strong signal. The reverse does not hold: a clean gateway verdict is never a reason to lower
+# The platform works alongside a gateway such as KSMG rather than replacing it. The gateway has a
+# full antivirus engine, which this platform deliberately does not; its detection is therefore a
+# strong signal. The reverse does not hold: a clean gateway verdict is never a reason to lower
 # risk, because the attacks this platform targets — BEC, impersonation, payload-free social
 # engineering — are precisely the ones a gateway passes through.
+#
+# Every rule below reads a fact that is produced *only from trusted evidence*: the Received chain
+# proved the message passed the hop whose headers it carries (ТЗ 1.0.1 §4.3). The rules about
+# unverified headers are the exception, and they raise risk rather than lowering it.
 ruleset: gateway
 rules:
   - id: GW-001
-    version: 1
+    version: 2
     name: Почтовый шлюз организации обнаружил вредоносное вложение
     category: malicious_attachment
     severity: critical
@@ -16,15 +20,16 @@ rules:
     weight: 80
     hard: true
     conditions:
-      - gateway_detected_malware
-    evidence: [gateway_detected_malware]
+      - upstream_malware_detection
+    evidence: [upstream_malware_detection]
     explanation: >-
-      Существующий почтовый шлюз организации классифицировал содержимое письма как вредоносное.
-      Это независимый от платформы источник с собственным антивирусным движком.
+      Почтовый шлюз организации классифицировал содержимое письма как вредоносное. Это
+      независимый от платформы источник с собственным антивирусным движком, и прохождение письма
+      через этот шлюз подтверждено цепочкой доставки.
     recommendation: Не открывайте вложения. Передайте письмо в службу информационной безопасности.
 
   - id: GW-002
-    version: 1
+    version: 2
     name: Почтовый шлюз организации отметил письмо как спам
     category: delivery_scam
     severity: low
@@ -37,8 +42,8 @@ rules:
       атаку, но повышает внимание к остальным признакам.
 
   - id: GW-003
-    version: 1
-    name: Почтовый шлюз организации отметил письмо как подозрительное
+    version: 2
+    name: Почтовый шлюз организации присвоил письму промежуточную оценку
     category: phishing_url
     severity: medium
     confidence: 0.6
@@ -49,8 +54,23 @@ rules:
       Почтовый шлюз организации присвоил письму промежуточную оценку: явных признаков не найдено,
       но письмо отличается от обычной переписки.
 
-  - id: GW-010
+  - id: GW-004
     version: 1
+    name: Почтовый шлюз организации распознал в письме фишинг
+    category: phishing_url
+    severity: high
+    confidence: 0.85
+    weight: 60
+    conditions:
+      - gateway_detected_phishing
+    evidence: [gateway_detected_phishing]
+    explanation: >-
+      Антифишинговый движок почтового шлюза организации классифицировал письмо как фишинговое.
+      Вердикт получен от независимого источника и подтверждён цепочкой доставки.
+    recommendation: Не переходите по ссылкам и не вводите учётные данные.
+
+  - id: GW-010
+    version: 2
     name: Письмо содержит заголовки чужого почтового шлюза
     category: sender_spoofing
     severity: medium
@@ -65,23 +85,102 @@ rules:
     recommendation: Оценивайте письмо по остальным признакам; «проверку» в заголовках не учитывайте.
 
   - id: GW-011
-    version: 1
+    version: 3
     name: Письмо прошло почтовый шлюз организации без обнаружения
     category: sender_spoofing
     severity: info
     confidence: 0.3
     weight: 0
     conditions:
-      - upstream_gateway_present
-    exclusions:
-      any:
-        - gateway_detected_malware
-        - gateway_detected_spam
-        - gateway_marked_suspicious
-    evidence: [upstream_gateway_present]
+      - upstream_gateway_clean_observed
+    evidence: [upstream_gateway_clean_observed, upstream_gateway_present]
     explanation: >-
       Письмо было проверено почтовым шлюзом организации, и он не обнаружил угроз. Это не является
       подтверждением безопасности: атаки без вложений и ссылок — подмена отправителя, BEC,
       социальная инженерия — проходят шлюз штатно. Вес сигнала нулевой, он приведён только для
       полноты картины.
     internal: false
+
+  - id: GW-012
+    version: 1
+    name: Заголовки шлюза не подтверждены цепочкой доставки
+    category: sender_spoofing
+    severity: high
+    confidence: 0.7
+    weight: 45
+    conditions:
+      - unverified_gateway_header
+    evidence: [unverified_gateway_header]
+    explanation: >-
+      Письмо содержит заголовки почтового шлюза организации, но цепочка Received не подтверждает,
+      что письмо через этот шлюз действительно проходило. Так выглядит скопированный или
+      подделанный заголовок: отправитель добавляет отметку о проверке, чтобы письмо выглядело
+      безопасным. Вердикт шлюза в анализе не учитывается.
+    recommendation: >-
+      Проверьте путь доставки письма. Отметка о проверке в заголовках ничего не подтверждает.
+
+  - id: GW-013
+    version: 1
+    name: Подделка результатов проверки подлинности отправителя
+    category: sender_spoofing
+    severity: high
+    confidence: 0.8
+    weight: 55
+    conditions:
+      - authentication_results_forged
+    evidence: [authentication_results_forged]
+    explanation: >-
+      В письме есть заголовок Authentication-Results с успешным результатом проверки SPF, DKIM
+      или DMARC, но он записан сервером, который не входит в инфраструктуру организации. Такой
+      заголовок отправитель может написать сам. Платформа его игнорирует и оценивает подлинность
+      отправителя по остальным признакам.
+    recommendation: >-
+      Относитесь к письму как к непроверенному: заявленная в нём успешная проверка не выполнялась.
+
+  - id: GW-014
+    version: 1
+    name: Результаты проверки подлинности получены от недоверенного сервера
+    category: sender_spoofing
+    severity: low
+    confidence: 0.5
+    conditions:
+      - authentication_results_untrusted
+    exclusions:
+      any:
+        - authentication_results_forged
+    evidence: [authentication_results_untrusted]
+    explanation: >-
+      Заголовок Authentication-Results записан сервером, не зарегистрированным в топологии
+      организации, поэтому его результаты не учитываются. Это не обязательно атака: так бывает
+      при пересылке письма через внешний сервис.
+
+  - id: GW-015
+    version: 1
+    name: Путь доставки не соответствует схеме почтового потока
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.6
+    conditions:
+      - mail_flow_topology_mismatch
+    evidence: [mail_flow_topology_mismatch]
+    explanation: >-
+      Письмо прошло через известный узел организации, но не на том месте цепочки, которое задано
+      в схеме почтового потока. Это может быть следствием изменения маршрутизации либо попыткой
+      обойти шлюз, доставив письмо напрямую на почтовый сервер.
+    recommendation: Сверьте фактический путь письма со схемой почтового потока организации.
+
+  - id: GW-016
+    version: 1
+    name: Источники дали противоречивые вердикты
+    category: sender_spoofing
+    severity: info
+    confidence: 0.4
+    weight: 0
+    conditions:
+      - provider_verdict_conflict
+    evidence: [provider_verdict_conflict]
+    explanation: >-
+      Вердикты почтового шлюза и платформы расходятся. Расхождение показано аналитику явно и само
+      по себе не меняет оценку письма: «чисто» по версии шлюза не снижает риск, а обнаружение
+      шлюзом учитывается отдельным сигналом.
+    internal: true

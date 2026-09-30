@@ -75,7 +75,21 @@ def db(engine):  # type: ignore[no-untyped-def]
 
 @pytest.fixture
 def organization(db):  # type: ignore[no-untyped-def]
-    from msp_api.db.models import MailboxIdentity, Organization, ProtectedIdentity
+    """The test organisation, described the way a real deployment describes itself.
+
+    That includes its mail path: the gateway in front of Exchange and the relay behind it. Both
+    are needed, because since 1.0.1 a gateway's headers are believed only when the Received chain
+    proves the message passed that hop, and the relay is what writes Authentication-Results
+    (ТЗ 1.0.1 §4.3, §4.4). An organisation configured with only half its topology is the
+    realistic misconfiguration, so it gets its own tests rather than being the default here.
+    """
+    from msp_api.db.models import (
+        MailboxIdentity,
+        MailGateway,
+        Organization,
+        ProtectedIdentity,
+        TrustedHop,
+    )
 
     org = Organization(
         id="org-test",
@@ -114,6 +128,33 @@ def organization(db):  # type: ignore[no-untyped-def]
             display_name="Мария Кузнецова",
             email="cfo@corp.example",
             categories=["finance"],
+        )
+    )
+    gateway = MailGateway(
+        organization_id=org.id,
+        provider_id="ksmg",
+        provider_type="ksmg",
+        display_name="KSMG",
+        enabled=True,
+    )
+    db.add(gateway)
+    db.flush()
+    db.add(
+        TrustedHop(
+            organization_id=org.id,
+            gateway_id=gateway.id,
+            hop_type="gateway",
+            hostname="ksmg-01.corp.example",
+            ip_networks=["10.20.0.0/24"],
+            authserv_ids=["ksmg-01.corp.example"],
+        )
+    )
+    db.add(
+        TrustedHop(
+            organization_id=org.id,
+            hop_type="exchange_mailbox",
+            hostname="mx.corp.example",
+            authserv_ids=["mx.corp.example"],
         )
     )
     db.commit()

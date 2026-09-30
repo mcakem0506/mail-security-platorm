@@ -10,8 +10,15 @@ from .context import (
 )
 from .engine import ENGINE_VERSION, DetectionResult, EnrichmentInput, ScanFinding, analyze
 from .facts import FactSet, build_facts
+from .gateway import GatewayFindings, gateway_facts
 from .rules import Rule, RuleError, RuleSet, default_ruleset
-from .similarity import compare_labels, has_homoglyph, name_similarity, skeleton
+from .similarity import (
+    compare_labels,
+    has_homoglyph,
+    has_mixed_script_token,
+    name_similarity,
+    skeleton,
+)
 
 __all__ = [
     "ENGINE_VERSION",
@@ -22,6 +29,7 @@ __all__ = [
     "DirectoryUser",
     "EnrichmentInput",
     "FactSet",
+    "GatewayFindings",
     "ProtectedIdentity",
     "Rule",
     "RuleError",
@@ -32,7 +40,9 @@ __all__ = [
     "build_facts",
     "compare_labels",
     "default_ruleset",
+    "gateway_facts",
     "has_homoglyph",
+    "has_mixed_script_token",
     "name_similarity",
     "skeleton",
 ]

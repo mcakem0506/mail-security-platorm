@@ -1,0 +1,10 @@
+# Accepted container and dependency findings (ТЗ 1.0.1 §6).
+#
+# Every line needs a CVE, a date and a reason. An entry without one is not an exception, it is an
+# unreviewed vulnerability that happens to be silenced — so this file is deliberately reviewed in
+# the same diff as the code that depends on it.
+#
+# Format:
+#   CVE-YYYY-NNNNN  # YYYY-MM-DD reason, and what has to change for the entry to go away
+#
+# (empty: no exceptions are currently approved)

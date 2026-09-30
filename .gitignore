@@ -14,3 +14,10 @@ build/
 # frontend build output
 apps/security-console/dist/
 apps/security-console/node_modules/
+
+# Generated validation corpus (scripts/export_corpus.py). The corpus itself lives as code in
+# tests/fixtures/corpus.py so it stays deterministic and cannot be contaminated with real mail.
+/corpus/
+
+# TypeScript incremental build cache: changes on every build, carries no information.
+apps/security-console/tsconfig.tsbuildinfo

@@ -76,6 +76,92 @@ export interface AnalysisDetail {
   campaign_id: string | null;
 }
 
+/** One gateway observation about a message (ТЗ 1.0.2 §16). */
+export interface GatewayEvidence {
+  provider_id: string;
+  provider_type: string;
+  /** MALICIOUS | PHISHING | SPAM | SUSPICIOUS | CLEAN_OBSERVED | UNKNOWN | ERROR. */
+  verdict: string;
+  category: string;
+  engine: string;
+  threat_name: string;
+  score: number | null;
+  policy: string;
+  source: string;
+  /** False when the Received chain does not prove the message passed this gateway. */
+  trusted: boolean;
+  trust_state: string;
+  trust_reason: string;
+  observed_at: string;
+  detail: Record<string, unknown>;
+}
+
+export interface GatewayConflict {
+  conflict_id: string;
+  kind: string;
+  summary: string;
+  providers: string[];
+  detail: Record<string, unknown>;
+  detected_at: string;
+  resolved_at: string | null;
+  resolution: string;
+}
+
+export interface UpstreamProtection {
+  message_id: string;
+  present: boolean;
+  evidence: GatewayEvidence[];
+  conflicts: GatewayConflict[];
+  note: string;
+}
+
+export interface TrustedHop {
+  hop_id: string;
+  hop_type: string;
+  hostname: string;
+  ip_networks: string[];
+  expected_headers: string[];
+  authserv_ids: string[];
+  position_in_chain: number | null;
+  direction: string;
+  enabled: boolean;
+  gateway_id: string | null;
+}
+
+export interface MailGateway {
+  gateway_id: string;
+  provider_id: string;
+  provider_type: string;
+  display_name: string;
+  vendor: string;
+  direction: string;
+  enabled: boolean;
+  settings: Record<string, unknown>;
+  capabilities: string[];
+  trusted_hops: TrustedHop[];
+  nodes: { hostname: string; ip_networks: string[]; role: string }[];
+  last_event_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  health?: { status: string; detail: string | null; mode: string | null };
+}
+
+export interface GatewayList {
+  /** NOT_PRESENT is a valid deployment, not a failure (ТЗ 1.0.2 §31). */
+  state: string;
+  gateways: MailGateway[];
+  supported_provider_types: string[];
+  available_skeletons: {
+    provider_type: string;
+    display_name: string;
+    implemented: string[];
+    planned: string[];
+    prerequisites: string[];
+    status: string;
+  }[];
+  syslog_enabled: boolean;
+}
+
 export interface Paginated<T> {
   total: number;
   limit: number;
@@ -244,6 +330,38 @@ export const api = {
     request<Paginated<Record<string, unknown>>>(`/api/v1/admin/audit${query(params)}`),
 
   health: () => request<Record<string, unknown>>("/health/dependencies"),
+
+  gateways: () => request<GatewayList>("/api/v1/gateways"),
+
+  createGateway: (body: Record<string, unknown>) =>
+    request<MailGateway>("/api/v1/gateways", { method: "POST", body: JSON.stringify(body) }),
+
+  updateGateway: (id: string, body: Record<string, unknown>) =>
+    request<MailGateway>(`/api/v1/gateways/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+
+  addTrustedHop: (gatewayId: string, body: Record<string, unknown>) =>
+    request<TrustedHop>(`/api/v1/gateways/${gatewayId}/hops`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  deleteTrustedHop: (hopId: string) =>
+    request<void>(`/api/v1/gateways/hops/${hopId}`, { method: "DELETE" }),
+
+  probeGateways: () =>
+    request<Record<string, unknown>>("/api/v1/gateways/probe", { method: "POST" }),
+
+  gatewayDeadLetters: () =>
+    request<Record<string, unknown>[]>("/api/v1/gateways/dead-letters"),
+
+  upstreamProtection: (messageId: string) =>
+    request<UpstreamProtection>(`/api/v1/gateways/messages/${messageId}`),
+
+  resolveGatewayConflict: (conflictId: string, resolution: string) =>
+    request<GatewayConflict>(
+      `/api/v1/gateways/conflicts/${conflictId}/resolve?resolution=${encodeURIComponent(resolution)}`,
+      { method: "POST" },
+    ),
 
   reportList: () => request<{ reports: string[] }>("/api/v1/reports"),
 

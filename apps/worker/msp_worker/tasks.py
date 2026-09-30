@@ -22,6 +22,7 @@ from msp_api.db.models import (
     DetectionException,
     DirectorySyncRun,
     Indicator,
+    IntakeRecord,
     MailboxIdentity,
     MailContent,
     MailMessage,
@@ -35,9 +36,15 @@ from msp_api.deps import get_scanner, get_ti_hub
 from msp_api.observability import (
     analyses_total,
     analysis_duration,
+    duplicate_report,
+    intake_backlog,
+    intake_failed,
+    intake_retry,
+    intake_success,
     provider_errors,
     provider_latency,
     provider_rate_limit,
+    unscannable_total,
 )
 from msp_api.security.audit import AuditAction, record
 from msp_api.services.analysis import (
@@ -47,10 +54,21 @@ from msp_api.services.analysis import (
     get_ruleset,
     run_local_analysis,
 )
+from msp_api.services.intake import (
+    attach_job,
+    begin_intake,
+    intake_stats,
+    mark_acknowledged,
+    mark_failed,
+    unscannable_job,
+)
+from msp_api.services.protected_identities import parse_protected_groups
+from msp_api.services.protected_identities import sync_from_directory as sync_protected_identities
 from msp_api.services.storage import build_storage
 from msp_contracts import (
     AnalysisStatus,
     IntakeSource,
+    IntakeState,
     JobState,
     RiskLevel,
     TIState,
@@ -250,7 +268,18 @@ def _incident_indicator_hits(session, job: AnalysisJob, detection) -> list[str]:
 
 @celery_app.task(name="msp.poll_security_mailbox")
 def poll_security_mailbox() -> dict[str, Any]:
-    """Ingest reports from the security mailbox (ТЗ 7.2)."""
+    """Durable intake from the security mailbox (ТЗ 7.2, ТЗ 1.0.1 §4.1).
+
+    The order of operations is the whole point: the message is recorded, stored and queued, the
+    transaction is committed, and only then is the mailbox told. A worker that dies at any step
+    before the commit leaves the message untouched, so the next poll picks it up again; one that
+    dies after the commit causes a re-fetch that deduplication turns into a no-op.
+
+    Acknowledgement happens *outside* the transaction on purpose. An IMAP move cannot take part
+    in a database transaction, so one of the two must go second — and a message acknowledged
+    before the commit would be lost, while a message committed before the acknowledgement is
+    merely seen twice.
+    """
     settings = get_settings()
     if settings.exchange_provider != "security_mailbox" or not settings.security_mailbox_host:
         return {"skipped": "security mailbox not configured"}
@@ -266,6 +295,7 @@ def poll_security_mailbox() -> dict[str, Any]:
             folder=settings.security_mailbox_folder,
             use_ssl=settings.security_mailbox_ssl,
             ca_file=settings.security_mailbox_ca_file,
+            max_message_size=settings.limit_message_size,
         )
     )
     try:
@@ -274,42 +304,127 @@ def poll_security_mailbox() -> dict[str, Any]:
         logger.warning("worker.mailbox_poll_failed", extra={"error": type(exc).__name__})
         return {"error": type(exc).__name__}
 
-    processed = 0
+    source_id = f"{settings.security_mailbox_user}:{settings.security_mailbox_folder}"
+    summary = {"fetched": len(reports), "processed": 0, "duplicates": 0, "unscannable": 0, "failed": 0}
+    # (uid, disposition) pairs, applied to the mailbox only after the transaction commits.
+    acknowledgements: list[tuple[str, str]] = []
+
+    for report in reports:
+        with session_scope() as session:
+            org = session.execute(select(Organization)).scalars().first()
+            if org is None:
+                return {"skipped": "no organization configured"}
+            disposition = _ingest_report(session, settings, org.id, source_id, report, summary)
+        if disposition:
+            acknowledgements.append((report.uid, disposition))
+
+    for uid, disposition in acknowledgements:
+        try:
+            moved = provider.ack(uid) if disposition == "ack" else provider.fail(uid)
+        except Exception as exc:  # noqa: BLE001 - a failed move only causes a harmless re-fetch
+            logger.warning("worker.mailbox_ack_failed", extra={"error": type(exc).__name__})
+            continue
+        if moved and disposition == "ack":
+            with session_scope() as session:
+                record = session.execute(
+                    select(IntakeRecord).where(
+                        IntakeRecord.source_id == source_id, IntakeRecord.mailbox_uid == uid
+                    )
+                ).scalar_one_or_none()
+                if record is not None and record.state is not IntakeState.DUPLICATE:
+                    mark_acknowledged(record)
+
     with session_scope() as session:
         org = session.execute(select(Organization)).scalars().first()
-        if org is None:
-            return {"skipped": "no organization configured"}
-        for report in reports:
-            job = AnalysisJob(
-                organization_id=org.id,
-                source=IntakeSource.SECURITY_MAILBOX,
-                requester_mailbox=report.reported_by,
-                is_report=True,
-                user_note=report.note[:2000],
-                idempotency_key=f"mailbox:{report.uid}:{len(report.raw_mime)}",
-            )
-            existing = session.execute(
-                select(AnalysisJob).where(AnalysisJob.idempotency_key == job.idempotency_key)
-            ).scalar_one_or_none()
-            if existing is not None:
-                continue
-            session.add(job)
-            session.flush()
-            try:
-                run_local_analysis(
-                    session, settings, job=job, raw=report.raw_mime, storage=build_storage(settings)
-                )
-                processed += 1
-            except Exception as exc:
-                logger.exception("worker.mailbox_analysis_failed", extra={"analysis_job_id": job.id})
-                job.state = JobState.FAILED
-                job.status = AnalysisStatus.ERROR
-                job.error = type(exc).__name__
-                continue
-            if report.warnings:
-                job.warnings = [*(job.warnings or []), *report.warnings]
-            enrich_analysis.delay(job.id)
-    return {"processed": processed, "fetched": len(reports)}
+        if org is not None:
+            for state, count in intake_stats(session, org.id)["by_state"].items():
+                intake_backlog.labels(state).set(count)
+    return summary
+
+
+def _ingest_report(session, settings, organization_id, source_id, report, summary):  # type: ignore[no-untyped-def]
+    """Persist one report and queue its analysis. Returns how to dispose of the mailbox item."""
+    outcome = begin_intake(
+        session,
+        settings,
+        organization_id=organization_id,
+        source=IntakeSource.SECURITY_MAILBOX,
+        source_id=source_id,
+        mailbox_uid=report.uid,
+        raw=report.raw_mime,
+        internet_message_id=report.internet_message_id,
+        content_sha256=report.content_sha256,
+        reported_by=report.reported_by,
+        oversized=report.oversized,
+        actual_size=report.actual_size,
+        warnings=report.warnings,
+        storage=build_storage(settings),
+    )
+    record = outcome.record
+
+    if outcome.is_duplicate:
+        # A repeat report is not noise: several people reporting the same message is how a
+        # campaign becomes visible. It is linked to the first one rather than re-analysed.
+        summary["duplicates"] += 1
+        duplicate_report.inc()
+        return "ack"
+
+    if record.state is IntakeState.ACKNOWLEDGED:
+        return "ack"
+
+    if report.oversized:
+        # Deliberately not analysed. The job exists and says UNKNOWN, so nothing anywhere in
+        # the product can present this message as checked (ТЗ 1.0.1 §4.2).
+        reason = (
+            f"письмо размером {report.actual_size} байт превышает предел анализа "
+            f"({settings.limit_message_size}); анализ не выполнялся"
+        )
+        job = unscannable_job(session, organization_id=organization_id, record=record, reason=reason)
+        summary["unscannable"] += 1
+        unscannable_total.labels("message_size").inc()
+        _queue_notification(
+            session,
+            organization_id=organization_id,
+            event="unscannable",
+            subject="Письмо не проверено: превышен предел размера",
+            recipient=settings.security_team_email,
+            payload={"analysis_job_id": job.id, "size_bytes": report.actual_size},
+            body=reason,
+        )
+        return "ack"
+
+    job = AnalysisJob(
+        organization_id=organization_id,
+        source=IntakeSource.SECURITY_MAILBOX,
+        requester_mailbox=report.reported_by,
+        is_report=True,
+        user_note=report.note[:2000],
+        idempotency_key=f"intake:{record.id}",
+    )
+    session.add(job)
+    session.flush()
+    try:
+        run_local_analysis(session, settings, job=job, raw=report.raw_mime, storage=build_storage(settings))
+    except Exception as exc:
+        logger.exception("worker.mailbox_analysis_failed", extra={"analysis_job_id": job.id})
+        job.state = JobState.FAILED
+        job.status = AnalysisStatus.ERROR
+        job.error = type(exc).__name__
+        dead_lettered = mark_failed(record, type(exc).__name__)
+        if dead_lettered:
+            summary["failed"] += 1
+            intake_failed.labels(IntakeSource.SECURITY_MAILBOX.value).inc()
+            return "fail"
+        intake_retry.labels(IntakeSource.SECURITY_MAILBOX.value, type(exc).__name__).inc()
+        return ""
+
+    if report.warnings:
+        job.warnings = [*(job.warnings or []), *report.warnings]
+    attach_job(record, job)
+    summary["processed"] += 1
+    intake_success.labels(IntakeSource.SECURITY_MAILBOX.value).inc()
+    enrich_analysis.delay(job.id)
+    return "ack"
 
 
 @celery_app.task(name="msp.sync_directory")
@@ -321,6 +436,7 @@ def sync_directory() -> dict[str, Any]:
 
     from msp_ad import ActiveDirectoryConfig, ActiveDirectoryProvider
 
+    protected_rules = parse_protected_groups(settings.ad_protected_groups)
     provider = ActiveDirectoryProvider(
         ActiveDirectoryConfig(
             server=settings.ad_server,
@@ -331,6 +447,9 @@ def sync_directory() -> dict[str, Any]:
             base_dn=settings.ad_base_dn,
             ca_file=settings.ad_ca_file,
             include_optional_attributes=settings.ad_include_optional_attributes,
+            # Group membership is read only when it is actually used to derive protected
+            # identities: reading more of the directory than needed is a privacy decision.
+            include_groups=bool(protected_rules),
         )
     )
     with session_scope() as session:
@@ -388,6 +507,27 @@ def sync_directory() -> dict[str, Any]:
                 run.updated += 1
         run.disabled = result.disabled
         session.add(run)
+
+        # Protected identities follow directory group membership (ТЗ 1.0.1 §5).
+        protected = sync_protected_identities(
+            session, organization_id=org.id, entries=result.entries, rules=protected_rules
+        )
+        if protected.total or protected.disabled:
+            record(
+                session,
+                action=AuditAction.DIRECTORY_SYNC,
+                actor_email="system",
+                actor_role="system",
+                organization_id=org.id,
+                object_type="protected_identities",
+                object_id=run.id,
+                detail={
+                    "created": protected.created,
+                    "updated": protected.updated,
+                    "disabled": protected.disabled,
+                    "groups_configured": len(protected_rules),
+                },
+            )
         record(
             session,
             action=AuditAction.DIRECTORY_SYNC,
@@ -405,7 +545,16 @@ def sync_directory() -> dict[str, Any]:
                 "errors": result.errors[:5],
             },
         )
-        return {"created": run.created, "updated": run.updated, "errors": result.errors}
+        return {
+            "created": run.created,
+            "updated": run.updated,
+            "errors": result.errors,
+            "protected_identities": {
+                "created": protected.created,
+                "updated": protected.updated,
+                "disabled": protected.disabled,
+            },
+        }
 
 
 @celery_app.task(name="msp.run_retention")

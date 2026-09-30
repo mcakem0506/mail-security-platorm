@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from msp_contracts import Indicator, IOCType
+from msp_contracts import Indicator, IOCType, ScanCompleteness
 from msp_mail_parser import ParsedMessage, category_for_extension, split_domain, to_ascii
 from msp_mail_parser.filetype import MACRO_EXT, SHORTCUT_EXT
 
@@ -21,6 +21,7 @@ from .gateway import gateway_facts
 from .similarity import (
     find_lookalike,
     has_homoglyph,
+    has_mixed_script_token,
     homoglyph_chars,
     is_mixed_script,
     name_similarity,
@@ -169,7 +170,10 @@ def _sender_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> None
         fs.flag("from_domain_mixed_script", domain=frm.domain, scripts=sorted(script_names(frm.domain)))
         if has_homoglyph(frm.domain):
             fs.flag("from_domain_homoglyph", domain=frm.domain, chars=homoglyph_chars(frm.domain))
-    if is_mixed_script(frm.display_name) and has_homoglyph(frm.display_name):
+    # Per *word*, not per string: "Отдел продаж Partner" is an ordinary Russian company name
+    # with a Latin brand in it, while "Аpple" hides a Cyrillic А inside a Latin word. Only the
+    # second is spoofing, and testing the whole string cannot tell them apart.
+    if has_mixed_script_token(frm.display_name) and has_homoglyph(frm.display_name):
         fs.flag(
             "display_name_homoglyph",
             display_name=frm.display_name,
@@ -299,6 +303,8 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
             "actual_sender": frm.address,
             "similarity": round(sim, 2),
             "categories": [c.value for c in pi.categories],
+            "risk_class": pi.risk_class,
+            "vip": pi.vip,
         }
         if approved:
             fs.set("protected_identity_approved_delegate", True, **ev)
@@ -313,6 +319,11 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
                 fs.set("finance_identity_impersonation", True, **ev)
             if "security" in cats or "administrator" in cats:
                 fs.set("it_identity_impersonation", True, **ev)
+            fs.set("impersonated_identity_risk_class", pi.risk_class, **ev)
+            if pi.risk_class == "critical":
+                fs.set("critical_identity_impersonation", True, **ev)
+            if pi.vip:
+                fs.set("vip_identity_impersonation", True, **ev)
 
     # Display name matching any directory user while the address is external.
     if not internal_sender and not fs.get("protected_identity_impersonation"):
@@ -545,13 +556,26 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
     if ctx.recipient_department:
         fs.set("recipient_department", ctx.recipient_department.lower())
 
-    fs.auth = parse_authentication_results(msg.authentication_results)
+    # Only Authentication-Results written by a verified authentication server are interpreted:
+    # a spoofed header claiming spf=pass would otherwise suppress the very signals that catch
+    # sender spoofing (ТЗ 1.0.1 §4.4). Without a gateway layer every header is read, as before.
+    findings = ctx.gateway_findings
+    auth_headers = (
+        findings.trusted_auth_results
+        if findings is not None and findings.present
+        else msg.authentication_results
+    )
+    fs.auth = parse_authentication_results(auth_headers)
     spf_headers = parse_received_spf(msg.received_spf)
     fs.auth.merge_received_spf(spf_headers)
     for key, value in fs.auth.as_facts().items():
         fs.set(key, value, **fs.auth.evidence.get(key, {}))
-    if not msg.authentication_results and not msg.received_spf:
+    if not auth_headers and not msg.received_spf:
         fs.missing_evidence.append("No trusted Authentication-Results header available")
+        if msg.authentication_results:
+            fs.missing_evidence.append(
+                "Authentication-Results present but not written by a verified authentication server"
+            )
     if msg.dkim_signatures == 0:
         fs.set("dkim_signature_absent", True)
 
@@ -567,7 +591,7 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
 
     # Verdicts from an upstream gateway (KSMG and others) are an additional source, never the
     # final word: a clean gateway verdict does not lower the platform's own risk (ТЗ 2.1).
-    for key, value, ev in gateway_facts(msg.headers, ctx.trusted_gateways):
+    for key, value, ev in gateway_facts(ctx.gateway_findings):
         fs.set(key, value, **ev)
 
     hist = ctx.sender_history
@@ -580,12 +604,78 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
     if hist.previously_reported:
         fs.set("sender_previously_reported", True, count=hist.previously_reported)
 
-    if msg.limits_hit:
-        fs.set("parser_limits_hit", msg.limits_hit)
-        fs.missing_evidence.append(f"Parser limits reached: {', '.join(msg.limits_hit)}")
+    _limit_facts(msg, fs)
     if not msg.parse_ok:
         fs.flag("message_unparseable", errors=msg.errors[:5])
         fs.missing_evidence.append("Message could not be fully parsed")
     elif any(e.startswith("MIME_DEFECT") for e in msg.errors):
         fs.flag("malformed_mime", errors=sorted({e for e in msg.errors if e.startswith("MIME_DEFECT")})[:5])
     return fs
+
+
+#: Each parser limit becomes its own fact, so exceeding one produces its own explainable signal
+#: rather than a single opaque "limits reached" note (ТЗ 1.0.1 §4.2).
+_LIMIT_FACTS: dict[str, str] = {
+    "MAX_MESSAGE_SIZE": "limit_message_size_exceeded",
+    "MAX_ATTACHMENT_SIZE": "limit_attachment_size_exceeded",
+    "MAX_ATTACHMENTS": "limit_attachment_count_exceeded",
+    "MAX_PARTS": "limit_mime_parts_exceeded",
+    "MAX_MIME_DEPTH": "limit_mime_depth_exceeded",
+    "MAX_URLS": "limit_url_count_exceeded",
+    "PARSER_TIMEOUT": "limit_parser_timeout",
+}
+#: Archive limits are reported per attachment rather than on the message.
+_ARCHIVE_LIMIT_FLAGS: dict[str, str] = {
+    "EXTRACTION_LIMIT": "limit_decompressed_size_exceeded",
+    "NESTING_LIMIT": "limit_archive_depth_exceeded",
+    "TOO_MANY_FILES": "limit_archive_file_count_exceeded",
+}
+#: What each limit means for the analyst, in one clause.
+_LIMIT_EVIDENCE: dict[str, str] = {
+    "MAX_MESSAGE_SIZE": "письмо превышает максимальный размер для анализа",
+    "MAX_ATTACHMENT_SIZE": "вложение превышает максимальный размер для анализа",
+    "MAX_ATTACHMENTS": "во вложениях больше файлов, чем платформа разбирает",
+    "MAX_PARTS": "в письме больше MIME-частей, чем платформа разбирает",
+    "MAX_MIME_DEPTH": "вложенность MIME-структуры превышает допустимую",
+    "MAX_URLS": "в письме больше ссылок, чем платформа разбирает",
+    "PARSER_TIMEOUT": "разбор письма не завершился за отведённое время",
+}
+
+
+def _limit_facts(msg: ParsedMessage, fs: FactSet) -> None:
+    """Record every limit that was hit, plus the resulting completeness of the scan.
+
+    A limit is not a detection, but it is never silence either: the parts that were not examined
+    are recorded as missing evidence, which keeps the verdict out of LOW_RISK (ТЗ 1.0.1 §4.2).
+    """
+    hit: list[str] = list(msg.limits_hit)
+    for meta in (a.meta for a in msg.attachments):
+        for flag in meta.flags:
+            if flag in _ARCHIVE_LIMIT_FLAGS and flag not in hit:
+                hit.append(flag)
+
+    if not hit:
+        fs.set("scan_completeness", ScanCompleteness.COMPLETE.value)
+        return
+
+    fs.set("parser_limits_hit", hit)
+    for code in hit:
+        fact = _LIMIT_FACTS.get(code) or _ARCHIVE_LIMIT_FLAGS.get(code)
+        if fact is None:
+            continue
+        evidence: dict[str, Any] = {"limit": code}
+        if code == "MAX_MESSAGE_SIZE":
+            evidence["actual_size_bytes"] = msg.size
+        fs.set(fact, True, **evidence)
+        fs.missing_evidence.append(_LIMIT_EVIDENCE.get(code, f"limit reached: {code}"))
+
+    # A message the parser refused outright was never examined at all; one that merely lost an
+    # oversized attachment was examined in part. The distinction reaches the employee view,
+    # where "проверено" must not be said about either.
+    completeness = (
+        ScanCompleteness.UNSCANNABLE
+        if "MAX_MESSAGE_SIZE" in hit or not msg.parse_ok
+        else ScanCompleteness.LIMIT_EXCEEDED
+    )
+    fs.set("scan_completeness", completeness.value)
+    fs.flag("scan_incomplete", completeness=completeness.value, limits=hit[:6])

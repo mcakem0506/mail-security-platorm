@@ -117,6 +117,20 @@ def login(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Служба каталогов недоступна. Повторите попытку позже.",
             )
+    elif settings.auth_backend == "ldap" and user is not None and user.auth_source == "local":
+        # Break-glass: a local account signing in while the directory is authoritative. It is
+        # allowed — otherwise a directory outage would lock the security team out of their own
+        # console — but it is never silent.
+        password_ok = verify_password(payload.password, user.password_hash)
+        directory_outcome = "local_account_used_while_directory_is_authoritative"
+        expected = settings.emergency_local_account_list
+        if password_ok:
+            logger.warning(
+                "auth.emergency_local_login",
+                extra={
+                    "declared_emergency_account": (not expected) or user.email.lower() in expected,
+                },
+            )
     elif is_directory_managed(user):
         # An AD-managed account must never fall back to a local password.
         password_ok = False

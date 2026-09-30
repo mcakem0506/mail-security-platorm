@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, type AnalysisDetail, type Signal } from "../api/client";
+import {
+  api,
+  type AnalysisDetail,
+  type Signal,
+  type UpstreamProtection,
+} from "../api/client";
 import { RISK_LABELS, SEVERITY_LABELS, formatDate } from "../types";
 
 interface AttachmentRow {
@@ -25,6 +30,116 @@ interface MessageDetail {
   urls: { url: string; context: string }[];
   auth_summary: Record<string, unknown>;
   preview_available: boolean;
+}
+
+const GATEWAY_VERDICT_LABELS: Record<string, string> = {
+  MALICIOUS: "Обнаружено вредоносное содержимое",
+  PHISHING: "Обнаружен фишинг",
+  SPAM: "Отнесено к спаму",
+  SUSPICIOUS: "Подозрительно",
+  CLEAN_OBSERVED: "Обнаружений нет",
+  UNKNOWN: "Вердикт не прочитан",
+  ERROR: "Ошибка проверки",
+};
+
+const TRUST_STATE_LABELS: Record<string, string> = {
+  trusted: "подтверждено цепочкой доставки",
+  unverified_chain: "не подтверждено цепочкой доставки",
+  unknown_gateway: "шлюз не используется организацией",
+  topology_mismatch: "узел найден не на своём месте в цепочке",
+  untrusted_source: "источник события не разрешён",
+};
+
+const CONFLICT_LABELS: Record<string, string> = {
+  GATEWAY_MALICIOUS_PLATFORM_LOW: "Шлюз обнаружил угрозу, платформа — нет",
+  GATEWAY_CLEAN_PLATFORM_HIGH: "Шлюз ничего не нашёл, платформа считает письмо опасным",
+  GATEWAY_DISAGREEMENT: "Шлюзы дали разные вердикты",
+  HEADER_API_MISMATCH: "Заголовки и API шлюза расходятся",
+};
+
+/**
+ * Upstream Protection (ТЗ 1.0.2 §24).
+ *
+ * Shows what the gateway said *and* whether that can be believed. An untrusted verdict is
+ * rendered struck through with the reason attached, because the important fact about a copied
+ * gateway header is not what it claims but that it could not be verified.
+ */
+function UpstreamProtectionCard({ messageId }: { messageId: string }) {
+  const [data, setData] = useState<UpstreamProtection | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .upstreamProtection(messageId)
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [messageId]);
+
+  if (!data || (!data.present && data.conflicts.length === 0)) {
+    return null;
+  }
+
+  return (
+    <section className="card">
+      <h2>Upstream Protection</h2>
+      <table className="table table--compact">
+        <thead>
+          <tr>
+            <th>Шлюз</th>
+            <th>Движок</th>
+            <th>Вердикт</th>
+            <th>Угроза</th>
+            <th>Оценка</th>
+            <th>Доверие</th>
+            <th>Время</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.evidence.map((item, index) => (
+            <tr key={`${item.provider_id}-${item.category}-${index}`}>
+              <td>{item.provider_id}</td>
+              <td>{item.category || item.engine || "—"}</td>
+              <td className={item.trusted ? undefined : "muted struck"}>
+                {GATEWAY_VERDICT_LABELS[item.verdict] ?? item.verdict}
+              </td>
+              <td>{item.threat_name || "—"}</td>
+              <td>{item.score === null ? "—" : item.score}</td>
+              <td>
+                <span className={item.trusted ? "tag tag--ok" : "tag tag--flag"}>
+                  {TRUST_STATE_LABELS[item.trust_state] ?? item.trust_state}
+                </span>
+                {!item.trusted && item.trust_reason && (
+                  <div className="muted small">{item.trust_reason}</div>
+                )}
+              </td>
+              <td>{formatDate(item.observed_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {data.conflicts.length > 0 && (
+        <div className="conflicts">
+          <h3>Расхождения источников</h3>
+          <ul>
+            {data.conflicts.map((conflict) => (
+              <li key={conflict.conflict_id}>
+                <strong>{CONFLICT_LABELS[conflict.kind] ?? conflict.kind}</strong>
+                <div className="muted">{conflict.summary}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <p className="muted">{data.note}</p>
+    </section>
+  );
 }
 
 /**
@@ -216,6 +331,8 @@ export function MessagePage() {
           </span>
         )}
       </div>
+
+      <UpstreamProtectionCard messageId={messageId} />
 
       <section className="card">
         <h2>Аутентификация отправителя</h2>

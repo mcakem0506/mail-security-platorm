@@ -1,16 +1,22 @@
-"""Environment probe for Exchange, Active Directory and the security mailbox (ТЗ 44, 51).
+"""Read-only environment probe and compatibility report (ТЗ 1.0.1 §4.6, ТЗ 44, 51).
 
-Run this at the customer site to collect the environment inventory instead of asking for it in
-writing. It connects with the configured credentials, reports what actually works, and prints
-the remaining blockers.
+Run this at the customer site instead of collecting an environment inventory in writing. It
+connects with the configured credentials, reports what the environment actually supports, and
+prints a decision of READY, READY_WITH_WARNINGS or NOT_READY with the specific items behind it.
 
-The probe is read-only: it opens connections, lists capabilities and reads nothing beyond a
-single message header. It never writes to a mailbox or to the directory.
+Nothing is changed. Remediation is reported as an access right and is never exercised: a probe
+that quarantined a message to prove it could would be worse than no probe at all.
 
-Usage:
-    python scripts/probe_exchange.py                 # uses the configured .env
-    python scripts/probe_exchange.py --json          # machine-readable output
-    python scripts/probe_exchange.py --ews-only
+Usage::
+
+    python scripts/probe_exchange.py                          # human-readable report
+    python scripts/probe_exchange.py --json                   # machine-readable
+    python scripts/probe_exchange.py --markdown report.md     # for the acceptance document
+    python scripts/probe_exchange.py --pilot-mailbox user@corp.example
+    python scripts/probe_exchange.py --section exchange --section directory
+
+The exit code is 0 for READY and READY_WITH_WARNINGS, and 1 for NOT_READY, so the probe can gate
+a deployment step in CI or a runbook.
 """
 
 from __future__ import annotations
@@ -18,172 +24,121 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from msp_api.config import get_settings
+from msp_api.services.readiness import (
+    CheckResult,
+    Readiness,
+    ReadinessReport,
+    probe_addin_prerequisites,
+    probe_directory,
+    probe_exchange,
+    probe_mail_flow,
+    probe_pilot_policy,
+    probe_security_mailbox,
+)
 
-OK = "  OK "
-WARN = " WARN"
-FAIL = " FAIL"
-SKIP = " SKIP"
+_LABELS = {
+    CheckResult.OK: "  OK  ",
+    CheckResult.WARN: " ПРЕД ",
+    CheckResult.FAIL: " ОШИБ ",
+    CheckResult.SKIP: " ПРОП ",
+}
+
+SECTIONS = ("exchange", "mailbox", "directory", "mailflow", "addin", "pilot")
 
 
-def line(status: str, label: str, detail: str = "") -> None:
-    print(f"[{status}] {label}" + (f" — {detail}" if detail else ""))
+def _registry(settings: Any) -> Any:
+    """The gateway registry, where a database is reachable.
 
-
-def probe_ews(settings: Any) -> dict[str, Any]:
-    from msp_exchange.ews import EwsAccessMode, EwsAuthMethod, EwsConfig, probe_environment
-
-    config = EwsConfig(
-        endpoint=settings.ews_endpoint,
-        autodiscover=settings.ews_autodiscover,
-        primary_smtp_address=settings.ews_primary_smtp_address or settings.ews_username,
-        username=settings.ews_username,
-        password=settings.ews_password,
-        auth_method=EwsAuthMethod(settings.ews_auth_method),
-        auth_preference=tuple(EwsAuthMethod(m) for m in settings.ews_auth_preference_list),
-        access_mode=EwsAccessMode(settings.ews_access_mode),
-        verify_tls=settings.ews_verify_tls,
-        ca_file=settings.ews_ca_file,
-        timeout_seconds=settings.ews_timeout_seconds,
-        mailbox_scope=settings.ews_mailbox_scope_list,
-    )
-    if not config.configured:
-        line(SKIP, "EWS", "не настроен; платформа работает через security mailbox")
-        return {"configured": False, "blockers": config.blockers()}
-
+    The probe is useful before the database exists, so a failure here degrades the mail-flow
+    section rather than the whole report.
+    """
     try:
-        report = probe_environment(config)
-    except RuntimeError as exc:  # exchangelib not installed
-        line(SKIP, "EWS", str(exc))
-        return {"configured": True, "error": str(exc)}
+        from msp_api.db.models import Organization
+        from msp_api.db.session import session_scope
+        from msp_api.services.gateways import build_registry
+        from sqlalchemy import select
 
-    if not report.get("reachable"):
-        line(FAIL, "EWS", "; ".join(report.get("errors", [])[:2]) or "недоступен")
-    else:
-        line(OK, "EWS", f"{report.get('server_version', '')} через {report.get('auth_method', '')}")
-        line(OK, "  endpoint", str(report.get("endpoint", "")))
-        line(OK, "  режим доступа", str(report.get("access_mode", "")))
-        capabilities = report.get("capabilities", [])
-        for capability in ("get_message", "get_headers", "get_attachments", "search"):
-            status = OK if capability in capabilities else WARN
-            line(status, f"  {capability}", "" if capability in capabilities else "недоступно")
-    for blocker in report.get("blockers", []):
-        line(WARN, "  блокер", blocker)
-    return report
+        with session_scope() as session:
+            org = session.execute(select(Organization)).scalars().first()
+            if org is None:
+                return None
+            return build_registry(session, settings, org.id)
+    except Exception:  # noqa: BLE001 - the probe must work without a database
+        return None
 
 
-def probe_directory(settings: Any) -> dict[str, Any]:
-    from msp_ad import ActiveDirectoryAuthenticator, AdAuthConfig, parse_group_role_map
-
-    if not settings.ad_server:
-        line(SKIP, "Active Directory", "не настроен")
-        return {"configured": False}
-
-    authenticator = ActiveDirectoryAuthenticator(
-        AdAuthConfig(
-            server=settings.ad_server,
-            port=settings.ad_port,
-            use_ssl=settings.ad_use_ssl,
-            start_tls=settings.ad_start_tls,
-            bind_dn=settings.ad_bind_dn,
-            bind_password=settings.ad_bind_password,
-            base_dn=settings.ad_base_dn,
-            group_role_map=parse_group_role_map(settings.ad_group_role_map),
-            ca_file=settings.ad_ca_file,
-            verify_tls=settings.ad_verify_tls,
-            timeout_seconds=settings.ad_timeout_seconds,
+def render_text(report: ReadinessReport) -> str:
+    lines = ["Проверка готовности среды Mail Security Platform", "=" * 70]
+    for section in report.sections:
+        lines.append(f"\n{section.section}")
+        lines.append("-" * 70)
+        for check in section.checks:
+            suffix = f" — {check.detail}" if check.detail else ""
+            lines.append(f"[{_LABELS[check.result]}] {check.name}{suffix}")
+    lines.append("\n" + "=" * 70)
+    decision = report.decision()
+    lines.append(f"Решение: {decision.value}")
+    if report.blockers:
+        lines.append(f"\nБлокеры ({len(report.blockers)}):")
+        lines += [f"  - {c.name}: {c.detail}" for c in report.blockers]
+    if report.warnings:
+        lines.append(f"\nЗамечания ({len(report.warnings)}):")
+        lines += [f"  - {c.name}: {c.detail}" for c in report.warnings]
+    if decision is Readiness.READY_WITH_WARNINGS:
+        lines.append(
+            "\nТеневой пилот можно начинать. Перечисленные замечания остаются открытыми и "
+            "должны быть закрыты до контролируемого развёртывания."
         )
-    )
-    health = authenticator.health()
-    status_map = {"ok": OK, "degraded": WARN, "unavailable": FAIL, "not_configured": SKIP}
-    line(status_map.get(health["status"], WARN), "Active Directory", health.get("detail") or health["status"])
-    if health.get("base_dn"):
-        line(OK, "  base DN", str(health["base_dn"]))
-    for problem in health.get("problems", []):
-        line(WARN, "  замечание", problem)
-    return health
-
-
-def probe_security_mailbox(settings: Any) -> dict[str, Any]:
-    from msp_exchange import SecurityMailboxConfig, SecurityMailboxProvider
-
-    if not settings.security_mailbox_host:
-        line(SKIP, "Security mailbox", "не настроен")
-        return {"configured": False}
-
-    provider = SecurityMailboxProvider(
-        SecurityMailboxConfig(
-            host=settings.security_mailbox_host,
-            port=settings.security_mailbox_port,
-            username=settings.security_mailbox_user,
-            password=settings.security_mailbox_password,
-            folder=settings.security_mailbox_folder,
-            use_ssl=settings.security_mailbox_ssl,
-            ca_file=settings.security_mailbox_ca_file,
-        )
-    )
-    health = provider.health()
-    status_map = {"ok": OK, "degraded": WARN, "unavailable": FAIL, "not_configured": SKIP}
-    line(status_map.get(health.status, WARN), "Security mailbox", health.detail or health.status)
-    return {"status": health.status, "detail": health.detail}
-
-
-def probe_gateway(settings: Any) -> dict[str, Any]:
-    gateways = settings.trusted_gateway_list
-    if not gateways:
-        line(
-            WARN,
-            "Почтовый шлюз",
-            "не указан: вердикты KSMG и других шлюзов учитываться не будут (MSP_TRUSTED_GATEWAYS)",
-        )
-    else:
-        line(OK, "Почтовый шлюз", ", ".join(gateways))
-    return {"trusted_gateways": list(gateways)}
+    elif decision is Readiness.NOT_READY:
+        lines.append("\nПилот начинать нельзя: сначала закройте блокеры.")
+    lines.append("\nПодробности: docs/EXCHANGE_PROBE_GUIDE.md")
+    return "\n".join(lines)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Проверка окружения перед пилотом (ТЗ 51)")
+    parser = argparse.ArgumentParser(description="Проверка готовности среды (ТЗ 1.0.1 §4.6)")
     parser.add_argument("--json", action="store_true", help="машиночитаемый вывод")
-    parser.add_argument("--ews-only", action="store_true")
-    parser.add_argument("--ad-only", action="store_true")
+    parser.add_argument("--markdown", metavar="FILE", help="записать отчёт в Markdown")
+    parser.add_argument("--pilot-mailbox", default="", help="проверить доступ к ящику пилота")
+    parser.add_argument(
+        "--section",
+        action="append",
+        choices=SECTIONS,
+        help="проверить только указанные разделы (можно повторять)",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
-    results: dict[str, Any] = {}
+    selected = set(args.section or SECTIONS)
+    report = ReadinessReport(environment=settings.environment)
 
-    if not args.json:
-        print("Проверка окружения Mail Security Platform")
-        print("=" * 60)
+    if "exchange" in selected:
+        probe_exchange(settings, report, pilot_mailbox=args.pilot_mailbox)
+    if "mailbox" in selected:
+        probe_security_mailbox(settings, report)
+    if "directory" in selected:
+        probe_directory(settings, report)
+    if "mailflow" in selected:
+        probe_mail_flow(settings, report, registry=_registry(settings))
+    if "addin" in selected:
+        probe_addin_prerequisites(settings, report)
+    if "pilot" in selected:
+        probe_pilot_policy(settings, report)
 
-    run_all = not (args.ews_only or args.ad_only)
-    if args.ews_only or run_all:
-        results["ews"] = probe_ews(settings)
-    if args.ad_only or run_all:
-        results["active_directory"] = probe_directory(settings)
-    if run_all:
-        results["security_mailbox"] = probe_security_mailbox(settings)
-        results["gateway"] = probe_gateway(settings)
-
+    if args.markdown:
+        Path(args.markdown).write_text(report.as_markdown(), encoding="utf-8")
     if args.json:
-        print(json.dumps(results, ensure_ascii=False, indent=2, default=str))
-        return 0
-
-    print("=" * 60)
-    blockers = [b for section in results.values() for b in (section.get("blockers") or [])]
-    if blockers:
-        print(f"\nОстались блокеры ({len(blockers)}):")
-        for blocker in blockers:
-            print(f"  - {blocker}")
-        print("\nПодробности: docs/EXCHANGE_COMPATIBILITY.md")
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, default=str))
     else:
-        print("\nБлокеров не обнаружено.")
-    print(
-        "\nПлатформа работает и без EWS: приём писем через security mailbox и надстройку "
-        "Outlook не требует ни одной возможности Exchange API."
-    )
-    return 0
+        print(render_text(report))
+        if args.markdown:
+            print(f"\nMarkdown-отчёт записан: {args.markdown}")
+
+    return 1 if report.decision() is Readiness.NOT_READY else 0
 
 
 if __name__ == "__main__":

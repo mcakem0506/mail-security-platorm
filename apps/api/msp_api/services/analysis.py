@@ -39,6 +39,7 @@ from msp_detection import (
 )
 from msp_detection.auth import parse_authentication_results, parse_received_spf
 from msp_detection.rules import RuleSet
+from msp_mail_gateway import detect_conflicts as detect_gateway_conflicts
 from msp_mail_parser import ParsedMessage, ParserLimits, parse_message
 from msp_risk import RISK_ENGINE_VERSION, RiskThresholds, employee_reasons, evaluate
 from sqlalchemy import func, select
@@ -64,7 +65,13 @@ from ..db.models import (
     ProviderLookup,
     RiskVerdictHistory,
 )
+from ..observability import rule_triggers
 from .campaigns import build_fingerprint, correlate
+from .gateways import build_registry as build_gateway_registry
+from .gateways import collect_findings as collect_gateway_findings
+from .gateways import empty_findings as empty_gateway_findings
+from .gateways import persist_conflicts, persist_evidence, record_trace
+from .pilot_metrics import record_rule_triggers
 from .storage import ObjectStorage, build_key
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,28 @@ _STATUS_BY_RISK = {
     RiskLevel.UNKNOWN: AnalysisStatus.UNKNOWN,
 }
 _RULESET: RuleSet | None = None
+
+
+def parser_limits(settings: Settings) -> ParserLimits:
+    """Parser limits from configuration (ТЗ 1.0.1 §4.2).
+
+    Each limit is separately configurable because the right value differs per organisation: a
+    firm that exchanges large CAD archives needs a different decompression budget from one that
+    exchanges invoices, and lowering a limit must not silently disable a whole category of
+    analysis without an explainable signal saying so.
+    """
+    return ParserLimits(
+        max_message_size=settings.limit_message_size,
+        max_attachment_size=settings.limit_attachment_size,
+        max_attachments=settings.limit_attachment_count,
+        max_parts=settings.limit_mime_parts,
+        max_mime_depth=settings.limit_mime_depth,
+        max_archive_depth=settings.limit_archive_depth,
+        max_extracted_total=settings.limit_decompressed_total,
+        max_extracted_file=settings.limit_decompressed_file,
+        max_urls=settings.limit_url_count,
+        timeout_seconds=settings.limit_parse_timeout_seconds,
+    )
 
 
 def get_ruleset() -> RuleSet:
@@ -105,7 +134,14 @@ def build_context(
     recipient_mailbox: str = "",
     sender_address: str = "",
     exclude_message_id: str | None = None,
+    parsed: ParsedMessage | None = None,
 ) -> AnalysisContext:
+    """Assemble everything the engines need from the database.
+
+    When ``parsed`` is supplied the upstream gateway layer runs here too, so the trust decision
+    about the delivery chain is made once per analysis and shared by every provider
+    (ТЗ 1.0.1 §4.3, ТЗ 1.0.2 §26).
+    """
     org = session.get(Organization, organization_id)
     corporate = tuple(org.corporate_domains or ()) if org else settings.corporate_domain_list
     trusted = tuple(org.trusted_infrastructure_domains or ()) if org else settings.trusted_infrastructure_list
@@ -137,6 +173,8 @@ def build_context(
             approved_external_systems=tuple(pi.approved_external_systems or ()),
             department=pi.department,
             title=pi.title,
+            risk_class=pi.risk_class,
+            vip=pi.vip,
         )
         for pi in identities
     )
@@ -213,12 +251,22 @@ def build_context(
             > 0
         )
 
+    gateway_findings = None
+    if parsed is not None:
+        try:
+            registry = build_gateway_registry(session, settings, organization_id)
+            gateway_findings = collect_gateway_findings(registry, parsed)
+        except Exception as exc:  # noqa: BLE001 - a gateway problem must not stop the analysis
+            logger.warning("gateway.layer_failed", extra={"error": type(exc).__name__})
+            gateway_findings = empty_gateway_findings()
+
     return AnalysisContext(
         organization_id=organization_id,
         organization_name=org.name if org else settings.organization_name,
         corporate_domains=corporate,
         trusted_infrastructure_domains=trusted,
         trusted_gateways=trusted_gateways,
+        gateway_findings=gateway_findings,
         protected_identities=protected,
         directory_users=users,
         exceptions=active_exceptions,
@@ -494,7 +542,9 @@ def persist_result(
     result.ruleset_fingerprint = detection.ruleset_fingerprint[:4000]
     result.risk_engine_version = RISK_ENGINE_VERSION
 
+    record_rule_triggers(session, organization_id=job.organization_id, signals=detection.signals)
     for detected in detection.signals:
+        rule_triggers.labels(detected.rule_id or "unknown").inc()
         session.add(
             DetectionSignal(
                 result_id=result.id,
@@ -538,7 +588,7 @@ def run_local_analysis(
     job.started_at = utcnow()
     session.flush()
 
-    parsed = parse_message(raw, ParserLimits())
+    parsed = parse_message(raw, parser_limits(settings))
     context = build_context(
         session,
         settings,
@@ -547,6 +597,7 @@ def run_local_analysis(
         reported_by=job.requester_mailbox or None,
         recipient_mailbox=job.requester_mailbox,
         sender_address=parsed.from_.address if parsed.from_ else "",
+        parsed=parsed,
     )
     message = persist_message(
         session,
@@ -591,7 +642,18 @@ def run_local_analysis(
         fingerprint=build_fingerprint(parsed),
         classification=verdict.classification.value,
     )
+    findings = context.gateway_findings
+    if findings is not None and findings.evidence:
+        persist_evidence(
+            session,
+            organization_id=job.organization_id,
+            message_id=message.id,
+            evidence=findings.evidence,
+        )
+        record_trace(session, organization_id=job.organization_id, message_id=message.id, parsed=parsed)
+
     duration = int((time.monotonic() - started) * 1000)
+    job.scan_completeness = str(detection.facts.get("scan_completeness") or "COMPLETE")
     job.state = JobState.PARTIAL
     job.ti_state = TIState.PENDING if collect_ti_indicators(detection) else TIState.NOT_REQUIRED
     job.status = _STATUS_BY_RISK[verdict.classification]
@@ -639,6 +701,7 @@ def apply_enrichment(
         recipient_mailbox=job.requester_mailbox,
         sender_address=message.sender_address,
         exclude_message_id=message.id,
+        parsed=parsed,
     )
     updated = analyze(parsed, context, enrichment, ruleset=get_ruleset())
     verdict = evaluate(
@@ -697,8 +760,26 @@ def apply_enrichment(
         if not enrichment.ti_configured
         else TIState.UNAVAILABLE
     )
+    # Conflicts are computed against the final verdict, so "gateway clean, platform high risk"
+    # is recorded once the platform's own verdict is settled (ТЗ 1.0.2 §28).
+    findings = context.gateway_findings
+    if findings is not None and findings.evidence:
+        persist_evidence(
+            session,
+            organization_id=job.organization_id,
+            message_id=message.id,
+            evidence=findings.evidence,
+        )
+        persist_conflicts(
+            session,
+            organization_id=job.organization_id,
+            message_id=message.id,
+            conflicts=detect_gateway_conflicts(findings.evidence, verdict.classification),
+        )
+
     job.state = JobState.COMPLETED
     job.status = _STATUS_BY_RISK[verdict.classification]
+    job.scan_completeness = str(updated.facts.get("scan_completeness") or "COMPLETE")
     job.finished_at = utcnow()
     if previous_classification != verdict.classification:
         session.add(
@@ -731,6 +812,9 @@ def employee_view(verdict: RiskVerdict, job: AnalysisJob, limit: int = 5) -> dic
             for r in employee_reasons(verdict, limit)
         ],
         "analysis_incomplete": bool(verdict.missing_evidence),
+        # UNSCANNABLE means the message was not examined at all. The add-in renders this
+        # differently from a completed check, so "проверено" is never shown (ТЗ 1.0.1 §4.2).
+        "scan_completeness": job.scan_completeness,
         "analyzed_at": (job.finished_at or job.started_at or utcnow()).isoformat(),
         "reported_to_security": job.is_report,
         "ti_state": job.ti_state.value,

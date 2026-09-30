@@ -255,3 +255,63 @@ worker-maintenance    только к разрешённым провайдер�
 | EWS-операции | нет фактических данных о среде (§51); реализован adapter boundary с перечнем blocker'ов |
 | Запись в Active Directory | запрещена (§49.8); в модуле нет ни одной операции записи |
 | Извлечение URL из QR-кодов и office-документов | отдельные поздние этапы (§11.1) |
+
+---
+
+## Дополнения этапов MSP 1.0.1 и 1.0.2
+
+### Пакет `providers/mail-gateway`
+
+Вся работа с внешними почтовыми шлюзами вынесена в отдельный пакет `msp_mail_gateway`:
+
+```text
+msp_mail_gateway/
+  received.py        разбор цепочки Received без обращений к DNS
+  trust.py           доказательство прохождения через узел; доверие к Authentication-Results
+  base.py            Protocol MailGatewayProvider и безопасные отказы по умолчанию
+  headers.py         общая нормализация статусов, оценок и имён угроз
+  ksmg.py            адаптер KSMG
+  generic_header.py  настраиваемый провайдер заголовков
+  builtin.py         EOP, SpamAssassin, generic AV
+  syslog.py          приём событий: allowlist, защита от повтора, дедупликация, dead-letter
+  api_base.py        каркас адаптера API: SSRF-шлюз, предохранитель, секреты
+  registry.py        реестр провайдеров, единое решение о доверии на сообщение
+  conflict.py        расхождения между источниками
+  skeletons.py       вендоры с реализованным разбором заголовков и объявленным API
+```
+
+### Направление зависимостей
+
+Движок детектирования **не зависит** ни от одного провайдера шлюза. Реестр собирается в
+сервисном слое API, результат приводится к `GatewayFindings` — структуре из типов
+`msp_contracts` — и передаётся в контекст анализа:
+
+```text
+БД (MailGateway, TrustedHop)
+      ↓
+services/gateways.build_registry()
+      ↓
+GatewayRegistry.analyze_message()   ← одно решение о доверии на сообщение
+      ↓
+GatewayFindings                      ← только типы msp_contracts
+      ↓
+msp_detection.build_facts()
+```
+
+Провайдер не вычисляет доверие сам: иначе адаптер мог бы доверять собственным заголовкам.
+
+### Устойчивый приём
+
+```text
+FETCH → IntakeRecord → содержимое в объектное хранилище → AnalysisJob → COMMIT → ack/Processed
+```
+
+Подтверждение выполняется вне транзакции намеренно: перемещение по IMAP не может входить в
+транзакцию БД, поэтому одно из двух неизбежно идёт вторым. Порядок выбран так, что худший исход —
+повторное чтение, а не потеря письма.
+
+### Новые таблицы
+
+`intake_records`, `mail_gateways`, `mail_gateway_nodes`, `trusted_mail_hops`, `mail_routes`,
+`gateway_credentials`, `gateway_capability_states`, `gateway_evidence`, `gateway_conflicts`,
+`message_traces`, `syslog_dead_letters`, `rule_statistics`, `pilot_metric_snapshots`.

@@ -32,7 +32,7 @@ from .filetype import (
 )
 from .html_safe import html_to_text, normalize_whitespace, sanitize_html
 from .limits import Deadline, LimitExceeded, ParserLimits
-from .urls import dedupe_urls, extract_urls_from_html, extract_urls_from_text
+from .urls import count_urls_in_text, dedupe_urls, extract_urls_from_html, extract_urls_from_text
 
 _ENCRYPTED_TYPES = {"multipart/encrypted", "application/pgp-encrypted"}
 _PKCS7 = {"application/pkcs7-mime", "application/x-pkcs7-mime"}
@@ -443,14 +443,20 @@ def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessa
     result.text_body = "\n".join(walker.text_parts)[: limits.max_text_chars]
     result.html_body = "\n".join(walker.html_parts)[: limits.max_html_size]
     urls: list[ExtractedUrl] = []
+    # Counted before extraction, because the extractors stop at the limit and a truncated list
+    # is indistinguishable from a short one.
+    total_urls_present = 0
     try:
         if result.html_body:
             html_urls, stats = extract_urls_from_html(result.html_body, limit=limits.max_urls)
             urls.extend(html_urls)
             result.html_stats = stats
+            if stats.get("links_truncated"):
+                result.limits_hit.append("MAX_URLS")
             result.sanitized_html = sanitize_html(result.html_body, limits.max_html_size)
         base_text = result.text_body or html_to_text(result.html_body)
         result.normalized_text = normalize_whitespace(base_text, limits.max_text_chars)
+        total_urls_present = count_urls_in_text(result.normalized_text)
         text_urls = extract_urls_from_text(result.normalized_text, limit=limits.max_urls)
         if result.html_body:
             # URLs only visible as text inside HTML are recorded as visible_text source.
@@ -460,6 +466,6 @@ def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessa
     except LimitExceeded as exc:
         result.limits_hit.append(exc.code)
     result.urls = dedupe_urls(urls, limits.max_urls)
-    if len(urls) > limits.max_urls:
+    if max(len(urls), total_urls_present) > limits.max_urls and "MAX_URLS" not in result.limits_hit:
         result.limits_hit.append("MAX_URLS")
     return result

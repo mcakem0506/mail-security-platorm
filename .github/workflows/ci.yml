@@ -59,7 +59,7 @@ jobs:
           python - <<'PY'
           from msp_detection import default_ruleset
           rules = default_ruleset()
-          assert len(rules.rules) >= 90, f"unexpected rule count: {len(rules.rules)}"
+          assert len(rules.rules) >= 110, f"unexpected rule count: {len(rules.rules)}"
           print(f"{len(rules.rules)} rules loaded")
           PY
 
@@ -80,9 +80,20 @@ jobs:
         # Any medium or high finding fails the build.
         run: bandit -c pyproject.toml -r packages apps/api/msp_api apps/worker providers scripts -ll
 
+      # Blocking, as required by ТЗ 1.0.1 §6. An advisory that cannot be fixed yet needs an
+      # explicit, dated entry in .pip-audit-ignore with the reason — not a silent pass.
       - name: pip-audit (dependency vulnerabilities)
-        run: pip-audit --strict --progress-spinner=off
-        continue-on-error: true
+        run: |
+          set -e
+          ignores=""
+          if [ -f .pip-audit-ignore ]; then
+            while read -r line; do
+              case "$line" in ''|'#'*) continue ;; esac
+              ignores="$ignores --ignore-vuln ${line%% *}"
+            done < .pip-audit-ignore
+            echo "::notice::approved exceptions:$ignores"
+          fi
+          pip-audit --strict --progress-spinner=off $ignores
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
@@ -101,6 +112,18 @@ jobs:
             exit 1
           fi
           echo "no secret files are tracked"
+
+      - name: Dependency lock consistency
+        # A lock file that no longer matches the manifest means the scanned set and the installed
+        # set are different, which makes every other result here unreliable.
+        run: |
+          set -e
+          cd apps/security-console
+          npm ci --dry-run >/dev/null
+          echo "npm lock file matches package.json"
+          cd ../..
+          pip install --quiet --dry-run -e ".[dev]" >/dev/null
+          echo "python requirements resolve"
 
       - name: No literal bidirectional control characters in source
         # Trojan Source: bidi controls can make reviewed code differ from executed code.
@@ -121,6 +144,104 @@ jobs:
               sys.exit(1)
           print("no literal bidirectional control characters")
           PY
+
+  sbom:
+    name: SBOM and container scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/security-console/package-lock.json
+
+      - name: Install
+        run: |
+          pip install -e ".[dev]" cyclonedx-bom
+          cd apps/security-console && npm ci
+
+      # CycloneDX for backend, frontend and image (ТЗ 1.0.1 §6). The SBOM is an artifact of the
+      # build, not a document maintained by hand: a hand-written one describes what someone
+      # believed was installed.
+      - name: SBOM (backend)
+        run: cyclonedx-py environment -o sbom-backend.cdx.json --output-format json
+
+      - name: SBOM (frontend)
+        working-directory: apps/security-console
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-format json --output-file ../../sbom-frontend.cdx.json
+
+      - name: Build the runtime image
+        run: docker build -f infrastructure/compose/Dockerfile.python -t msp-python:ci .
+
+      - name: SBOM (image)
+        uses: anchore/sbom-action@v0
+        with:
+          image: msp-python:ci
+          format: cyclonedx-json
+          output-file: sbom-image.cdx.json
+
+      # High and Critical block the build. An accepted risk needs a dated entry in
+      # .trivyignore with a reason, which is reviewable in a diff.
+      - name: Container vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: msp-python:ci
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      - name: Filesystem scan (dependencies and configuration)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      - name: Publish the SBOMs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ github.sha }}
+          path: sbom-*.cdx.json
+          retention-days: 90
+
+  acceptance-snapshot:
+    name: Acceptance snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # The acceptance document has to describe the revision it is attached to (ТЗ 1.0.1 §7).
+      - name: Generate the snapshot
+        run: python scripts/generate_acceptance_snapshot.py --out acceptance-snapshot.md
+      - name: Show it
+        run: cat acceptance-snapshot.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Validation corpus exports
+        run: python scripts/export_corpus.py --out "$RUNNER_TEMP/corpus"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-snapshot-${{ github.sha }}
+          path: acceptance-snapshot.md
+          retention-days: 90
 
   migrations:
     name: Migrations from scratch
@@ -173,9 +294,10 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+      # Blocking: a High or Critical advisory in a dependency that ships to the browser is a
+      # release blocker, not a warning.
       - name: Audit dependencies
         run: npm audit --audit-level=high
-        continue-on-error: true
 
   compose:
     name: Clean Compose start

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import email
+import hashlib
 import imaplib
 import logging
 import re
@@ -29,6 +30,7 @@ from .base import ExchangeCapability, ExchangeMessageRef, FetchedMessage
 logger = logging.getLogger(__name__)
 
 _UID_RE = re.compile(rb"UID (\d+)")
+_SIZE_RE = re.compile(rb"RFC822\.SIZE (\d+)")
 
 
 @dataclass
@@ -51,7 +53,13 @@ class SecurityMailboxConfig:
 
 @dataclass
 class IngestedReport:
-    """A message pulled from the security mailbox, with the original attachment unwrapped."""
+    """A message pulled from the security mailbox, with the original attachment unwrapped.
+
+    ``raw_mime`` is always the complete message as it arrived. When the report exceeds the
+    configured limit the bytes are dropped entirely and ``oversized`` is set, rather than the
+    message being cut short: analysing the first N bytes of a message and presenting the result
+    as an analysis is the mistake ТЗ 1.0.1 §4.2 exists to prevent.
+    """
 
     uid: str
     raw_mime: bytes
@@ -61,6 +69,12 @@ class IngestedReport:
     note: str = ""
     is_forwarded_original: bool = False
     warnings: list[str] = field(default_factory=list)
+    #: True when the report exceeded ``max_message_size`` and was therefore not read.
+    oversized: bool = False
+    #: The real size in the mailbox, recorded even when the content was not kept.
+    actual_size: int = 0
+    internet_message_id: str = ""
+    content_sha256: str = ""
 
 
 def _tls_context(config: SecurityMailboxConfig) -> ssl.SSLContext:
@@ -170,7 +184,15 @@ class SecurityMailboxProvider:
         return {ExchangeCapability.GET_MESSAGE, ExchangeCapability.SUBMIT_REPORT}
 
     def fetch_unprocessed(self, limit: int | None = None) -> list[IngestedReport]:
-        """Fetch unseen reports. Messages are marked \\Seen only after a successful read."""
+        """Fetch reports without acknowledging them.
+
+        Nothing is marked or moved here. The caller acknowledges a message with :meth:`ack`
+        only once the intake record and the analysis job are committed, so a crash anywhere in
+        between simply causes the message to be fetched again (ТЗ 1.0.1 §4.1).
+
+        ``BODY.PEEK`` is used deliberately: a plain FETCH sets the Seen flag as a side effect
+        and would silently turn a read into an acknowledgement.
+        """
         limit = limit or self.config.batch_size
         out: list[IngestedReport] = []
         conn = self._connect()
@@ -178,33 +200,124 @@ class SecurityMailboxProvider:
             status, _ = conn.select(self.config.folder, readonly=False)
             if status != "OK":
                 raise RuntimeError(f"cannot select folder {self.config.folder}")
-            status, data = conn.uid("SEARCH", None, "UNSEEN")  # type: ignore[arg-type]
+            # UNDELETED rather than UNSEEN: a message opened by a human, or by a worker that
+            # died before committing, is still unprocessed as far as this platform knows.
+            status, data = conn.uid("SEARCH", None, "UNDELETED")  # type: ignore[arg-type]
             if status != "OK" or not data or not data[0]:
                 return out
-            uids = data[0].split()[:limit]
+            # imaplib returns UIDs as bytes but takes them back as str, so they are decoded
+            # once here rather than at every call site.
+            uids = [raw.decode("ascii", "ignore") for raw in data[0].split()[:limit]]
             for uid in uids:
-                status, payload = conn.uid("FETCH", uid, "(BODY.PEEK[])")
-                if status != "OK" or not payload or not isinstance(payload[0], tuple):
-                    continue
-                raw = payload[0][1]
-                if not isinstance(raw, bytes):
-                    continue
-                report = self._to_report(uid.decode(), raw)
-                out.append(report)
-                conn.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+                report = self._fetch_one(conn, uid)
+                if report is not None:
+                    out.append(report)
         finally:
-            try:
-                conn.close()
-                conn.logout()
-            except (imaplib.IMAP4.error, OSError):
-                pass
+            self._disconnect(conn)
         return out
+
+    def _fetch_one(self, conn: imaplib.IMAP4, uid: str) -> IngestedReport | None:
+        """Read one message, checking its size before downloading the body."""
+        size = self._message_size(conn, uid)
+        if size > self.config.max_message_size:
+            # The body is never downloaded: it would only be discarded, and pulling tens of
+            # megabytes per poll is itself a denial-of-service vector.
+            return IngestedReport(
+                uid=uid,
+                raw_mime=b"",
+                oversized=True,
+                actual_size=size,
+                warnings=[f"report exceeds max_message_size ({size} > {self.config.max_message_size})"],
+            )
+        status, payload = conn.uid("FETCH", uid, "(BODY.PEEK[])")
+        if status != "OK" or not payload or not isinstance(payload[0], tuple):
+            return None
+        raw = payload[0][1]
+        if not isinstance(raw, bytes):
+            return None
+        return self._to_report(uid, raw)
+
+    def _message_size(self, conn: imaplib.IMAP4, uid: str) -> int:
+        status, payload = conn.uid("FETCH", uid, "(RFC822.SIZE)")
+        if status != "OK" or not payload:
+            return 0
+        for item in payload:
+            blob = item[0] if isinstance(item, tuple) else item
+            if isinstance(blob, bytes):
+                match = _SIZE_RE.search(blob)
+                if match:
+                    return int(match.group(1))
+        return 0
+
+    def _disconnect(self, conn: imaplib.IMAP4) -> None:
+        try:
+            conn.close()
+            conn.logout()
+        except (imaplib.IMAP4.error, OSError):
+            pass
+
+    # -- acknowledgement (ТЗ 1.0.1 §4.1) -------------------------------------------------------
+    def ack(self, uid: str) -> bool:
+        """Move a successfully ingested message to the Processed folder."""
+        return self._move(uid, self.config.processed_folder)
+
+    def fail(self, uid: str) -> bool:
+        """Move a message that cannot be ingested to the Failed folder (dead letter)."""
+        return self._move(uid, self.config.failed_folder)
+
+    def _move(self, uid: str, folder: str) -> bool:
+        conn = self._connect()
+        try:
+            status, _ = conn.select(self.config.folder, readonly=False)
+            if status != "OK":
+                return False
+            self._ensure_folder(conn, folder)
+            conn.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+            # MOVE (RFC 6851) is atomic where the server supports it; otherwise fall back to
+            # COPY plus delete, which can leave the message in both folders after a crash —
+            # harmless here, because the intake record already deduplicates.
+            status, _ = conn.uid("MOVE", uid, folder)
+            if status == "OK":
+                return True
+            status, _ = conn.uid("COPY", uid, folder)
+            if status != "OK":
+                return False
+            conn.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+            conn.expunge()
+            return True
+        except (imaplib.IMAP4.error, OSError) as exc:
+            logger.warning("security_mailbox.move_failed", extra={"error": type(exc).__name__})
+            return False
+        finally:
+            self._disconnect(conn)
+
+    def _ensure_folder(self, conn: imaplib.IMAP4, folder: str) -> None:
+        """Create the destination folder on first use, then return to the source folder."""
+        try:
+            status, _ = conn.select(folder, readonly=True)
+            if status != "OK":
+                conn.create(folder)
+                conn.subscribe(folder)
+        except (imaplib.IMAP4.error, OSError):
+            # An existing folder under a different namespace separator is not an error here:
+            # the move itself will report the real failure.
+            pass
+        finally:
+            conn.select(self.config.folder, readonly=False)
 
     def _to_report(self, uid: str, raw: bytes) -> IngestedReport:
         warnings: list[str] = []
         if len(raw) > self.config.max_message_size:
-            warnings.append("report exceeds max_message_size and was truncated")
-            raw = raw[: self.config.max_message_size]
+            # The server under-reported RFC822.SIZE, or the limit changed between the two
+            # calls. The message is still not truncated: it is marked oversized and left
+            # unanalysed, which is the whole point of ТЗ 1.0.1 §4.2.
+            return IngestedReport(
+                uid=uid,
+                raw_mime=b"",
+                oversized=True,
+                actual_size=len(raw),
+                warnings=[f"report exceeds max_message_size ({len(raw)})"],
+            )
         outer = email.message_from_bytes(raw[:65536], policy=policy.compat32)
         from email.utils import getaddresses
 
@@ -221,6 +334,12 @@ class SecurityMailboxProvider:
         original, unwrapped, note = extract_original_message(raw)
         if not unwrapped:
             warnings.append("original message was not attached as message/rfc822; headers may be incomplete")
+        inner_message_id = ""
+        try:
+            inner = email.message_from_bytes(original[:65536], policy=policy.compat32)
+            inner_message_id = str(inner.get("Message-ID") or "").strip()[:998]
+        except (ValueError, TypeError):
+            warnings.append("could not read the Message-ID of the reported message")
         return IngestedReport(
             uid=uid,
             raw_mime=original,
@@ -230,6 +349,9 @@ class SecurityMailboxProvider:
             note=note,
             is_forwarded_original=unwrapped,
             warnings=warnings,
+            actual_size=len(raw),
+            internet_message_id=inner_message_id,
+            content_sha256=hashlib.sha256(original).hexdigest(),
         )
 
     def get_message(self, ref: ExchangeMessageRef) -> FetchedMessage:

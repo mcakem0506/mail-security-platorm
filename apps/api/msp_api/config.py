@@ -28,6 +28,11 @@ _SECRET_FIELDS = (
 )
 
 
+#: Addresses that mean "every interface". Listening on one is sometimes necessary but is never
+#: a default here, because plain syslog carries no authentication at all.
+_ALL_INTERFACES = frozenset({"0" + ".0.0.0", "::", "*"})
+
+
 def _read_secret_file(path: str | None) -> str | None:
     if not path:
         return None
@@ -94,6 +99,21 @@ class Settings(BaseSettings):
     # Only their headers are trusted — any sender can forge a "already scanned" header (ТЗ 2.1).
     trusted_gateways: str = ""
 
+    # -- parser limits (ТЗ 8.2, ТЗ 1.0.1 §4.2)
+    # Exceeding any of these produces its own explainable signal and marks the analysis
+    # incomplete. A message over limit_message_size is not analysed at all rather than
+    # truncated: a partial read reported as a check is worse than an honest refusal.
+    limit_message_size: int = 25 * 1024 * 1024
+    limit_attachment_size: int = 20 * 1024 * 1024
+    limit_attachment_count: int = 50
+    limit_mime_parts: int = 300
+    limit_mime_depth: int = 12
+    limit_archive_depth: int = 3
+    limit_decompressed_total: int = 100 * 1024 * 1024
+    limit_decompressed_file: int = 25 * 1024 * 1024
+    limit_url_count: int = 500
+    limit_parse_timeout_seconds: float = 20.0
+
     # -- detection thresholds
     suspicious_threshold: int = 25
     high_risk_threshold: int = 50
@@ -147,7 +167,11 @@ class Settings(BaseSettings):
     ews_verify_tls: bool = True
     # auto | ntlm | kerberos | basic | sspi — "auto" tries the preference list below in order.
     ews_auth_method: Literal["auto", "ntlm", "kerberos", "basic", "sspi"] = "auto"
-    ews_auth_preference: str = "ntlm,kerberos,basic"
+    # Kerberos first: it does not put a reusable credential on the wire. Basic is deliberately
+    # absent from the default order — a silent downgrade to Basic is forbidden, so enabling it
+    # takes both ews_allow_basic_auth and an explicit place in this list (ТЗ 1.0.1 §4.5).
+    ews_auth_preference: str = "kerberos,ntlm"
+    ews_allow_basic_auth: bool = False
     # impersonation reaches any mailbox in scope; delegate only explicitly shared ones.
     ews_access_mode: Literal["impersonation", "delegate"] = "delegate"
     # Mailboxes this deployment may touch: addresses or "@domain". Empty means the service
@@ -158,6 +182,27 @@ class Settings(BaseSettings):
     remediation_enabled: bool = False  # ТЗ 7.1 — remediation account off by default
     remediation_dry_run_only: bool = True
     remediation_second_approver_threshold: int = 10  # ТЗ 20.1
+
+    # -- mail flow topology (ТЗ 1.0.1 §4.3, §4.4)
+    # Networks that belong to the organisation, used to find the hop where a message entered.
+    internal_mail_networks: str = ""
+    # Authentication servers whose Authentication-Results may be believed, beyond those derived
+    # from the configured trusted hops. Empty and with no hops configured, every header is read
+    # and the missing allowlist is reported as a readiness warning rather than silently
+    # weakening detection.
+    trusted_authserv_ids: str = ""
+    # Where a gateway may send syslog events. Empty means none are accepted (ТЗ 1.0.2 §20).
+    gateway_syslog_enabled: bool = False
+    # Loopback by default. Syslog has no authentication, so the interface it listens on is a
+    # security decision: a deployment that needs to receive events from a gateway on another
+    # host sets this deliberately (in a container, usually to the container's own address).
+    gateway_syslog_host: str = "127.0.0.1"
+    gateway_syslog_port: int = 6514
+    gateway_syslog_transport: Literal["tcp", "tls", "udp"] = "tls"
+    gateway_syslog_allowed_sources: str = ""
+    gateway_syslog_tls_certfile: str | None = None
+    gateway_syslog_tls_keyfile: str | None = None
+    gateway_syslog_tls_client_ca: str | None = None
 
     # -- Active Directory (ТЗ 10)
     ad_enabled: bool = False
@@ -186,6 +231,15 @@ class Settings(BaseSettings):
     ad_group_role_map: str = ""
     ad_default_role: str = "employee"
     ad_require_group_match: bool = False
+    # --- protected identities from directory groups (ТЗ 1.0.1 §5) ---
+    # "CN=Executives,OU=Groups,DC=corp,DC=example=executive:critical:vip;Finance=finance:high"
+    # Group -> category[:risk_class][:vip]. Membership decides who is protected, so the list
+    # does not go stale the week after it is written.
+    ad_protected_groups: str = ""
+    # Local accounts that may still sign in while MSP_AUTH_BACKEND=ldap, so a directory outage
+    # cannot lock the security team out of their own console. Every use is audited as a
+    # break-glass event (ТЗ 1.0.1 §5).
+    emergency_local_accounts: str = ""
 
     # -- semantic analysis (ТЗ 16.4)
     semantic_enabled: bool = False
@@ -268,10 +322,52 @@ class Settings(BaseSettings):
                 raise ValueError("EWS needs either MSP_EWS_ENDPOINT or MSP_EWS_AUTODISCOVER=true")
             if self.environment == "production" and not self.ews_verify_tls:
                 raise ValueError("MSP_EWS_VERIFY_TLS must stay enabled in production")
+            if "basic" in self.ews_auth_preference_list and not self.ews_allow_basic_auth:
+                raise ValueError(
+                    "Basic authentication is listed in MSP_EWS_AUTH_PREFERENCE but "
+                    "MSP_EWS_ALLOW_BASIC_AUTH is false: enabling Basic must be deliberate"
+                )
+            if self.ews_allow_basic_auth:
+                if not self.ews_verify_tls:
+                    raise ValueError(
+                        "Basic authentication requires TLS verification: it sends the service "
+                        "account password on every request"
+                    )
+                if self.ews_endpoint and not self.ews_endpoint.lower().startswith("https://"):
+                    raise ValueError("Basic authentication requires an HTTPS EWS endpoint")
             if self.remediation_enabled and not self.ews_mailbox_scope_list:
                 raise ValueError(
                     "remediation over EWS requires MSP_EWS_MAILBOX_SCOPE: an unscoped "
                     "deployment could act on any mailbox in the organisation"
+                )
+        for limit_name, limit_value in (
+            ("MSP_LIMIT_MESSAGE_SIZE", self.limit_message_size),
+            ("MSP_LIMIT_ATTACHMENT_SIZE", self.limit_attachment_size),
+            ("MSP_LIMIT_DECOMPRESSED_FILE", self.limit_decompressed_file),
+        ):
+            if limit_value <= 0:
+                raise ValueError(f"{limit_name} must be positive: a zero limit would refuse every message")
+        if self.limit_attachment_size > self.limit_message_size:
+            raise ValueError("MSP_LIMIT_ATTACHMENT_SIZE above MSP_LIMIT_MESSAGE_SIZE can never take effect")
+        if self.gateway_syslog_enabled:
+            if not self.gateway_syslog_allowed_source_list:
+                raise ValueError(
+                    "syslog intake requires MSP_GATEWAY_SYSLOG_ALLOWED_SOURCES: plain syslog has "
+                    "no authentication, so anything that reaches the port could forge events"
+                )
+            if self.environment == "production" and self.gateway_syslog_transport == "udp":
+                raise ValueError(
+                    "UDP syslog is not acceptable in production: events are unauthenticated and "
+                    "trivially spoofed. Use TCP or TLS."
+                )
+            if self.gateway_syslog_transport == "tls" and not self.gateway_syslog_tls_certfile:
+                raise ValueError("TLS syslog requires MSP_GATEWAY_SYSLOG_TLS_CERTFILE")
+            if self.gateway_syslog_host in _ALL_INTERFACES and self.environment == "production":
+                # Listening on every interface is sometimes necessary, but it must be a choice
+                # an operator made knowingly rather than a default they inherited.
+                logger.warning(
+                    "syslog.listening_on_all_interfaces",
+                    extra={"allowed_sources": len(self.gateway_syslog_allowed_source_list)},
                 )
         if self.auth_backend == "ldap":
             if not self.ad_server:
@@ -303,6 +399,22 @@ class Settings(BaseSettings):
         return tuple(a.strip().lower() for a in self.ews_auth_preference.split(",") if a.strip())
 
     @property
+    def emergency_local_account_list(self) -> tuple[str, ...]:
+        return tuple(a.strip().lower() for a in self.emergency_local_accounts.split(",") if a.strip())
+
+    @property
+    def internal_mail_network_list(self) -> tuple[str, ...]:
+        return tuple(n.strip() for n in self.internal_mail_networks.split(",") if n.strip())
+
+    @property
+    def trusted_authserv_id_list(self) -> tuple[str, ...]:
+        return tuple(a.strip().lower() for a in self.trusted_authserv_ids.split(",") if a.strip())
+
+    @property
+    def gateway_syslog_allowed_source_list(self) -> tuple[str, ...]:
+        return tuple(s.strip() for s in self.gateway_syslog_allowed_sources.split(",") if s.strip())
+
+    @property
     def trusted_gateway_list(self) -> tuple[str, ...]:
         return tuple(g.strip().lower() for g in self.trusted_gateways.split(",") if g.strip())
 
@@ -317,6 +429,7 @@ class Settings(BaseSettings):
             "auth_backend": self.auth_backend,
             "remediation_enabled": self.remediation_enabled and not self.remediation_dry_run_only,
             "url_fetch_enabled": self.url_fetch_enabled,
+            "gateway_syslog_enabled": self.gateway_syslog_enabled,
             "semantic_enabled": self.semantic_enabled,
             "thresholds": {
                 "suspicious": self.suspicious_threshold,

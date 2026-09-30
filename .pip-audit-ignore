@@ -1,0 +1,10 @@
+# Accepted Python dependency advisories (ТЗ 1.0.1 §6).
+#
+# One advisory id per line, with a date and a reason. Blocking is the default: an advisory with no
+# entry here fails the build. An entry is an explicit, reviewable decision that the risk is
+# accepted for now, not a way to make the check quiet.
+#
+# Format:
+#   GHSA-xxxx-xxxx-xxxx  # YYYY-MM-DD reason, and when this will be revisited
+#
+# (empty: no exceptions are currently approved)

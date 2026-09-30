@@ -181,3 +181,39 @@ class ProtectedCategory(StrEnum):
     SECURITY = "security"
     PROCUREMENT = "procurement"
     VIP = "vip"
+
+
+class IntakeState(StrEnum):
+    """Durable intake state machine for the security mailbox (ТЗ 1.0.1 §4.1).
+
+    A message is only acknowledged in the mailbox after its intake record, its raw content and
+    its analysis job are committed. The IMAP ``Seen`` flag is not a receipt: a worker that dies between the
+    FETCH and the commit must find the message again on the next poll.
+    """
+
+    FETCHED = "FETCHED"  # persisted, raw content not yet stored
+    STORED = "STORED"  # raw content committed to object storage
+    JOB_CREATED = "JOB_CREATED"  # analysis job exists; safe to acknowledge
+    ACKNOWLEDGED = "ACKNOWLEDGED"  # moved to the Processed folder
+    DUPLICATE = "DUPLICATE"  # same report already ingested
+    RETRY = "RETRY"  # transient failure, will be picked up again
+    DEAD_LETTER = "DEAD_LETTER"  # gave up after max retries; moved to Failed
+
+
+#: States from which a poll may safely re-process the message.
+INTAKE_RESUMABLE = frozenset({IntakeState.FETCHED, IntakeState.STORED, IntakeState.RETRY})
+#: States that mean the intake is finished, successfully or not.
+INTAKE_TERMINAL = frozenset({IntakeState.ACKNOWLEDGED, IntakeState.DUPLICATE, IntakeState.DEAD_LETTER})
+
+
+class ScanCompleteness(StrEnum):
+    """How much of a message the platform was actually able to examine (ТЗ 1.0.1 §4.2).
+
+    ``UNSCANNABLE`` and ``LIMIT_EXCEEDED`` never produce reassuring wording: a message that
+    could not be examined is not a message that was found clean.
+    """
+
+    COMPLETE = "COMPLETE"
+    LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
+    UNSCANNABLE = "UNSCANNABLE"
+    PARTIAL = "PARTIAL"

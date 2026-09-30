@@ -73,6 +73,9 @@ def _identity_out(row: ProtectedIdentity) -> ProtectedIdentityOut:
         title=row.title,
         enabled=row.enabled,
         created_at=row.created_at,
+        risk_class=row.risk_class,
+        vip=row.vip,
+        source=row.source,
     )
 
 

@@ -123,7 +123,31 @@ def script_names(text: str) -> set[str]:
 
 
 def is_mixed_script(text: str) -> bool:
+    """True when the string as a whole uses more than one script.
+
+    For a *domain* this is the right test: a single label mixing scripts is what punycode
+    spoofing looks like. For free text such as a display name it is far too broad — see
+    :func:`has_mixed_script_token`.
+    """
     return len(script_names(text)) > 1
+
+
+#: Words split on whitespace and the punctuation that separates name parts.
+_WORD_SPLIT_RE = re.compile(r"[\s.,\-_/\\()\[\]«»\"']+")
+
+
+def has_mixed_script_token(text: str) -> bool:
+    """True when a *single word* mixes scripts.
+
+    This is the distinction that matters for display names. ``Отдел продаж Partner`` mixes
+    Cyrillic and Latin, but each word is written in one script — an ordinary Russian company name
+    containing a Latin brand. ``Аpple`` mixes them *inside one word*, with a Cyrillic А standing
+    in for the Latin one, and nothing legitimate is written that way.
+
+    Judging the whole string instead flags a large share of normal Russian corporate mail, which
+    is how a detection rule teaches people to ignore it.
+    """
+    return any(len(word) > 1 and len(script_names(word)) > 1 for word in _WORD_SPLIT_RE.split(text or ""))
 
 
 @lru_cache(maxsize=16384)

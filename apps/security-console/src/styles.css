@@ -491,3 +491,52 @@ textarea {
 
 .errors { color: var(--critical); }
 .warnings { color: var(--medium); }
+
+
+/* Mail gateway views (ТЗ 1.0.2 §24, §25) */
+.struck {
+  text-decoration: line-through;
+}
+
+.small {
+  font-size: 0.85em;
+}
+
+.warning {
+  border-left: 3px solid var(--color-warning, #b8860b);
+  padding: 0.5rem 0.75rem;
+  background: rgba(184, 134, 11, 0.08);
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.form-row input,
+.form-row select {
+  padding: 0.35rem 0.5rem;
+  min-width: 12rem;
+}
+
+.card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.hops {
+  margin-top: 1rem;
+}
+
+.conflicts ul {
+  margin: 0.25rem 0 0.75rem 1rem;
+}
+
+.tag--ok {
+  background: rgba(34, 139, 34, 0.15);
+}

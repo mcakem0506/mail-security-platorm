@@ -375,6 +375,11 @@ class ProtectedIdentityRequest(ApiModel):
 class ProtectedIdentityOut(ProtectedIdentityRequest):
     identity_id: str
     created_at: datetime
+    #: critical|high|medium|low — how much damage impersonating this identity would do.
+    risk_class: str = "medium"
+    vip: bool = False
+    #: "directory" when derived from an AD group, "manual" when an analyst created it.
+    source: str = "manual"
 
 
 class PolicyUpdateRequest(ApiModel):
@@ -388,6 +393,104 @@ class PolicyOut(ApiModel):
     version: int
     updated_by: str | None
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------------------------
+# Mail gateways (ТЗ 1.0.2 §24, §25)
+# ---------------------------------------------------------------------------------------------
+class TrustedHopUpsertRequest(ApiModel):
+    """A hop whose headers may be believed once the chain proves the message passed it."""
+
+    hop_type: Literal["gateway", "exchange_edge", "exchange_mailbox", "relay"] = "gateway"
+    hostname: str = Field(default="", max_length=255)
+    ip_networks: list[str] = Field(default_factory=list, max_length=50)
+    expected_headers: list[str] = Field(default_factory=list, max_length=50)
+    #: Authentication servers whose Authentication-Results this hop is allowed to write.
+    authserv_ids: list[str] = Field(default_factory=list, max_length=20)
+    #: Position counted from the delivery end, or null for "anywhere in the chain".
+    position_in_chain: int | None = Field(default=None, ge=0, le=50)
+    enabled: bool = True
+
+
+class TrustedHopOut(ApiModel):
+    hop_id: str
+    hop_type: str
+    hostname: str
+    ip_networks: list[str]
+    expected_headers: list[str]
+    authserv_ids: list[str]
+    position_in_chain: int | None
+    direction: str
+    enabled: bool
+    gateway_id: str | None
+
+
+class GatewayUpsertRequest(ApiModel):
+    provider_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    provider_type: str = Field(min_length=1, max_length=32)
+    display_name: str = Field(default="", max_length=255)
+    vendor: str = Field(default="", max_length=64)
+    direction: Literal["inbound", "outbound", "both"] = "inbound"
+    enabled: bool = True
+    #: Header mappings and syslog sources. Credential *values* are refused here (ТЗ 28).
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class GatewayOut(ApiModel):
+    gateway_id: str
+    provider_id: str
+    provider_type: str
+    display_name: str
+    vendor: str
+    direction: str
+    enabled: bool
+    settings: dict[str, Any]
+    capabilities: list[str]
+    trusted_hops: list[TrustedHopOut]
+    nodes: list[dict[str, Any]]
+    last_event_at: datetime | None
+    last_error: str | None
+    last_error_at: datetime | None
+
+
+class GatewayEvidenceOut(ApiModel):
+    """One gateway observation. ``trusted`` decides whether it influenced the verdict."""
+
+    provider_id: str
+    provider_type: str
+    verdict: str
+    category: str
+    engine: str
+    threat_name: str
+    score: float | None
+    policy: str
+    source: str
+    trusted: bool
+    trust_state: str
+    trust_reason: str
+    observed_at: datetime
+    detail: dict[str, Any]
+
+
+class GatewayConflictOut(ApiModel):
+    conflict_id: str
+    kind: str
+    summary: str
+    providers: list[str]
+    detail: dict[str, Any]
+    detected_at: datetime
+    resolved_at: datetime | None = None
+    resolution: str = ""
+
+
+class UpstreamProtectionResponse(ApiModel):
+    """The Upstream Protection card of ТЗ 1.0.2 §24."""
+
+    message_id: str
+    present: bool
+    evidence: list[GatewayEvidenceOut]
+    conflicts: list[GatewayConflictOut]
+    note: str
 
 
 # ---------------------------------------------------------------------------------------------

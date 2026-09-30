@@ -27,6 +27,10 @@ MINIMAL_ATTRIBUTES: tuple[str, ...] = (
     "userAccountControl",
 )
 OPTIONAL_ATTRIBUTES: tuple[str, ...] = ("title", "manager")
+#: Read only when protected-identity groups are configured. Group membership is the directory's
+#: own statement about who matters, which is why ТЗ 1.0.1 §5 derives risk class from it rather
+#: than from a list maintained by hand in the platform.
+GROUP_ATTRIBUTES: tuple[str, ...] = ("memberOf",)
 
 _UAC_ACCOUNTDISABLE = 0x0002
 
@@ -40,6 +44,8 @@ class DirectoryEntry:
     department: str = ""
     title: str = ""
     manager_dn: str = ""
+    #: Distinguished names of the groups this account belongs to, when group sync is enabled.
+    groups: tuple[str, ...] = ()
     enabled: bool = True
     deleted: bool = False
 
@@ -76,6 +82,8 @@ class ActiveDirectoryConfig:
     base_dn: str = ""
     user_filter: str = "(&(objectCategory=person)(objectClass=user)(mail=*))"
     include_optional_attributes: bool = False
+    #: Read group membership, needed to derive protected identities (ТЗ 1.0.1 §5).
+    include_groups: bool = False
     page_size: int = 500
     timeout_seconds: float = 30.0
     ca_file: str | None = None
@@ -132,8 +140,28 @@ class ActiveDirectoryProvider:
             receive_timeout=cfg.timeout_seconds,
         )
 
+    def _base_dn(self, conn: Any) -> str:
+        """The configured base DN, or the domain root read from RootDSE.
+
+        Discovering it keeps the module usable in any forest without the organisation having to
+        supply its directory layout up front.
+        """
+        if self.config.base_dn:
+            return self.config.base_dn
+        try:
+            info = conn.server.info
+            contexts = list(getattr(info, "naming_contexts", None) or [])
+            default = getattr(info, "other", {}).get("defaultNamingContext")
+            if default:
+                return str(default[0] if isinstance(default, list) else default)
+            if contexts:
+                return str(contexts[0])
+        except Exception as exc:  # noqa: BLE001 - discovery failure is reported, not raised
+            logger.warning("active_directory.base_dn_discovery_failed", extra={"error": type(exc).__name__})
+        return ""
+
     def health(self) -> ProviderHealth:
-        if not self.config.server or not self.config.base_dn:
+        if not self.config.server:
             return ProviderHealth(
                 provider_id=self.provider_id,
                 status="not_configured",
@@ -143,8 +171,15 @@ class ActiveDirectoryProvider:
             conn = self._connect()
             try:
                 ok = bool(conn.bound)
+                base_dn = self._base_dn(conn)
             finally:
                 conn.unbind()
+            if ok and not base_dn:
+                return ProviderHealth(
+                    provider_id=self.provider_id,
+                    status="degraded",
+                    detail="bound, but no base DN configured and none discoverable from RootDSE",
+                )
             return ProviderHealth(
                 provider_id=self.provider_id,
                 status="ok" if ok else "degraded",
@@ -161,7 +196,7 @@ class ActiveDirectoryProvider:
     def sync(self, since: str | None = None) -> SyncResult:
         """Full or incremental (uSNChanged-based) sync of the minimal attribute set."""
         result = SyncResult(incremental=since is not None)
-        if not self.config.server or not self.config.base_dn:
+        if not self.config.server:
             result.errors.append("Active Directory not configured")
             result.finished_at = utcnow()
             return result
@@ -169,6 +204,8 @@ class ActiveDirectoryProvider:
         attributes = list(MINIMAL_ATTRIBUTES)
         if self.config.include_optional_attributes:
             attributes.extend(OPTIONAL_ATTRIBUTES)
+        if self.config.include_groups:
+            attributes.extend(GROUP_ATTRIBUTES)
         search_filter = self.config.user_filter
         if since:
             search_filter = f"(&{search_filter}(uSNChanged>={since}))"
@@ -180,9 +217,16 @@ class ActiveDirectoryProvider:
             result.errors.append(f"bind failed: {type(exc).__name__}")
             result.finished_at = utcnow()
             return result
+        base_dn = self._base_dn(conn)
+        if not base_dn:
+            result.errors.append("no base DN configured and none discoverable from RootDSE")
+            result.finished_at = utcnow()
+            with contextlib.suppress(Exception):
+                conn.unbind()
+            return result
         try:
             entries = conn.extend.standard.paged_search(
-                search_base=self.config.base_dn,
+                search_base=base_dn,
                 search_filter=search_filter,
                 attributes=[*attributes, "uSNChanged"],
                 paged_size=self.config.page_size,
@@ -214,6 +258,7 @@ class ActiveDirectoryProvider:
                         department=str(attrs.get("department") or "").strip(),
                         title=str(attrs.get("title") or "").strip(),
                         manager_dn=str(attrs.get("manager") or "").strip(),
+                        groups=tuple(str(g).strip() for g in (attrs.get("memberOf") or []) if g),
                         enabled=enabled,
                     )
                 )

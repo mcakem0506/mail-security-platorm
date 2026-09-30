@@ -82,11 +82,16 @@ class EwsConfig:
     username: str = ""
     password: str = ""
     auth_method: EwsAuthMethod = EwsAuthMethod.AUTO
+    # Kerberos first: it authenticates without placing a reusable credential on the wire, and
+    # an on-premises Exchange in a domain almost always supports it. Basic is absent from the
+    # default order on purpose — see ``allow_basic_auth`` (ТЗ 1.0.1 §4.5).
     auth_preference: tuple[EwsAuthMethod, ...] = (
-        EwsAuthMethod.NTLM,
         EwsAuthMethod.KERBEROS,
-        EwsAuthMethod.BASIC,
+        EwsAuthMethod.NTLM,
     )
+    #: Basic sends the service account password on every request. It is never reached by
+    #: negotiation: a silent downgrade is exactly what this flag prevents.
+    allow_basic_auth: bool = False
     access_mode: EwsAccessMode = EwsAccessMode.DELEGATE
     verify_tls: bool = True
     ca_file: str | None = None
@@ -112,6 +117,17 @@ class EwsConfig:
             problems.append(BLOCKERS[2])
         if not self.verify_tls:
             problems.append("TLS verification is disabled: not acceptable for production (ТЗ 44)")
+        if self.allow_basic_auth:
+            # Not a configuration error, but the deployment is not production-ready until the
+            # choice has been accepted explicitly (ТЗ 1.0.1 §4.5).
+            problems.append(
+                "Basic authentication is enabled: the service account password is sent on every "
+                "request. Production readiness stays degraded until this is approved separately."
+            )
+            if self.endpoint and not self.endpoint.lower().startswith("https://"):
+                problems.append("Basic authentication over plain HTTP is refused")
+            if not self.verify_tls:
+                problems.append("Basic authentication with TLS verification disabled is refused")
         if (
             self.remediation_account_enabled
             and self.access_mode is EwsAccessMode.DELEGATE
@@ -204,6 +220,10 @@ class OnPremEwsExchangeProvider:
         self.config = config
         self._account: Any = None
         self._report: EwsCapabilityReport | None = None
+        #: Which method the last successful connection used, for health and audit.
+        self.last_auth_method: str = ""
+        #: True once a connection has actually been made over Basic.
+        self.basic_auth_in_use: bool = False
 
     # -- configuration ------------------------------------------------------------------------
     def blockers(self) -> list[str]:
@@ -211,6 +231,28 @@ class OnPremEwsExchangeProvider:
         if self._report is not None and self._report.errors:
             problems.extend(self._report.errors)
         return problems
+
+    def auth_order(self) -> list[EwsAuthMethod]:
+        """The methods that may be attempted, in order.
+
+        Basic is filtered out unless it was enabled deliberately, whether it appears in the
+        preference list or was requested outright. A deployment whose only configured method is
+        Basic therefore gets an empty list and a clear refusal, rather than quietly falling back
+        to sending the password (ТЗ 1.0.1 §4.5).
+        """
+        requested: list[EwsAuthMethod] = (
+            [self.config.auth_method]
+            if self.config.auth_method is not EwsAuthMethod.AUTO
+            else [EwsAuthMethod(m) for m in self.config.auth_preference]
+        )
+        allowed: list[EwsAuthMethod] = []
+        for method in requested:
+            if method is EwsAuthMethod.BASIC and not self.config.allow_basic_auth:
+                logger.warning("ews.basic_auth_refused", extra={"reason": "not explicitly enabled"})
+                continue
+            if method not in allowed:
+                allowed.append(method)
+        return allowed
 
     def _auth_candidates(self) -> list[Any]:
         exchangelib = _import_exchangelib()
@@ -220,9 +262,14 @@ class OnPremEwsExchangeProvider:
             EwsAuthMethod.BASIC: exchangelib.BASIC,
             EwsAuthMethod.SSPI: exchangelib.SSPI,
         }
-        if self.config.auth_method is not EwsAuthMethod.AUTO:
-            return [mapping[self.config.auth_method]]
-        return [mapping[method] for method in self.config.auth_preference if method in mapping]
+        order = self.auth_order()
+        if not order:
+            raise CapabilityUnavailable(
+                ExchangeCapability.GET_MESSAGE,
+                "no permitted authentication method: Basic is disabled and nothing else is "
+                "configured. Set MSP_EWS_AUTH_PREFERENCE, or enable Basic deliberately.",
+            )
+        return [mapping[method] for method in order if method in mapping]
 
     def _tls_context(self) -> None:
         """Apply the organisation's CA bundle, where one was provided.
@@ -284,10 +331,17 @@ class OnPremEwsExchangeProvider:
                 # Touch the account so an authentication failure surfaces here, not later.
                 _ = account.root
                 self._account = account
-                logger.info(
-                    "ews.connected",
-                    extra={"auth": getattr(auth_type, "__name__", str(auth_type))},
-                )
+                method = getattr(auth_type, "__name__", str(auth_type))
+                self.last_auth_method = method
+                if "basic" in method.lower() or auth_type == exchangelib.BASIC:
+                    # Recorded at warning level so the event is visible in the audit trail
+                    # rather than only in a health field (ТЗ 1.0.1 §4.5).
+                    self.basic_auth_in_use = True
+                    logger.warning(
+                        "ews.basic_auth_in_use",
+                        extra={"endpoint_configured": bool(self.config.endpoint)},
+                    )
+                logger.info("ews.connected", extra={"auth": method})
                 return account
             except Exception as exc:  # noqa: BLE001 - try the next method in the preference list
                 last_error = exc
@@ -378,6 +432,8 @@ class OnPremEwsExchangeProvider:
                 detail="; ".join(report.errors[:2]) or "not reachable",
             )
         blockers = self.blockers()
+        if self.basic_auth_in_use:
+            blockers.insert(0, "connected over Basic authentication")
         return ProviderHealth(
             provider_id=self.provider_id,
             status="ok" if not blockers else "degraded",

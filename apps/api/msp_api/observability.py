@@ -149,6 +149,78 @@ http_duration = Histogram(
 )
 
 
+# -- durable intake (ТЗ 1.0.1 §4.1) -----------------------------------------------------------
+intake_success = Counter(
+    "msp_intake_success_total", "Reports ingested and acknowledged", ["source"], registry=REGISTRY
+)
+intake_retry = Counter(
+    "msp_intake_retry_total", "Intake attempts that will be retried", ["source", "reason"], registry=REGISTRY
+)
+intake_failed = Counter(
+    "msp_intake_failed_total", "Reports dead-lettered after repeated failures", ["source"], registry=REGISTRY
+)
+duplicate_report = Counter(
+    "msp_duplicate_report_total", "Repeat reports of a message already ingested", registry=REGISTRY
+)
+intake_backlog = Gauge(
+    "msp_intake_backlog", "Intake records not yet acknowledged", ["state"], registry=REGISTRY
+)
+unscannable_total = Counter(
+    "msp_unscannable_total",
+    "Messages deliberately not analysed because a limit was exceeded",
+    ["reason"],
+    registry=REGISTRY,
+)
+
+# -- mail gateways (ТЗ 1.0.2 §35) ---------------------------------------------------------------
+gateway_events = Counter(
+    "msp_gateway_events_total", "Gateway events accepted", ["provider", "source"], registry=REGISTRY
+)
+gateway_event_parse_errors = Counter(
+    "msp_gateway_event_parse_errors_total",
+    "Gateway events that could not be parsed or accepted",
+    ["provider", "reason"],
+    registry=REGISTRY,
+)
+gateway_api_requests = Counter(
+    "msp_gateway_api_requests_total", "Gateway API requests", ["provider"], registry=REGISTRY
+)
+gateway_api_failures = Counter(
+    "msp_gateway_api_failures_total", "Gateway API failures", ["provider", "kind"], registry=REGISTRY
+)
+gateway_conflicts = Counter(
+    "msp_gateway_conflicts_total", "Verdict conflicts detected", ["kind"], registry=REGISTRY
+)
+gateway_untrusted_headers = Counter(
+    "msp_gateway_untrusted_headers_total",
+    "Gateway headers that could not be verified against the delivery chain",
+    ["provider", "trust_state"],
+    registry=REGISTRY,
+)
+gateway_provider_latency = Histogram(
+    "msp_gateway_provider_latency_seconds",
+    "Gateway provider call latency",
+    ["provider"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10),
+    registry=REGISTRY,
+)
+gateway_last_event_timestamp = Gauge(
+    "msp_gateway_last_event_timestamp",
+    "Unix time of the last accepted event per gateway",
+    ["provider"],
+    registry=REGISTRY,
+)
+gateway_health = Gauge(
+    "msp_gateway_health",
+    "Gateway health: 1 ok, 0.5 degraded, 0 unavailable",
+    ["provider"],
+    registry=REGISTRY,
+)
+
+# -- detection quality (ТЗ 1.0.1 §11) -----------------------------------------------------------
+rule_triggers = Counter("msp_rule_triggers_total", "Rule activations", ["rule_id"], registry=REGISTRY)
+
+
 def render_metrics() -> bytes:
     return generate_latest(REGISTRY)
 

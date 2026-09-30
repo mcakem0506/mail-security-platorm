@@ -1,0 +1,124 @@
+# Resource limits reached during analysis (ТЗ 8.2, ТЗ 1.0.1 §4.2).
+#
+# None of these rules is a detection. They exist because the opposite mistake is worse: a message
+# the platform could not fully examine must never be reported as examined. Each limit produces
+# its own signal, so an analyst sees exactly which part was not looked at, and each one adds an
+# entry to missing_evidence, which keeps the verdict out of LOW_RISK and into UNKNOWN.
+#
+# Weights are low or zero on purpose. Hitting a limit is not evidence of an attack — though
+# deliberately exceeding one is a known way to avoid inspection, which is why the signals are
+# visible rather than silent.
+ruleset: limits
+rules:
+  - id: LIM-001
+    version: 1
+    name: "Письмо не проверено: превышен максимальный размер"
+    category: unscannable
+    severity: medium
+    confidence: 0.9
+    weight: 10
+    conditions:
+      - limit_message_size_exceeded
+    evidence: [limit_message_size_exceeded, parser_limits_hit]
+    explanation: >-
+      Размер письма превышает предел, установленный для безопасного разбора, поэтому письмо не
+      анализировалось. Усечённое письмо платформа не разбирает: анализ части письма создавал бы
+      впечатление проверки, которой не было. Отсутствие обнаружений здесь ничего не означает.
+    recommendation: >-
+      Не считайте письмо проверенным. При сомнениях передайте его в службу информационной
+      безопасности — аналитик разберёт письмо отдельно.
+
+  - id: LIM-002
+    version: 1
+    name: "Вложение не проверено: превышен максимальный размер"
+    category: unscannable
+    severity: low
+    confidence: 0.9
+    weight: 8
+    conditions:
+      - limit_attachment_size_exceeded
+    evidence: [limit_attachment_size_exceeded]
+    explanation: >-
+      Одно или несколько вложений больше допустимого для анализа размера и не проверялись.
+      Остальная часть письма разобрана.
+    recommendation: Не открывайте крупные вложения от незнакомых отправителей без проверки.
+
+  - id: LIM-003
+    version: 1
+    name: Проверены не все вложения
+    category: unscannable
+    severity: low
+    confidence: 0.8
+    weight: 6
+    conditions:
+      any:
+        - limit_attachment_count_exceeded
+        - limit_archive_file_count_exceeded
+    evidence: [limit_attachment_count_exceeded, limit_archive_file_count_exceeded]
+    explanation: >-
+      Во вложениях больше файлов, чем платформа разбирает за один проход, поэтому проверена
+      только часть из них.
+
+  - id: LIM-004
+    version: 1
+    name: Архив распакован не полностью
+    category: unscannable
+    severity: medium
+    confidence: 0.85
+    weight: 12
+    conditions:
+      any:
+        - limit_decompressed_size_exceeded
+        - limit_archive_depth_exceeded
+    evidence: [limit_decompressed_size_exceeded, limit_archive_depth_exceeded]
+    explanation: >-
+      Архив во вложении не удалось разобрать целиком: он превышает предел распакованного объёма
+      либо глубины вложенности. Содержимое, оставшееся нераспакованным, не проверялось.
+      Многоуровневые архивы применяются в том числе для того, чтобы избежать проверки.
+    recommendation: Не распаковывайте архив до выяснения, от кого и зачем он прислан.
+
+  - id: LIM-005
+    version: 1
+    name: Структура письма разобрана не полностью
+    category: unscannable
+    severity: low
+    confidence: 0.8
+    weight: 8
+    conditions:
+      any:
+        - limit_mime_parts_exceeded
+        - limit_mime_depth_exceeded
+    evidence: [limit_mime_parts_exceeded, limit_mime_depth_exceeded]
+    explanation: >-
+      В письме больше или глубже вложенных MIME-частей, чем платформа разбирает. Непроверенные
+      части могли содержать вложения или ссылки.
+
+  - id: LIM-006
+    version: 1
+    name: Проверены не все ссылки
+    category: unscannable
+    severity: low
+    confidence: 0.8
+    weight: 6
+    conditions:
+      - limit_url_count_exceeded
+    evidence: [limit_url_count_exceeded]
+    explanation: >-
+      В письме больше ссылок, чем платформа проверяет за один проход. Часть ссылок не
+      анализировалась.
+
+  - id: LIM-007
+    version: 1
+    name: Разбор письма не завершился за отведённое время
+    category: unscannable
+    severity: medium
+    confidence: 0.85
+    weight: 12
+    conditions:
+      - limit_parser_timeout
+    evidence: [limit_parser_timeout]
+    explanation: >-
+      Разбор письма был прерван по тайм-ауту, поэтому анализ неполон. Письма, специально
+      составленные так, чтобы разбор занимал много времени, встречаются именно для обхода
+      проверки.
+    recommendation: Передайте письмо в службу информационной безопасности для ручного разбора.
