@@ -170,6 +170,10 @@ class MessageSummary(ApiModel):
     source: str
     reported_by: str | None
     campaign_id: str | None = None
+    #: The analysis that produced ``classification``. The console needs it to fetch the
+    #: detection signals behind the verdict — without it the message card can show a verdict
+    #: but not the reasons for it.
+    job_id: str | None = None
 
 
 class MessageSearchQuery(ApiModel):
@@ -209,6 +213,9 @@ class MessageDetailResponse(ApiModel):
     attachments: list[AttachmentOut]
     urls: list[dict[str, Any]]
     auth_summary: dict[str, Any]
+    #: Set when Authentication-Results were present but not believed. Without it an analyst
+    #: cannot tell "the sender did not authenticate" from "we refused to read the claim".
+    auth_note: str | None = None
     verdict: AnalysisDetailResponse | None
     preview_available: bool
 

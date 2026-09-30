@@ -29,6 +29,8 @@ interface MessageDetail {
   attachments: AttachmentRow[];
   urls: { url: string; context: string }[];
   auth_summary: Record<string, unknown>;
+  /** Set when Authentication-Results were present but not believed (ТЗ 1.0.1 §4.4). */
+  auth_note: string | null;
   preview_available: boolean;
 }
 
@@ -351,6 +353,7 @@ export function MessagePage() {
             ))}
           </ul>
         )}
+        {detail.auth_note && <p className="warning">{detail.auth_note}</p>}
       </section>
 
       {detail.preview_available && <SafePreview messageId={messageId} />}

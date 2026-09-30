@@ -369,8 +369,15 @@ def persist_message(
     reported_by: str | None = None,
     storage: ObjectStorage | None = None,
     store_raw: bool = True,
+    trusted_auth_results: list[str] | None = None,
 ) -> MailMessage:
-    """Store metadata in PostgreSQL and raw content in object storage (ТЗ 26.1)."""
+    """Store metadata in PostgreSQL and raw content in object storage (ТЗ 26.1).
+
+    ``trusted_auth_results`` are the Authentication-Results the gateway layer accepted for this
+    message. The stored summary is built from those alone: an analyst reading the message card
+    must not be shown an ``spf=pass`` that the detection engine refused to believe, or the card
+    would contradict the verdict beside it (ТЗ 1.0.1 §4.4).
+    """
     fingerprint = build_fingerprint(parsed)
     message = MailMessage(
         organization_id=organization_id,
@@ -462,7 +469,8 @@ def persist_message(
                 logger.warning("storage.attachment_failed", extra={"error": type(exc).__name__})
         session.add(record)
 
-    auth = parse_authentication_results(parsed.authentication_results)
+    believed = trusted_auth_results if trusted_auth_results is not None else parsed.authentication_results
+    auth = parse_authentication_results(believed)
     auth.merge_received_spf(parse_received_spf(parsed.received_spf))
     facts = auth.as_facts()
     message.auth_summary = {
@@ -470,6 +478,12 @@ def persist_message(
         for method in ("spf", "dkim", "dmarc", "compauth")
         if facts.get(f"{method}_present")
     }
+    if trusted_auth_results is not None and len(trusted_auth_results) < len(parsed.authentication_results):
+        # Recorded so the card can say the results were refused rather than simply showing
+        # nothing, which reads as "the sender never authenticated".
+        message.auth_summary["_refused_headers"] = len(parsed.authentication_results) - len(
+            trusted_auth_results
+        )
     return message
 
 
@@ -608,6 +622,11 @@ def run_local_analysis(
         source_mailbox=job.requester_mailbox,
         reported_by=job.requester_mailbox if job.is_report else None,
         storage=storage,
+        trusted_auth_results=(
+            context.gateway_findings.trusted_auth_results
+            if context.gateway_findings is not None and context.gateway_findings.present
+            else None
+        ),
     )
     job.message_id = message.id
     # History was computed before this message existed; keep it that way for the flushed row.

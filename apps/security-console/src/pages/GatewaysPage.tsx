@@ -43,6 +43,13 @@ const CAPABILITY_LABELS: Record<string, string> = {
   PHISHING_RESULT: "антифишинг",
 };
 
+const HOP_TYPE_LABELS: Record<string, string> = {
+  gateway: "шлюз",
+  exchange_edge: "пограничный сервер",
+  exchange_mailbox: "почтовый сервер",
+  relay: "релей",
+};
+
 interface Props {
   user: CurrentUser;
 }
@@ -177,6 +184,9 @@ export function GatewaysPage({ user }: Props) {
   const [providerId, setProviderId] = useState("");
   const [providerType, setProviderType] = useState("ksmg");
   const [displayName, setDisplayName] = useState("");
+  const [infraHost, setInfraHost] = useState("");
+  const [infraType, setInfraType] = useState("exchange_mailbox");
+  const [infraAuth, setInfraAuth] = useState("");
 
   const canEdit = user.permissions.includes("manage:policies");
 
@@ -300,6 +310,98 @@ export function GatewaysPage({ user }: Props) {
           <HopList gateway={gateway} canEdit={canEdit} onChange={load} />
         </section>
       ))}
+
+      <section className="card">
+        <h2>Узлы почтовой инфраструктуры</h2>
+        <p className="muted small">
+          Серверы Exchange не являются шлюзами, но это доверенные узлы: именно они пишут
+          Authentication-Results. Описать шлюз и забыть почтовый сервер — самая частая ошибка
+          настройки: тогда каждое обычное письмо получает результаты проверки от объявленного,
+          но не подтверждённого сервера.
+        </p>
+        {data.infrastructure_hops.length === 0 ? (
+          <p className="warning">
+            Узлы не описаны. Заголовки Authentication-Results читаются без проверки источника.
+          </p>
+        ) : (
+          <table className="table table--compact">
+            <thead>
+              <tr>
+                <th>Имя узла</th>
+                <th>Тип</th>
+                <th>Сети</th>
+                <th>authserv-id</th>
+                {canEdit && <th />}
+              </tr>
+            </thead>
+            <tbody>
+              {data.infrastructure_hops.map((hop) => (
+                <tr key={hop.hop_id}>
+                  <td>{hop.hostname || "—"}</td>
+                  <td>{HOP_TYPE_LABELS[hop.hop_type] ?? hop.hop_type}</td>
+                  <td>{hop.ip_networks.join(", ") || "—"}</td>
+                  <td>{hop.authserv_ids.join(", ") || "—"}</td>
+                  {canEdit && (
+                    <td>
+                      <button
+                        type="button"
+                        className="button button--tiny button--ghost"
+                        onClick={() => void api.deleteTrustedHop(hop.hop_id).then(load)}
+                      >
+                        Удалить
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {canEdit && (
+          <div className="form-row">
+            <input
+              type="text"
+              placeholder="mx.corp.example"
+              value={infraHost}
+              onChange={(e) => setInfraHost(e.target.value)}
+            />
+            <select value={infraType} onChange={(e) => setInfraType(e.target.value)}>
+              <option value="exchange_mailbox">почтовый сервер</option>
+              <option value="exchange_edge">пограничный сервер</option>
+              <option value="relay">релей</option>
+            </select>
+            <input
+              type="text"
+              placeholder="authserv-id, например mx.corp.example"
+              value={infraAuth}
+              onChange={(e) => setInfraAuth(e.target.value)}
+            />
+            <button
+              type="button"
+              className="button button--tiny"
+              onClick={() =>
+                void api
+                  .addInfrastructureHop({
+                    hop_type: infraType,
+                    hostname: infraHost.trim(),
+                    authserv_ids: infraAuth
+                      .split(",")
+                      .map((a) => a.trim())
+                      .filter(Boolean),
+                  })
+                  .then(() => {
+                    setInfraHost("");
+                    setInfraAuth("");
+                    return load();
+                  })
+                  .catch((e) => setError(e instanceof Error ? e.message : "Не удалось добавить"))
+              }
+            >
+              Добавить узел
+            </button>
+          </div>
+        )}
+      </section>
 
       {canEdit && (
         <section className="card">

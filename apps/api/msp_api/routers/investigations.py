@@ -72,6 +72,7 @@ def _summary(session, message: MailMessage) -> MessageSummary:  # type: ignore[n
         source=message.source.value,
         reported_by=message.reported_by,
         campaign_id=campaign_id,
+        job_id=result.job_id if result else None,
     )
 
 
@@ -158,6 +159,36 @@ def search_messages(
     )
 
 
+def _auth_note(session, message: MailMessage) -> str | None:  # type: ignore[no-untyped-def]
+    """Explain refused Authentication-Results (ТЗ 1.0.1 §4.4).
+
+    Showing nothing would read as "the sender never authenticated", which is a different claim
+    from "the sender asserted a pass and we could not verify who wrote it".
+    """
+    result = session.execute(
+        select(AnalysisResult)
+        .where(AnalysisResult.message_id == message.id)
+        .order_by(desc(AnalysisResult.created_at))
+        .limit(1)
+    ).scalar_one_or_none()
+    facts = (result.facts or {}) if result is not None else {}
+    if facts.get("authentication_results_forged"):
+        return (
+            "В письме есть заголовок Authentication-Results с успешным результатом, но он "
+            "записан сервером, который не входит в инфраструктуру организации, либо цепочка "
+            "доставки через этот сервер не подтверждается. Результаты не учитывались."
+        )
+    if facts.get("authentication_results_untrusted"):
+        return (
+            "Заголовок Authentication-Results записан сервером вне топологии организации "
+            "(например, при пересылке), поэтому его результаты не учитывались."
+        )
+    refused = int((message.auth_summary or {}).get("_refused_headers") or 0)
+    if refused:
+        return f"Не учтено заголовков Authentication-Results: {refused}."
+    return None
+
+
 @router.get("/messages/{message_id}", response_model=MessageDetailResponse)
 def get_message(
     message_id: str, request: Request, actor: Viewer, session: DbSession
@@ -233,7 +264,8 @@ def get_message(
             for a in attachments
         ],
         urls=[{"url": value, "context": context} for value, context in urls],
-        auth_summary=dict(message.auth_summary or {}),
+        auth_summary={k: v for k, v in (message.auth_summary or {}).items() if not k.startswith("_")},
+        auth_note=_auth_note(session, message),
         verdict=None,
         preview_available=content is not None
         and (content.sanitized_html is not None or content.normalized_text is not None),

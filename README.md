@@ -264,6 +264,12 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [EXCHANGE_PROBE_GUIDE.md](docs/EXCHANGE_PROBE_GUIDE.md) | Проверка готовности среды |
 | [DETECTION_VALIDATION.md](docs/DETECTION_VALIDATION.md) | Валидация детектирования и метрики |
 
+### Консоль
+
+Снимки экрана работающего стенда — [docs/screenshots/](docs/screenshots/README.md). Три карточки
+письма там стоит смотреть подряд: они отличаются не оформлением, а тем, чему платформа поверила —
+подтверждённый вердикт шлюза, подделанные заголовки и отвергнутый `Authentication-Results`.
+
 ### Этап MSP 1.0.2
 
 | Документ | Назначение |

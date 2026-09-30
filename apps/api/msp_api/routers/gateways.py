@@ -132,6 +132,20 @@ def list_gateways(actor: Viewer, session: DbSession, settings: AppSettings) -> d
             }
             for gateway in gateways
         ],
+        # Hops that belong to no gateway: the Exchange edge and mailbox servers. Listed
+        # separately because they are easy to forget, and forgetting them is what makes
+        # ordinary mail look tampered with (ТЗ 1.0.1 §4.4).
+        "infrastructure_hops": [
+            _hop_out(hop).model_dump(mode="json")
+            for hop in session.execute(
+                select(TrustedHop).where(
+                    TrustedHop.organization_id == actor.organization_id,
+                    TrustedHop.gateway_id.is_(None),
+                )
+            )
+            .scalars()
+            .all()
+        ],
         "supported_provider_types": sorted(PROVIDER_TYPES),
         # Vendors whose header format is implemented but whose API is not yet (ТЗ 1.0.2 §36).
         "available_skeletons": skeleton_summary(),
@@ -256,6 +270,23 @@ def update_gateway(
     return _gateway_out(session, gateway)
 
 
+@router.post("/hops", response_model=TrustedHopOut, status_code=201)
+def add_infrastructure_hop(
+    payload: TrustedHopUpsertRequest,
+    request: Request,
+    actor: PolicyAdmin,
+    session: DbSession,
+) -> TrustedHopOut:
+    """Register a trusted hop that does not belong to a gateway (ТЗ 1.0.1 §4.3).
+
+    The Exchange edge and mailbox servers are trusted hops with no gateway behind them, and they
+    are the ones that write ``Authentication-Results``. Describing the gateway but not the relay
+    is the most common way to get this wrong: every ordinary message then carries results from a
+    declared-but-unverified server, which reads as tampering.
+    """
+    return _create_hop(payload, request, actor, session, gateway=None)
+
+
 @router.post("/{gateway_id}/hops", response_model=TrustedHopOut, status_code=201)
 def add_trusted_hop(
     gateway_id: str,
@@ -272,6 +303,17 @@ def add_trusted_hop(
     gateway = session.get(MailGateway, gateway_id)
     if gateway is None or gateway.organization_id != actor.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Шлюз не найден")
+    return _create_hop(payload, request, actor, session, gateway=gateway)
+
+
+def _create_hop(
+    payload: TrustedHopUpsertRequest,
+    request: Request,
+    actor: Actor,
+    session: Any,
+    *,
+    gateway: MailGateway | None,
+) -> TrustedHopOut:
     if not payload.hostname and not payload.ip_networks:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -283,14 +325,14 @@ def add_trusted_hop(
 
     hop = TrustedHop(
         organization_id=actor.organization_id,
-        gateway_id=gateway.id,
+        gateway_id=gateway.id if gateway is not None else None,
         hop_type=payload.hop_type,
         hostname=payload.hostname,
         ip_networks=list(payload.ip_networks),
         expected_headers=list(payload.expected_headers),
         authserv_ids=[a.lower() for a in payload.authserv_ids],
         position_in_chain=payload.position_in_chain,
-        direction=gateway.direction,
+        direction=gateway.direction if gateway is not None else "inbound",
         enabled=payload.enabled,
         updated_by=actor.email,
     )
@@ -306,7 +348,8 @@ def add_trusted_hop(
         object_type="trusted_mail_hop",
         object_id=hop.id,
         detail={
-            "gateway": gateway.provider_id,
+            "gateway": gateway.provider_id if gateway is not None else None,
+            "hop_type": hop.hop_type,
             "hostname": hop.hostname,
             "networks": len(hop.ip_networks or []),
             "authserv_ids": hop.authserv_ids,

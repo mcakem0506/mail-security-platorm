@@ -537,6 +537,83 @@ class TestRemediationScope:
         assert not verification.complete, "a partial remediation is not a complete one"
 
 
+class TestCardMatchesVerdict:
+    """What the analyst is shown must not contradict what the engine decided.
+
+    The engine refusing a forged ``spf=pass`` is worth nothing if the message card still prints
+    "SPF: pass" next to the verdict — the analyst reads the card, not the fact set.
+    """
+
+    def test_refused_authentication_results_are_not_stored_as_passing(
+        self, db, settings, organization
+    ) -> None:
+        from fixtures.corpus import BY_NAME
+        from msp_api.db.models import AnalysisJob
+        from msp_api.services.analysis import run_local_analysis
+        from msp_api.services.storage import build_storage
+        from msp_contracts import IntakeSource
+
+        job = AnalysisJob(
+            organization_id=organization.id,
+            source=IntakeSource.SECURITY_MAILBOX,
+            requester_mailbox="buh@corp.example",
+            is_report=True,
+            idempotency_key="card-vs-verdict",
+        )
+        db.add(job)
+        db.flush()
+        outcome = run_local_analysis(
+            db,
+            settings,
+            job=job,
+            raw=BY_NAME["24_spoofed_authentication_results"].raw,
+            storage=build_storage(settings),
+        )
+        db.commit()
+
+        facts = outcome.detection.facts
+        assert facts.get("authentication_results_forged") is True, (
+            "precondition: the engine must have refused this header"
+        )
+        summary = outcome.message.auth_summary or {}
+        assert summary.get("spf") != "pass", (
+            "the card must not show a passing SPF the engine refused to believe"
+        )
+        assert summary.get("dmarc") != "pass"
+        assert summary.get("_refused_headers"), "the refusal itself must be recorded"
+
+    def test_the_card_explains_the_refusal_rather_than_showing_nothing(
+        self, db, settings, organization
+    ) -> None:
+        """Silence would read as "the sender never authenticated", a different claim."""
+        from fixtures.corpus import BY_NAME
+        from msp_api.db.models import AnalysisJob
+        from msp_api.routers.investigations import _auth_note
+        from msp_api.services.analysis import run_local_analysis
+        from msp_api.services.storage import build_storage
+        from msp_contracts import IntakeSource
+
+        job = AnalysisJob(
+            organization_id=organization.id,
+            source=IntakeSource.SECURITY_MAILBOX,
+            is_report=True,
+            idempotency_key="card-note",
+        )
+        db.add(job)
+        db.flush()
+        outcome = run_local_analysis(
+            db,
+            settings,
+            job=job,
+            raw=BY_NAME["24_spoofed_authentication_results"].raw,
+            storage=build_storage(settings),
+        )
+        db.commit()
+
+        note = _auth_note(db, outcome.message)
+        assert note and "не учитывались" in note
+
+
 class TestVerdictsCannotLowerRisk:
     """The invariant that outlives every individual adapter (ТЗ 1.0.2 §17, §27)."""
 

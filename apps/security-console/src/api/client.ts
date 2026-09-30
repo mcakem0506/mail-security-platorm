@@ -52,6 +52,8 @@ export interface MessageSummary {
   source: string;
   reported_by: string | null;
   campaign_id: string | null;
+  /** The analysis behind `classification`; needed to load the signals that explain it. */
+  job_id: string | null;
 }
 
 export interface AnalysisDetail {
@@ -150,6 +152,8 @@ export interface GatewayList {
   /** NOT_PRESENT is a valid deployment, not a failure (ТЗ 1.0.2 §31). */
   state: string;
   gateways: MailGateway[];
+  /** Trusted hops belonging to no gateway: the Exchange edge and mailbox servers. */
+  infrastructure_hops: TrustedHop[];
   supported_provider_types: string[];
   available_skeletons: {
     provider_type: string;
@@ -341,6 +345,12 @@ export const api = {
 
   addTrustedHop: (gatewayId: string, body: Record<string, unknown>) =>
     request<TrustedHop>(`/api/v1/gateways/${gatewayId}/hops`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  addInfrastructureHop: (body: Record<string, unknown>) =>
+    request<TrustedHop>("/api/v1/gateways/hops", {
       method: "POST",
       body: JSON.stringify(body),
     }),
