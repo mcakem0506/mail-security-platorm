@@ -500,6 +500,21 @@ class TestQualityDashboardCannotFlatter:
         assert "unscannable" in body
         assert body["unowned_active_rules"] == []
 
+    def test_a_complete_scan_is_not_counted_as_unscannable(self, client, people) -> None:
+        """Regression, found on a live stand: the dashboard said 22 of 22 were not scanned.
+
+        The query compared ``scan_completeness`` against a value the enum does not contain, so
+        every analysis matched. It read as "we checked nothing", which is the opposite kind of
+        lie from a flattering metric but just as useless.
+        """
+        _report(client, people, "09_bank_details_change")
+        analyst = Actor(client, people["analyst"]["email"], people["analyst"]["password"])
+        body = analyst.get("/api/v1/detection/quality").json()
+        assert body["total_analyzed"] >= 1
+        assert body["unscannable"] < body["total_analyzed"], (
+            "полностью проверенное письмо не должно попадать в непроверенные"
+        )
+
     def test_versions_are_reported_for_reproducibility(self, client, people) -> None:
         """ТЗ 1.0.3 §48: a verdict is only defensible if it can be reproduced."""
         analyst = Actor(client, people["analyst"]["email"], people["analyst"]["password"])

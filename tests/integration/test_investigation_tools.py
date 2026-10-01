@@ -422,3 +422,81 @@ class TestReportingQuality:
         _message(db, org_id, reported_by="user@corp.example")
         db.commit()
         assert "не повод отговаривать" in investigation.reporting_quality(db, org_id)["note"]
+
+
+class TestIncidentSpanningSeveralCampaigns:
+    """An incident may group more than one wave (regression, found on a live stand).
+
+    Both the queue and the timeline used to assume an incident touches at most one campaign.
+    Grouping two waves into one investigation is an ordinary thing for an analyst to do, and it
+    made the whole queue return 500 for everybody — not just that one row.
+    """
+
+    def _campaign(self, db, org_id, fingerprint, name, count):  # type: ignore[no-untyped-def]
+        now = utcnow()
+        campaign = Campaign(
+            organization_id=org_id,
+            fingerprint=fingerprint,
+            name=name,
+            first_seen=now - timedelta(hours=2),
+            last_seen=now,
+            message_count=count,
+            recipient_count=count,
+            reported_count=0,
+            verdict_distribution={},
+            indicators=[],
+            subjects=[],
+            senders=[],
+        )
+        db.add(campaign)
+        db.flush()
+        return campaign
+
+    def _incident_over(self, db, org_id, messages):  # type: ignore[no-untyped-def]
+        incident = Incident(
+            organization_id=org_id,
+            number=4242,
+            title="Две волны в одном инциденте",
+            summary="Аналитик объединил две кампании для разбора.",
+            severity=Severity.HIGH,
+        )
+        db.add(incident)
+        db.flush()
+        for message in messages:
+            db.add(IncidentMessage(incident_id=incident.id, message_id=message.id))
+        db.flush()
+        return incident
+
+    def test_queue_handles_it_and_takes_the_widest_spread(self, db, org_id) -> None:  # type: ignore[no-untyped-def]
+        from msp_api.services import triage
+
+        small = self._campaign(db, org_id, "fp-small", "Малая волна", 3)
+        large = self._campaign(db, org_id, "fp-large", "Большая волна", 17)
+        first = _message(db, org_id, minutes_ago=30)
+        second = _message(db, org_id, sender="other@partner.test", minutes_ago=20)
+        db.add(CampaignMessage(campaign_id=small.id, message_id=first.id))
+        db.add(CampaignMessage(campaign_id=large.id, message_id=second.id))
+        incident = self._incident_over(db, org_id, [first, second])
+        db.commit()
+
+        context = triage.build_context(db, incident)
+        assert context.campaign_size == 17, "для приоритета важен самый широкий охват"
+
+        queue = triage.build_queue(db, org_id)
+        assert any(entry.incident_id == incident.id for entry in queue)
+
+    def test_timeline_mentions_every_campaign(self, db, org_id) -> None:  # type: ignore[no-untyped-def]
+        from msp_api.services import triage
+
+        first_campaign = self._campaign(db, org_id, "fp-a", "Первая волна", 2)
+        second_campaign = self._campaign(db, org_id, "fp-b", "Вторая волна", 5)
+        first = _message(db, org_id, minutes_ago=40)
+        second = _message(db, org_id, sender="two@partner.test", minutes_ago=35)
+        db.add(CampaignMessage(campaign_id=first_campaign.id, message_id=first.id))
+        db.add(CampaignMessage(campaign_id=second_campaign.id, message_id=second.id))
+        incident = self._incident_over(db, org_id, [first, second])
+        db.commit()
+
+        timeline = triage.build_timeline(db, incident)
+        created = [entry for entry in timeline if entry["event"] == "campaign_created"]
+        assert len(created) == 2, "обе кампании должны попасть в хронологию"

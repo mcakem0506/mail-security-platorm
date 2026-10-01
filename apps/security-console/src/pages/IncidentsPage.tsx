@@ -37,6 +37,20 @@ interface Note {
  * platform was wrong" into something a rule owner can act on. Closing a case as harmless
  * requires a reason, because that is the decision most likely to be re-read after an incident.
  */
+/** Timeline event codes, in the analyst's language. */
+const TIMELINE_LABELS: Record<string, string> = {
+  message_received: "Получено письмо",
+  employee_reported: "Сообщил сотрудник",
+  analyzed: "Выполнен анализ",
+  gateway_scanned: "Проверено шлюзом",
+  campaign_created: "Кампания",
+  analyst_assigned: "Назначен исполнитель",
+  classification_changed: "Классифицировано аналитиком",
+  remediation_proposed: "Предложено реагирование",
+  remediation_executed: "Выполнено реагирование",
+  closed: "Инцидент закрыт",
+};
+
 const CLASSIFICATIONS: { value: AnalystClassification; label: string }[] = [
   { value: "CONFIRMED_PHISHING", label: "Подтверждён фишинг" },
   { value: "CONFIRMED_BEC", label: "Подтверждён BEC" },
@@ -253,6 +267,7 @@ function MissedDetectionPanel({ incidentId }: { incidentId: string }) {
 
 function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident; canManage: boolean; onChanged: () => void }) {
   const [notes, setNotes] = useState<Note[]>([]);
+  const [timeline, setTimeline] = useState<{ at: string; event: string; detail: string }[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -265,9 +280,21 @@ function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident
     }
   }, [incident.incident_id]);
 
+  // The timeline is assembled from what actually happened — messages, gateway evidence,
+  // assignments, classifications, remediation — rather than read from a field somebody has to
+  // remember to fill in (ТЗ 1.0.3 §21).
+  const loadTimeline = useCallback(async () => {
+    try {
+      setTimeline(await api.incidentTimeline(incident.incident_id));
+    } catch {
+      setTimeline([]);
+    }
+  }, [incident.incident_id]);
+
   useEffect(() => {
     void loadNotes();
-  }, [loadNotes]);
+    void loadTimeline();
+  }, [loadNotes, loadTimeline]);
 
   async function changeStatus(status: string) {
     setBusy(true);
@@ -335,13 +362,13 @@ function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident
 
       <h3>Хронология</h3>
       <ul className="timeline">
-        {incident.timeline.map((entry, index) => (
+        {timeline.map((entry, index) => (
           <li key={`${entry.at}-${index}`}>
-            <span className="muted">{formatDate(entry.at)}</span> — {entry.event}
-            {entry.detail && <span className="muted"> ({entry.detail})</span>}
-            <span className="muted"> · {entry.actor}</span>
+            <span className="muted">{formatDate(entry.at)}</span> — {TIMELINE_LABELS[entry.event] ?? entry.event}
+            {entry.detail && <span className="muted"> · {entry.detail}</span>}
           </li>
         ))}
+        {timeline.length === 0 && <li className="muted">Записей нет</li>}
       </ul>
 
       <h3>Заметки аналитика</h3>

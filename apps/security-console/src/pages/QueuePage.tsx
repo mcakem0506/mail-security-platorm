@@ -34,7 +34,9 @@ const FACTOR_LABELS: Record<string, string> = {
   verdict_high_risk: "вердикт HIGH_RISK",
   verdict_suspicious: "вердикт SUSPICIOUS",
   vip_recipient: "получатель — руководитель",
+  vip_finance_recipient: "руководитель финансового блока",
   protected_recipient: "защищаемая учётная запись",
+  protected_finance_recipient: "защищаемая запись в финансовом блоке",
   finance_recipient: "получатель из финансового блока",
   payment_fraud: "признаки платёжного мошенничества",
   credential_theft: "признаки кражи учётных данных",
@@ -46,6 +48,9 @@ const FACTOR_LABELS: Record<string, string> = {
   gateway_conflict: "расхождение со шлюзом",
   already_remediated: "письма уже удалены",
   unscannable: "письмо не удалось проверить полностью",
+  // Not a factor but a band correction, shown so the analyst sees why a high score did not
+  // become P1 (ТЗ 1.0.3 §18: priority needs consequence *and* spread).
+  single_recipient_reversible: "один адресат, последствие обратимо — понижено до P2",
 };
 
 function describeFactor(factor: string): string {
@@ -53,7 +58,10 @@ function describeFactor(factor: string): string {
   // the weight and detail are shown as they came, because they are evidence.
   const [head = factor, ...rest] = factor.split(":");
   const label = FACTOR_LABELS[head] ?? head;
-  return rest.length ? `${label} (+${rest.join(":")})` : label;
+  if (!rest.length) return label;
+  const value = rest.join(":");
+  // A band correction carries an arrow rather than points; "+P1→P2" would read as nonsense.
+  return /^[-+]?\d/.test(value) ? `${label} (+${value})` : label;
 }
 
 function formatAge(seconds: number): string {

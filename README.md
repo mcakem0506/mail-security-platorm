@@ -282,6 +282,30 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [SYSLOG_INTEGRATION.md](docs/SYSLOG_INTEGRATION.md) | Приём событий по syslog |
 | [MULTI_GATEWAY_SECURITY_MODEL.md](docs/MULTI_GATEWAY_SECURITY_MODEL.md) | Модель безопасности интеграции |
 
+
+### Этап MSP 1.0.3
+
+| Документ | Назначение |
+|---|---|
+| [MSP_1_0_3_ACCEPTANCE.md](docs/MSP_1_0_3_ACCEPTANCE.md) | Приёмка этапа |
+| [MSP_1_0_3_REPORT.md](docs/MSP_1_0_3_REPORT.md) | Итоговый отчёт и решение |
+| [DETECTION_ENGINE.md](docs/DETECTION_ENGINE.md) | Устройство движка детектирования |
+| [RULE_LIFECYCLE.md](docs/RULE_LIFECYCLE.md) | Жизненный цикл правила |
+| [DETECTION_EVALUATION.md](docs/DETECTION_EVALUATION.md) | Оценка качества и гейт |
+| [GOLDEN_DATASET.md](docs/GOLDEN_DATASET.md) | Золотой корпус |
+| [ANALYST_WORKFLOW.md](docs/ANALYST_WORKFLOW.md) | Рабочий процесс аналитика |
+| [ANALYST_PLAYBOOKS.md](docs/ANALYST_PLAYBOOKS.md) | Плейбуки по сценариям угроз |
+| [DETECTION_GAPS.md](docs/DETECTION_GAPS.md) | Реестр известных пробелов |
+| [THREAT_SCENARIO_CATALOG.md](docs/THREAT_SCENARIO_CATALOG.md) | Каталог сценариев и покрытие |
+| [DETECTION_RELEASE_PROCESS.md](docs/DETECTION_RELEASE_PROCESS.md) | Порядок выпуска изменений |
+| [SEMANTIC_ANALYSIS_POLICY.md](docs/SEMANTIC_ANALYSIS_POLICY.md) | Политика семантического анализа |
+
+Проверка качества детектирования запускается одной командой:
+
+```bash
+python scripts/evaluate_detection.py --gate
+```
+
 ---
 
 ## Ограничения

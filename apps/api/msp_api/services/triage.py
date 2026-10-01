@@ -62,7 +62,12 @@ WEIGHTS: dict[str, int] = {
     "verdict_malicious": 30,
     "verdict_high_risk": 20,
     "verdict_suspicious": 8,
+    # One number per recipient, not a sum of ways to describe the same person. A protected
+    # mailbox in the finance department used to score 12 + 15 = 27 — the same property counted
+    # twice — which pushed practically every finance incident into P1 and made the band useless.
+    "vip_finance_recipient": 30,
     "vip_recipient": 25,
+    "protected_finance_recipient": 20,
     "finance_recipient": 15,
     "protected_recipient": 12,
     "credential_theft": 20,
@@ -71,7 +76,10 @@ WEIGHTS: dict[str, int] = {
     "multiple_recipients": 10,
     "campaign_small": 10,
     "campaign_large": 25,
-    "employee_report": 12,
+    # Reporting says who noticed, not how bad it is. On a deployment where employees are the
+    # main intake path this factor is present on nearly every incident, and a large weight for
+    # something nearly constant only shifts the whole queue upwards.
+    "employee_report": 5,
     "gateway_conflict": 10,
     "gateway_detection": 15,
 }
@@ -105,6 +113,12 @@ class PriorityScore:
     score: int = 0
     factors: list[str] = field(default_factory=list)
 
+    #: Whether anything was found on the spread axis: more than one recipient, or a campaign.
+    has_spread: bool = False
+    #: Whether the consequence is irreversible once the recipient acts — malware delivered, or a
+    #: VIP targeted. Such an incident is urgent even when it reached exactly one person.
+    has_irreversible_consequence: bool = False
+
     def add(self, key: str, detail: str = "") -> None:
         points = WEIGHTS.get(key, 0)
         if not points:
@@ -113,10 +127,25 @@ class PriorityScore:
         self.factors.append(f"{key}:{points}" + (f" ({detail})" if detail else ""))
 
     def finalise(self) -> PriorityScore:
+        """Assign the band from the score, with one structural condition on P1.
+
+        ТЗ 1.0.3 §18 derives priority from consequence **and** spread. A pure sum lets one axis
+        reach the top band alone, and on a real deployment that is what happens: every serious
+        verdict aimed at the finance department scores past the threshold, 80% of the queue
+        becomes P1, and the band stops meaning anything. P1 therefore also requires evidence of
+        spread — or a consequence that cannot be taken back, which is urgent even for a single
+        recipient.
+        """
         for minimum, priority in THRESHOLDS:
-            if self.score >= minimum:
-                self.priority = priority
+            if self.score < minimum:
+                continue
+            if priority is Priority.P1 and not (self.has_spread or self.has_irreversible_consequence):
+                # Serious, but reaching one person and reversible: an hour, not ten minutes.
+                self.priority = Priority.P2
+                self.factors.append("single_recipient_reversible:P1→P2")
                 return self
+            self.priority = priority
+            return self
         self.priority = Priority.P4
         return self
 
@@ -156,12 +185,20 @@ def score_priority(context: IncidentContext) -> PriorityScore:
         case RiskLevel.SUSPICIOUS:
             score.add("verdict_suspicious")
 
-    if context.vip_recipient:
+    # Exactly one recipient factor: whichever describes the most consequential target.
+    if context.vip_recipient and context.finance_recipient:
+        score.add("vip_finance_recipient")
+    elif context.vip_recipient:
         score.add("vip_recipient")
+    elif context.protected_recipient and context.finance_recipient:
+        score.add("protected_finance_recipient")
+    elif context.finance_recipient:
+        score.add("finance_recipient")
     elif context.protected_recipient:
         score.add("protected_recipient")
-    if context.finance_recipient:
-        score.add("finance_recipient")
+
+    if context.vip_recipient:
+        score.has_irreversible_consequence = True
 
     if context.signal_categories & _CREDENTIAL_CATEGORIES:
         score.add("credential_theft")
@@ -169,13 +206,18 @@ def score_priority(context: IncidentContext) -> PriorityScore:
         score.add("payment_fraud")
     if context.signal_categories & _MALWARE_CATEGORIES:
         score.add("malware")
+        # A delivered attachment cannot be un-run once it is opened.
+        score.has_irreversible_consequence = True
 
     if context.recipient_count > 1:
         score.add("multiple_recipients", f"{context.recipient_count}")
+        score.has_spread = True
     if context.campaign_size >= 10:
         score.add("campaign_large", f"{context.campaign_size} писем")
+        score.has_spread = True
     elif context.campaign_size > 1:
         score.add("campaign_small", f"{context.campaign_size} писем")
+        score.has_spread = True
 
     if context.employee_reported:
         score.add("employee_report")
@@ -252,13 +294,24 @@ def build_context(session: Session, incident: Incident) -> IncidentContext:
             "finance" in (p.categories or []) or "procurement" in (p.categories or []) for p in protected
         )
 
-    campaign_id = session.execute(
-        select(CampaignMessage.campaign_id).where(CampaignMessage.message_id.in_(message_ids))
-    ).scalar_one_or_none()
-    if campaign_id:
-        campaign = session.get(Campaign, campaign_id)
-        if campaign is not None:
-            context.campaign_size = campaign.message_count
+    # An incident may span several campaigns: an analyst grouping two waves into one
+    # investigation is ordinary, and a query that assumed at most one campaign failed the whole
+    # queue for everybody as soon as it happened. The size that matters for priority is the
+    # widest spread the incident touches, so the campaigns are taken together.
+    campaign_ids = set(
+        session.execute(
+            select(CampaignMessage.campaign_id).where(CampaignMessage.message_id.in_(message_ids)).distinct()
+        )
+        .scalars()
+        .all()
+    )
+    if campaign_ids:
+        sizes = [
+            campaign.message_count
+            for campaign in (session.get(Campaign, campaign_id) for campaign_id in campaign_ids)
+            if campaign is not None
+        ]
+        context.campaign_size = max(sizes, default=0)
 
     conflicts = (
         session.execute(
@@ -614,21 +667,29 @@ def build_timeline(session: Session, incident: Incident) -> list[dict[str, Any]]
             }
         )
 
-    campaign_id = (
-        session.execute(
-            select(CampaignMessage.campaign_id).where(CampaignMessage.message_id.in_(message_ids))
-        ).scalar_one_or_none()
+    # An incident can span several campaigns, so every one of them gets a timeline entry
+    # rather than the query assuming there is at most one.
+    campaign_ids = (
+        set(
+            session.execute(
+                select(CampaignMessage.campaign_id)
+                .where(CampaignMessage.message_id.in_(message_ids))
+                .distinct()
+            )
+            .scalars()
+            .all()
+        )
         if message_ids
-        else None
+        else set()
     )
-    if campaign_id:
+    for campaign_id in sorted(campaign_ids):
         campaign = session.get(Campaign, campaign_id)
         if campaign is not None:
             events.append(
                 {
                     "at": campaign.first_seen.isoformat(),
                     "event": "campaign_created",
-                    "detail": f"Кампания: {campaign.message_count} писем",
+                    "detail": f"Кампания «{campaign.name}»: {campaign.message_count} писем",
                 }
             )
 

@@ -23,7 +23,9 @@ from msp_contracts import (
     CONFIRMED_THREAT,
     AnalystClassification,
     GapStatus,
+    RiskLevel,
     RuleStatus,
+    ScanCompleteness,
     utcnow,
 )
 from sqlalchemy import func, select
@@ -930,7 +932,7 @@ def detection_quality(
             .where(
                 AnalysisJob.organization_id == org,
                 AnalysisJob.created_at >= start,
-                AnalysisResult.scan_completeness != "FULL",
+                AnalysisResult.scan_completeness != ScanCompleteness.COMPLETE.value,
             )
         ).scalar_one()
         or 0
@@ -942,7 +944,7 @@ def detection_quality(
             .where(
                 AnalysisJob.organization_id == org,
                 AnalysisJob.created_at >= start,
-                AnalysisResult.classification == "UNKNOWN",
+                AnalysisResult.classification == RiskLevel.UNKNOWN,
             )
         ).scalar_one()
         or 0
