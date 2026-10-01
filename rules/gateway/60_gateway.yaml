@@ -13,6 +13,8 @@ ruleset: gateway
 rules:
   - id: GW-001
     version: 2
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Почтовый шлюз организации обнаружил вредоносное вложение
     category: malicious_attachment
     severity: critical
@@ -30,6 +32,8 @@ rules:
 
   - id: GW-002
     version: 2
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Почтовый шлюз организации отметил письмо как спам
     category: delivery_scam
     severity: low
@@ -43,6 +47,8 @@ rules:
 
   - id: GW-003
     version: 2
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Почтовый шлюз организации присвоил письму промежуточную оценку
     category: phishing_url
     severity: medium
@@ -56,6 +62,8 @@ rules:
 
   - id: GW-004
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Почтовый шлюз организации распознал в письме фишинг
     category: phishing_url
     severity: high
@@ -71,6 +79,8 @@ rules:
 
   - id: GW-010
     version: 2
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Письмо содержит заголовки чужого почтового шлюза
     category: sender_spoofing
     severity: medium
@@ -86,6 +96,8 @@ rules:
 
   - id: GW-011
     version: 3
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Письмо прошло почтовый шлюз организации без обнаружения
     category: sender_spoofing
     severity: info
@@ -103,6 +115,8 @@ rules:
 
   - id: GW-012
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Заголовки шлюза не подтверждены цепочкой доставки
     category: sender_spoofing
     severity: high
@@ -121,6 +135,8 @@ rules:
 
   - id: GW-013
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Подделка результатов проверки подлинности отправителя
     category: sender_spoofing
     severity: high
@@ -139,6 +155,8 @@ rules:
 
   - id: GW-014
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Результаты проверки подлинности получены от недоверенного сервера
     category: sender_spoofing
     severity: low
@@ -156,6 +174,8 @@ rules:
 
   - id: GW-015
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Путь доставки не соответствует схеме почтового потока
     category: sender_spoofing
     severity: medium
@@ -171,6 +191,8 @@ rules:
 
   - id: GW-016
     version: 1
+    status: ACTIVE
+    owner: detection-gateway@corp.example
     name: Источники дали противоречивые вердикты
     category: sender_spoofing
     severity: info

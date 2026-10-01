@@ -329,3 +329,83 @@ def name_similarity(a: str, b: str) -> float:
     if dist <= 2 and len(joined_b) >= 6:
         return 0.75
     return 0.0
+
+
+#: Words that make a display name a role rather than a person, across the languages this
+#: platform sees. The list is short on purpose: it disambiguates, while the structural test
+#: below does the actual work.
+_ROLE_WORDS = frozenset(
+    {
+        "отдел",
+        "служба",
+        "группа",
+        "департамент",
+        "управление",
+        "сектор",
+        "дирекция",
+        "бухгалтерия",
+        "канцелярия",
+        "склад",
+        "логистика",
+        "поддержка",
+        "техподдержка",
+        "администрация",
+        "секретариат",
+        "приемная",
+        "приёмная",
+        "ресепшн",
+        "офис",
+        "team",
+        "support",
+        "sales",
+        "service",
+        "helpdesk",
+        "billing",
+        "accounting",
+        "finance",
+        "hr",
+        "admin",
+        "office",
+        "desk",
+        "department",
+        "noreply",
+        "no-reply",
+        "info",
+        "contact",
+        "mail",
+        "notifications",
+        "notification",
+        "system",
+    }
+)
+
+
+def is_personal_name(name: str) -> bool:
+    """Whether a display name looks like a person rather than a role.
+
+    This decides whether a name is worth comparing against the directory at all. Generic role
+    names — "Бухгалтерия", "Отдел продаж", "Support Team" — are shared by every organisation, so
+    matching them flags a contractor's accounting department as impersonating ours.
+
+    The test is structural rather than a list lookup: a personal name is two or more capitalised
+    word-tokens, none of which is a role word. A list of names would be incomplete in a
+    different way in every language; the shape generalises.
+
+    Deliberately conservative in both directions:
+
+    * a single token ("Иван", "Support") is not treated as personal — too little to go on, and
+      the cost of missing an impersonation here is lower than the cost of flagging every
+      contractor's shared mailbox;
+    * a name containing a role word is never personal, even with two tokens ("Отдел продаж").
+    """
+    text = (name or "").strip()
+    if not text or "@" in text:
+        return False
+    tokens = [t for t in re.split(r"[\s.,]+", text) if len(t) > 1]
+    if len(tokens) < 2:
+        return False
+    lowered = {t.lower().strip("«»\"'()") for t in tokens}
+    if lowered & _ROLE_WORDS:
+        return False
+    # Every token should read as a word, not a code or an address fragment.
+    return all(re.match(r"^[^\W\d_]+$", token.strip("«»\"'()-"), re.UNICODE) for token in tokens)

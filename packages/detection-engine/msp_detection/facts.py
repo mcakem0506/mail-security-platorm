@@ -24,6 +24,7 @@ from .similarity import (
     has_mixed_script_token,
     homoglyph_chars,
     is_mixed_script,
+    is_personal_name,
     name_similarity,
     script_names,
     skeleton,
@@ -275,21 +276,40 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
     if protected_exact is not None:
         fs.set("sender_is_protected_identity", True, identity=protected_exact.identity_id)
 
+    # An internal, authenticated sender whose display name matches their own directory entry is
+    # the person themselves, not an impersonation of themselves. People routinely hold more than
+    # one mailbox — an administrator has a user account and a privileged one — and treating the
+    # second as an attack on the first flags ordinary internal correspondence.
+    own_directory_entry = ctx.directory_by_email(frm.address)
+    sends_under_own_name = (
+        internal_sender
+        and own_directory_entry is not None
+        and name_similarity(display, own_directory_entry.display_name) >= 0.85
+    )
+    if sends_under_own_name:
+        fs.set(
+            "sender_uses_own_directory_name",
+            True,
+            display_name=display,
+            directory_user=own_directory_entry.email if own_directory_entry else "",
+        )
+
     # Display-name impersonation of a protected identity from a non-matching address.
     candidates = ctx.protected_by_name(display)
     best: tuple[float, Any] | None = None
-    for pi in candidates or ():
-        if frm.address in {e.lower() for e in pi.all_emails}:
-            continue
-        best = (1.0, pi)
-        break
-    if best is None:
-        for pi in ctx.protected_identities:
-            if not pi.enabled or frm.address in {e.lower() for e in pi.all_emails}:
+    if not sends_under_own_name:
+        for pi in candidates or ():
+            if frm.address in {e.lower() for e in pi.all_emails}:
                 continue
-            sim = max((name_similarity(display, n) for n in pi.all_names if n), default=0.0)
-            if sim >= 0.75 and (best is None or sim > best[0]):
-                best = (sim, pi)
+            best = (1.0, pi)
+            break
+        if best is None:
+            for pi in ctx.protected_identities:
+                if not pi.enabled or frm.address in {e.lower() for e in pi.all_emails}:
+                    continue
+                sim = max((name_similarity(display, n) for n in pi.all_names if n), default=0.0)
+                if sim >= 0.75 and (best is None or sim > best[0]):
+                    best = (sim, pi)
     if best is not None:
         sim, pi = best
         approved = frm.address in {d.lower() for d in pi.approved_delegates} or any(
@@ -326,9 +346,15 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
                 fs.set("vip_identity_impersonation", True, **ev)
 
     # Display name matching any directory user while the address is external.
-    if not internal_sender and not fs.get("protected_identity_impersonation"):
+    #
+    # Only *personal* names are compared. Generic role names — "Бухгалтерия", "Отдел продаж",
+    # "Техподдержка" — are shared by every organisation, so matching them against the directory
+    # flags a contractor's accounting department as impersonating ours. A personal name is
+    # recognised by shape (given name plus surname), not by a maintained list, because every
+    # such list is incomplete in a different language.
+    if not internal_sender and not fs.get("protected_identity_impersonation") and is_personal_name(display):
         for du in ctx.directory_by_name(display):
-            if frm.address != du.email.lower():
+            if frm.address != du.email.lower() and is_personal_name(du.display_name):
                 fs.set(
                     "internal_display_name_from_external_sender",
                     True,
@@ -337,6 +363,10 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
                     actual_sender=frm.address,
                 )
                 break
+    elif not internal_sender and display and not is_personal_name(display):
+        # Recorded so the absence of a signal is explainable: the name was compared and
+        # deliberately not treated as a person's name.
+        fs.set("display_name_is_generic_role", True, display_name=display)
 
     # Display name claiming the organisation or a known brand while sending externally.
     if not internal_sender:

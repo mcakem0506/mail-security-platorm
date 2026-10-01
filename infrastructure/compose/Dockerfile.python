@@ -21,6 +21,11 @@ COPY apps/api ./apps/api
 COPY apps/worker ./apps/worker
 COPY scripts ./scripts
 
+# The detection rule pack ships as data, not as part of the Python package (ТЗ 1.0.3 §12), so
+# it can be reviewed and updated on its own schedule. The loader looks for /app/rules.
+COPY rules ./rules
+COPY datasets ./datasets
+
 RUN pip install --no-cache-dir . \
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /root/.cache

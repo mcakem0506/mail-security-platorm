@@ -217,3 +217,141 @@ class ScanCompleteness(StrEnum):
     LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
     UNSCANNABLE = "UNSCANNABLE"
     PARTIAL = "PARTIAL"
+
+
+class RuleStatus(StrEnum):
+    """Lifecycle state of a detection rule (ТЗ 1.0.3 §8, §10, §11).
+
+    The states differ in two independent ways: whether the rule is *evaluated* at all, and
+    whether its signal is allowed to *change the verdict*. Keeping those separate is what makes
+    SHADOW possible — a rule that runs, is measured and is visible to an analyst, while being
+    unable to affect what anyone is told.
+    """
+
+    #: Being drafted. Not evaluated anywhere, so a half-written rule cannot cost latency.
+    EXPERIMENTAL = "EXPERIMENTAL"
+    #: Evaluated and measured, but cannot change a verdict and is never shown to an employee.
+    SHADOW = "SHADOW"
+    #: Normal operation.
+    ACTIVE = "ACTIVE"
+    #: Active, but quality metrics have flagged it. Still contributes, and says so.
+    DEGRADED = "DEGRADED"
+    #: Switched off deliberately. Not evaluated.
+    DISABLED = "DISABLED"
+    #: Retired. Not evaluated, kept so historical verdicts stay explainable.
+    DEPRECATED = "DEPRECATED"
+
+
+#: Statuses whose rules are evaluated at all.
+RULE_EVALUATED: frozenset[RuleStatus] = frozenset({RuleStatus.SHADOW, RuleStatus.ACTIVE, RuleStatus.DEGRADED})
+#: Statuses whose signals may change the verdict. SHADOW is deliberately absent.
+RULE_SCORING: frozenset[RuleStatus] = frozenset({RuleStatus.ACTIVE, RuleStatus.DEGRADED})
+
+
+class AnalystClassification(StrEnum):
+    """What an analyst concluded about a message (ТЗ 1.0.3 §22).
+
+    This is the ground truth every quality metric is computed from, which is why it is a
+    separate vocabulary from :class:`IncidentStatus`: an incident's workflow state and an
+    analyst's verdict about the mail are different facts, and conflating them would make
+    precision depend on whether someone remembered to close a ticket.
+    """
+
+    CONFIRMED_PHISHING = "CONFIRMED_PHISHING"
+    CONFIRMED_BEC = "CONFIRMED_BEC"
+    CONFIRMED_MALWARE = "CONFIRMED_MALWARE"
+    SPAM = "SPAM"
+    LEGITIMATE = "LEGITIMATE"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    BENIGN_SIMULATION = "BENIGN_SIMULATION"
+    UNKNOWN = "UNKNOWN"
+
+
+#: Classifications that confirm the platform was right about a threat.
+CONFIRMED_THREAT: frozenset[AnalystClassification] = frozenset(
+    {
+        AnalystClassification.CONFIRMED_PHISHING,
+        AnalystClassification.CONFIRMED_BEC,
+        AnalystClassification.CONFIRMED_MALWARE,
+    }
+)
+#: Classifications that say the platform was wrong to flag the message.
+CONFIRMED_BENIGN: frozenset[AnalystClassification] = frozenset(
+    {
+        AnalystClassification.LEGITIMATE,
+        AnalystClassification.FALSE_POSITIVE,
+        AnalystClassification.BENIGN_SIMULATION,
+    }
+)
+
+
+class Priority(StrEnum):
+    """Analyst queue priority (ТЗ 1.0.3 §18).
+
+    Priority is not risk. A MALICIOUS message to one person who already deleted it is less
+    urgent than a HIGH_RISK campaign aimed at the finance department, and a queue sorted by
+    risk score alone sends analysts to the wrong one first.
+    """
+
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+    P4 = "P4"
+
+
+PRIORITY_ORDER: dict[Priority, int] = {
+    Priority.P1: 0,
+    Priority.P2: 1,
+    Priority.P3: 2,
+    Priority.P4: 3,
+}
+
+
+class SlaState(StrEnum):
+    """Where an incident stands against its acknowledgement target (ТЗ 1.0.3 §19)."""
+
+    ON_TIME = "ON_TIME"
+    DUE_SOON = "DUE_SOON"
+    BREACHED = "BREACHED"
+    MET = "MET"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class GapStatus(StrEnum):
+    """Lifecycle of a known detection gap (ТЗ 1.0.3 §27)."""
+
+    OPEN = "OPEN"
+    ACCEPTED = "ACCEPTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    FIXED = "FIXED"
+    WONT_FIX = "WONT_FIX"
+
+
+class FalseNegativeSource(StrEnum):
+    """Who found the miss (ТЗ 1.0.3 §26).
+
+    Recorded because the platform cannot discover its own false negatives: every one of these
+    means a human or another system noticed something the platform did not.
+    """
+
+    ANALYST = "analyst"
+    EMPLOYEE_REPORT = "employee_report"
+    GATEWAY = "gateway"
+    POST_INCIDENT = "post_incident"
+    EXTERNAL_TI = "external_ti"
+
+
+class RootCause(StrEnum):
+    """Why a message was missed (ТЗ 1.0.3 §26).
+
+    Naming the layer matters: a miss caused by a parser limit is fixed somewhere completely
+    different from one caused by a rule that never fired.
+    """
+
+    MISSING_FACT = "missing_fact"
+    MISSING_RULE = "missing_rule"
+    PARSER_FAILURE = "parser_failure"
+    PROVIDER_FAILURE = "provider_failure"
+    RULE_FAILURE = "rule_failure"
+    RISK_AGGREGATION_FAILURE = "risk_aggregation_failure"
+    UNKNOWN = "unknown"

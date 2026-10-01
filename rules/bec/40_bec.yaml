@@ -4,6 +4,8 @@ ruleset: bec
 rules:
   - id: BEC-001
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос на изменение платёжных реквизитов
     category: invoice_payment_fraud
     severity: high
@@ -21,6 +23,8 @@ rules:
 
   - id: BEC-002
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Изменение реквизитов от внешнего отправителя без аутентификации
     category: invoice_payment_fraud
     severity: critical
@@ -45,6 +49,8 @@ rules:
 
   - id: BEC-003
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Срочный платёж
     category: invoice_payment_fraud
     severity: medium
@@ -59,6 +65,8 @@ rules:
 
   - id: BEC-004
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Срочный платёж от имени руководителя
     category: executive_impersonation
     severity: critical
@@ -80,6 +88,8 @@ rules:
 
   - id: BEC-005
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос на покупку подарочных карт
     category: invoice_payment_fraud
     severity: high
@@ -94,6 +104,8 @@ rules:
 
   - id: BEC-006
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос кода подтверждения или MFA
     category: credential_harvesting
     severity: critical
@@ -109,6 +121,8 @@ rules:
 
   - id: BEC-007
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос пароля или учётных данных
     category: credential_harvesting
     severity: high
@@ -121,6 +135,8 @@ rules:
 
   - id: BEC-008
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос конфиденциальных документов
     category: hr_scam
     severity: high
@@ -137,6 +153,8 @@ rules:
 
   - id: BEC-009
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Просьба обойти установленный порядок согласования
     category: invoice_payment_fraud
     severity: high
@@ -151,6 +169,8 @@ rules:
 
   - id: BEC-010
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Давление от имени руководства
     category: executive_impersonation
     severity: medium
@@ -163,6 +183,8 @@ rules:
 
   - id: BEC-011
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Мошенничество со счётом на оплату
     category: invoice_payment_fraud
     severity: medium
@@ -177,6 +199,8 @@ rules:
 
   - id: BEC-012
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Счёт от отправителя с поддельным доменом
     category: vendor_impersonation
     severity: critical
@@ -196,6 +220,8 @@ rules:
 
   - id: BEC-013
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Запрос на изменение зарплатных реквизитов
     category: hr_scam
     severity: high
@@ -210,6 +236,8 @@ rules:
 
   - id: BEC-014
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Атака без вложений и ссылок
     category: invoice_payment_fraud
     severity: high
@@ -226,6 +254,8 @@ rules:
 
   - id: BEC-015
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Финансовый запрос адресован финансовому подразделению
     category: invoice_payment_fraud
     severity: medium
@@ -239,6 +269,8 @@ rules:
 
   - id: BEC-016
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Имитация ответа на несуществующую переписку
     category: sender_spoofing
     severity: medium
@@ -254,6 +286,8 @@ rules:
 
   - id: BEC-017
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Угрозы и давление в письме
     category: credential_harvesting
     severity: low
@@ -269,6 +303,8 @@ rules:
 
   - id: BEC-020
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Поддельное уведомление о документе
     category: fake_shared_document
     severity: medium
@@ -284,6 +320,8 @@ rules:
 
   - id: BEC-021
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Поддельное уведомление о документе с подозрительной ссылкой
     category: fake_shared_document
     severity: high
@@ -304,6 +342,8 @@ rules:
 
   - id: BEC-022
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Поддельное уведомление об истечении пароля или квоты
     category: fake_password_expiry
     severity: medium
@@ -320,6 +360,8 @@ rules:
 
   - id: BEC-023
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Мошенничество с доставкой
     category: delivery_scam
     severity: low
@@ -335,6 +377,8 @@ rules:
 
   - id: BEC-024
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Кадровая тематика как приманка
     category: hr_scam
     severity: low
@@ -350,6 +394,8 @@ rules:
 
   - id: BEC-025
     version: 1
+    status: ACTIVE
+    owner: detection-bec@corp.example
     name: Семантический анализ выявил признаки социальной инженерии
     category: invoice_payment_fraud
     severity: low

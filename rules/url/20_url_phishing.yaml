@@ -3,6 +3,8 @@ ruleset: url_phishing
 rules:
   - id: URL-001
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка ведёт на домен, похожий на домен организации
     category: phishing_url
     severity: critical
@@ -18,6 +20,8 @@ rules:
 
   - id: URL-002
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка ведёт на домен, похожий на известный сервис
     category: phishing_url
     severity: high
@@ -31,6 +35,8 @@ rules:
 
   - id: URL-003
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка использует символы-омоглифы
     category: phishing_url
     severity: high
@@ -45,6 +51,8 @@ rules:
 
   - id: URL-004
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Видимый текст ссылки не соответствует адресу перехода
     category: phishing_url
     severity: high
@@ -60,6 +68,8 @@ rules:
 
   - id: URL-005
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка ведёт на IP-адрес
     category: phishing_url
     severity: medium
@@ -74,6 +84,8 @@ rules:
 
   - id: URL-006
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка на нестандартный порт
     category: phishing_url
     severity: medium
@@ -85,6 +97,8 @@ rules:
 
   - id: URL-007
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка маскирует адрес через userinfo
     category: phishing_url
     severity: high
@@ -99,6 +113,8 @@ rules:
 
   - id: URL-008
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Использован сервис сокращения ссылок
     category: phishing_url
     severity: low
@@ -112,6 +128,8 @@ rules:
 
   - id: URL-009
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Избыточное число поддоменов
     category: phishing_url
     severity: low
@@ -125,6 +143,8 @@ rules:
 
   - id: URL-010
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Подозрительная доменная зона
     category: phishing_url
     severity: info
@@ -140,6 +160,8 @@ rules:
 
   - id: URL-011
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Ссылка ведёт на страницу входа или подтверждения
     category: credential_harvesting
     severity: medium
@@ -155,6 +177,8 @@ rules:
 
   - id: URL-012
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Сбор учётных данных через ссылку в письме
     category: credential_harvesting
     severity: critical
@@ -177,6 +201,8 @@ rules:
 
   - id: URL-013
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Опасная схема ссылки
     category: phishing_url
     severity: high
@@ -191,6 +217,8 @@ rules:
 
   - id: URL-020
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Форма ввода пароля в теле письма
     category: credential_harvesting
     severity: high
@@ -205,6 +233,8 @@ rules:
 
   - id: URL-021
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Форма письма отправляет данные на внешний адрес
     category: credential_harvesting
     severity: high
@@ -217,6 +247,8 @@ rules:
 
   - id: URL-022
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Поддельная страница входа корпоративной почты
     category: fake_cloud_login
     severity: critical
@@ -238,6 +270,8 @@ rules:
 
   - id: URL-023
     version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
     name: Скрипт в теле письма
     category: phishing_url
     severity: medium

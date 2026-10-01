@@ -86,6 +86,16 @@ class Signal(BaseModel):
     rule_version: int | None = None
     hard: bool = False
     internal: bool = False  # hide from employee view (internal detection logic)
+    #: Produced by a SHADOW rule: measured and shown to analysts, but it may not change the
+    #: verdict and is never shown to an employee (ТЗ 1.0.3 §10). Distinct from ``internal``,
+    #: which hides a signal that *did* count.
+    shadow: bool = False
+    #: Lifecycle state of the rule at evaluation time, so a stored verdict stays readable after
+    #: the rule moves on.
+    rule_status: str = "ACTIVE"
+    #: The rule condition that matched, in its source form. Explainability v2 asks for the
+    #: condition itself, not only its outcome (ТЗ 1.0.3 §15).
+    rule_condition: str | None = None
     recommendation: str | None = None
     observed_at: datetime = Field(default_factory=utcnow)
     suppressed: bool = False
@@ -146,6 +156,22 @@ class Reason(BaseModel):
     recommendation: str | None = None
 
 
+class EngineVersions(BaseModel):
+    """Everything needed to reproduce a verdict later (ТЗ 1.0.3 §48).
+
+    Without these a stored verdict cannot be explained once anything changes: "why did this
+    score 72 last month" has no answer if the rules, the parser and the risk engine have all
+    moved since.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    ruleset_version: str = ""
+    risk_engine_version: str = ""
+    parser_version: str = ""
+    ti_policy_version: str = ""
+
+
 class RiskVerdict(BaseModel):
     classification: RiskLevel
     score: int = Field(ge=0, le=100)
@@ -156,5 +182,9 @@ class RiskVerdict(BaseModel):
     missing_evidence: list[str]
     hard_signals: list[Reason]
     suppressed: list[Reason] = Field(default_factory=list)
+    #: Signals from SHADOW rules. Carried so an analyst can see what a candidate rule *would*
+    #: have said, while none of them contributed to ``score`` or ``classification``.
+    shadow: list[Reason] = Field(default_factory=list)
     recommendation: str
     engine_version: str
+    versions: EngineVersions = Field(default_factory=EngineVersions)

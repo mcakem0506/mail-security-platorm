@@ -4,6 +4,8 @@ ruleset: threat_intel
 rules:
   - id: TI-001
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: URL известен как вредоносный
     category: phishing_url
     severity: critical
@@ -20,6 +22,8 @@ rules:
 
   - id: TI-002
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: URL отмечен как подозрительный
     category: phishing_url
     severity: medium
@@ -31,6 +35,8 @@ rules:
 
   - id: TI-003
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Домен известен как вредоносный
     category: phishing_url
     severity: critical
@@ -45,6 +51,8 @@ rules:
 
   - id: TI-004
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Домен отмечен как подозрительный
     category: phishing_url
     severity: medium
@@ -56,6 +64,8 @@ rules:
 
   - id: TI-005
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: IP-адрес известен как вредоносный
     category: phishing_url
     severity: high
@@ -67,6 +77,8 @@ rules:
 
   - id: TI-006
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Домен недавно зарегистрирован или впервые наблюдается
     category: lookalike_domain
     severity: medium
@@ -81,6 +93,8 @@ rules:
 
   - id: TI-010
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Письмо относится к известной активной кампании
     category: phishing_url
     severity: critical
@@ -96,6 +110,8 @@ rules:
 
   - id: TI-011
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Индикаторы письма ранее наблюдались в инцидентах
     category: phishing_url
     severity: high
@@ -109,6 +125,8 @@ rules:
 
   - id: TI-020
     version: 1
+    status: ACTIVE
+    owner: detection-ti@corp.example
     name: Внешние источники Threat Intelligence недоступны
     category: sender_spoofing
     severity: info

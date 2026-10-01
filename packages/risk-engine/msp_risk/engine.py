@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from msp_contracts import (
     RISK_ORDER,
+    EngineVersions,
     Reason,
     RiskLevel,
     RiskVerdict,
@@ -121,11 +122,24 @@ def evaluate(
     content_encrypted: bool = False,
     unparseable: bool = False,
     max_reasons: int = 8,
+    versions: EngineVersions | None = None,
 ) -> RiskVerdict:
+    """Aggregate signals into an explainable verdict.
+
+    Three sets of signals are kept apart on purpose:
+
+    * **scoring** — everything that actually produced this verdict;
+    * **suppressed** — matched, but silenced by an exception. Kept so an analyst can see that
+      an exception is what is holding a signal back, not an absence of evidence;
+    * **shadow** — produced by rules still under validation. They are measured and shown, and
+      they contribute nothing to the score. A shadow rule that could move a verdict would not
+      be a shadow rule (ТЗ 1.0.3 §10).
+    """
     thresholds = thresholds or RiskThresholds()
     missing = list(dict.fromkeys(missing_evidence or []))
-    active = [s for s in signals if not s.suppressed]
-    suppressed = [s for s in signals if s.suppressed]
+    shadow = [s for s in signals if s.shadow]
+    suppressed = [s for s in signals if s.suppressed and not s.shadow]
+    active = [s for s in signals if not s.suppressed and not s.shadow]
     hard_signals = [s for s in active if s.hard]
 
     score, confidence_value = _score(active)
@@ -163,11 +177,17 @@ def evaluate(
         missing_evidence=missing,
         hard_signals=[_to_reason(s) for s in hard_signals],
         suppressed=[_to_reason(s) for s in suppressed],
+        shadow=[_to_reason(s) for s in shadow],
         recommendation=_RECOMMENDATIONS[classification],
         engine_version=RISK_ENGINE_VERSION,
+        versions=versions or EngineVersions(risk_engine_version=RISK_ENGINE_VERSION),
     )
 
 
 def employee_reasons(verdict: RiskVerdict, limit: int = 5) -> list[Reason]:
-    """Reasons shown to an employee: internal detection logic is never exposed (ТЗ 6.4)."""
+    """Reasons shown to an employee: internal detection logic is never exposed (ТЗ 6.4).
+
+    Shadow signals cannot appear here even by accident: they are marked internal at the point
+    they are created, and they never reach ``reasons`` in the first place (ТЗ 1.0.3 §10).
+    """
     return [r for r in verdict.reasons if not r.internal][:limit]

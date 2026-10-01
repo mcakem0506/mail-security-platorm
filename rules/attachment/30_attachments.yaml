@@ -4,6 +4,8 @@ ruleset: attachments
 rules:
   - id: ATT-001
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Исполняемое вложение
     category: suspicious_attachment
     severity: high
@@ -19,6 +21,8 @@ rules:
 
   - id: ATT-002
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Скрипт во вложении
     category: suspicious_attachment
     severity: high
@@ -31,6 +35,8 @@ rules:
 
   - id: ATT-003
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Файл-ярлык во вложении
     category: suspicious_attachment
     severity: high
@@ -45,6 +51,8 @@ rules:
 
   - id: ATT-004
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Двойное расширение файла
     category: suspicious_attachment
     severity: high
@@ -59,6 +67,8 @@ rules:
 
   - id: ATT-005
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Тип файла не соответствует расширению
     category: suspicious_attachment
     severity: medium
@@ -72,6 +82,8 @@ rules:
 
   - id: ATT-006
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Документ с макросами
     category: suspicious_attachment
     severity: medium
@@ -86,6 +98,8 @@ rules:
 
   - id: ATT-007
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Документ с макросами от внешнего отправителя
     category: malicious_attachment
     severity: high
@@ -100,6 +114,8 @@ rules:
 
   - id: ATT-008
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Встроенные объекты в документе
     category: suspicious_attachment
     severity: medium
@@ -113,6 +129,8 @@ rules:
 
   - id: ATT-009
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Образ диска во вложении
     category: suspicious_attachment
     severity: high
@@ -127,6 +145,8 @@ rules:
 
   - id: ATT-010
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Запароленный архив
     category: suspicious_attachment
     severity: medium
@@ -141,6 +161,8 @@ rules:
 
   - id: ATT-011
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Опасный файл внутри архива
     category: malicious_attachment
     severity: high
@@ -154,6 +176,8 @@ rules:
 
   - id: ATT-012
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Признаки архивной бомбы
     category: suspicious_attachment
     severity: high
@@ -168,6 +192,8 @@ rules:
 
   - id: ATT-013
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Небезопасные пути внутри архива
     category: suspicious_attachment
     severity: high
@@ -182,6 +208,8 @@ rules:
 
   - id: ATT-014
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Вложенные архивы
     category: suspicious_attachment
     severity: low
@@ -193,6 +221,8 @@ rules:
 
   - id: ATT-015
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: HTML-вложение
     category: credential_harvesting
     severity: medium
@@ -207,6 +237,8 @@ rules:
 
   - id: ATT-016
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Форма ввода пароля в HTML-вложении
     category: credential_harvesting
     severity: critical
@@ -221,6 +253,8 @@ rules:
 
   - id: ATT-017
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Признаки HTML smuggling
     category: malicious_attachment
     severity: high
@@ -235,6 +269,8 @@ rules:
 
   - id: ATT-018
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Имя файла с подменой направления текста
     category: suspicious_attachment
     severity: high
@@ -249,6 +285,8 @@ rules:
 
   - id: ATT-030
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Локальный антивирус обнаружил угрозу
     category: malicious_attachment
     severity: critical
@@ -263,6 +301,8 @@ rules:
 
   - id: ATT-031
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Хеш вложения известен как вредоносный
     category: malicious_attachment
     severity: critical
@@ -278,6 +318,8 @@ rules:
 
   - id: ATT-032
     version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
     name: Хеш вложения отмечен как подозрительный
     category: suspicious_attachment
     severity: medium

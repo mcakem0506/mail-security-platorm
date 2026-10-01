@@ -12,6 +12,8 @@ ruleset: limits
 rules:
   - id: LIM-001
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: "Письмо не проверено: превышен максимальный размер"
     category: unscannable
     severity: medium
@@ -30,6 +32,8 @@ rules:
 
   - id: LIM-002
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: "Вложение не проверено: превышен максимальный размер"
     category: unscannable
     severity: low
@@ -45,6 +49,8 @@ rules:
 
   - id: LIM-003
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: Проверены не все вложения
     category: unscannable
     severity: low
@@ -61,6 +67,8 @@ rules:
 
   - id: LIM-004
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: Архив распакован не полностью
     category: unscannable
     severity: medium
@@ -79,6 +87,8 @@ rules:
 
   - id: LIM-005
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: Структура письма разобрана не полностью
     category: unscannable
     severity: low
@@ -95,6 +105,8 @@ rules:
 
   - id: LIM-006
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: Проверены не все ссылки
     category: unscannable
     severity: low
@@ -109,6 +121,8 @@ rules:
 
   - id: LIM-007
     version: 1
+    status: ACTIVE
+    owner: detection-core@corp.example
     name: Разбор письма не завершился за отведённое время
     category: unscannable
     severity: medium

@@ -35,6 +35,17 @@ _INTENTS: tuple[IntentPattern, ...] = (
             r"(?i)(?:изменил|поменял|новы[йе]|обновл[её]нны[йе]|друг(?:ие|ой))\s+(?:наш[иие]\s+)?"
             r"(?:банковск\w+|платежн\w+|реквизит\w+|расч[её]тн\w+\s+сч[её]т\w*)",
             r"(?i)(?:реквизит\w*|сч[её]т\w*)\s+(?:измен|помен|обнов|друг)",
+            # Verb-first word order, which Russian uses at least as often as noun-first:
+            # "изменились реквизиты", "сменились платёжные данные". Missing it left the
+            # most natural phrasing of a bank-details change undetected.
+            r"(?i)(?:измен|помен|смен|обнов)\w*\s+(?:наш\w+\s+)?"
+            r"(?:банковск\w+|платежн\w+|реквизит\w+|расч[её]тн\w+\s+сч[её]т\w*)",
+            r"(?i)(?:измен|помен|смен|обнов)\w*[^.]{0,30}"
+            r"(?:реквизит\w+|данн\w+)\s+(?:для\s+)?(?:оплат\w+|перечислен\w+|платеж\w+)",
+            # The previous account is closed or blocked: a pretext with no legitimate use
+            # in a payment instruction.
+            r"(?i)(?:стар\w+|прежн\w+|предыдущ\w+)\s+(?:сч[её]т\w*|реквизит\w*)[^.]{0,40}"
+            r"(?:закрыт|заблокирован|недействительн|не\s+действ|не\s+пройд)",
             r"(?i)(?:перевед|оплат\w+|направ\w+)\w*\s+(?:на\s+)?(?:нов\w+|друг\w+)\s+(?:сч[её]т|реквизит)",
             r"(?i)\b(?:change|update|updated|new|different|amend|revise)\b[^.\n]{0,40}\b"
             r"(?:bank(?:ing)?\s+(?:details|account|information|info)|account\s+(?:number|details)|"

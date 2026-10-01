@@ -16,6 +16,7 @@ from .similarity import (
     compare_labels,
     has_homoglyph,
     has_mixed_script_token,
+    is_personal_name,
     name_similarity,
     skeleton,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "gateway_facts",
     "has_homoglyph",
     "has_mixed_script_token",
+    "is_personal_name",
     "name_similarity",
     "skeleton",
 ]

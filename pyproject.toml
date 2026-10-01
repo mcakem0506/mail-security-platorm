@@ -52,6 +52,7 @@ where = [
   "packages/shared-contracts",
   "packages/mail-parser",
   "packages/detection-engine",
+  "packages/detection-eval",
   "packages/risk-engine",
   "packages/ti-core",
   "providers/exchange",
@@ -64,7 +65,7 @@ where = [
 include = ["msp_*"]
 
 [tool.setuptools.package-data]
-msp_detection = ["rules/*.yaml", "data/*.txt"]
+msp_detection = ["data/*.txt"]
 msp_mail_gateway = ["profiles/*.yaml"]
 msp_api = ["migrations/*.py", "migrations/versions/*.py", "alembic.ini"]
 
