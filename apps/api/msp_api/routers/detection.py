@@ -428,9 +428,14 @@ def list_rules(
 
 @router.post("/detection/rules/sync", response_model=dict)
 def sync_registry(actor: RuleManager, session: DbSession, request: Request) -> dict[str, Any]:
-    """Mirror the Git-managed rule pack and gap registry into the database."""
+    """Mirror the Git-managed rule pack, gap registry and scenario catalog into the database.
+
+    The files stay the source of truth: each is reviewed in a pull request next to the code it
+    describes. The tables exist so the console can show them beside live data.
+    """
     rules = detection_ops.sync_rule_registry(session, actor.organization_id)
     gaps = detection_ops.sync_gap_registry(session, actor.organization_id)
+    scenarios = detection_ops.sync_threat_scenarios(session, actor.organization_id)
     record(
         session,
         action=AuditAction.RULE_CHANGED,
@@ -440,12 +445,12 @@ def sync_registry(actor: RuleManager, session: DbSession, request: Request) -> d
         organization_id=actor.organization_id,
         object_type="ruleset",
         object_id=get_ruleset().version_fingerprint[:64],
-        detail={"rules": rules, "gaps": gaps, "action": "sync"},
+        detail={"rules": rules, "gaps": gaps, "scenarios": scenarios, "action": "sync"},
         ip_address=client_ip(request),
         request_id=getattr(request.state, "request_id", ""),
     )
     session.commit()
-    return {"rules": rules, "gaps": gaps}
+    return {"rules": rules, "gaps": gaps, "scenarios": scenarios}
 
 
 @router.post("/detection/rules/{rule_id}/status", response_model=dict)

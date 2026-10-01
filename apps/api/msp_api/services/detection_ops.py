@@ -47,6 +47,7 @@ from ..db.models import (
     MailMessage,
     ReevaluationRun,
     RuleStatistic,
+    ThreatScenario,
 )
 from .analysis import build_context, get_ruleset, parser_limits
 from .storage import build_storage
@@ -679,14 +680,64 @@ def sync_gap_registry(session: Session, organization_id: str, *, path: str | Pat
     return loaded
 
 
-def _default_gap_path() -> Path:
+def sync_threat_scenarios(session: Session, organization_id: str, *, path: str | Path | None = None) -> int:
+    """Load the threat scenario catalog from its YAML file (ТЗ 1.0.3 §28).
+
+    Coverage is deliberately not stored here. It is computed from the rule pack whenever the
+    catalog is read, because a stored "covered" flag that outlives the rule providing it
+    asserts protection that no longer exists.
+    """
+    import yaml
+
+    source = Path(path) if path else _default_scenario_path()
+    if not source.is_file():
+        return 0
+    payload = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    loaded = 0
+    for entry in payload.get("scenarios", []) or []:
+        scenario_id = str(entry.get("id", "")).strip()
+        if not scenario_id:
+            continue
+        record = session.execute(
+            select(ThreatScenario).where(
+                ThreatScenario.organization_id == organization_id,
+                ThreatScenario.scenario_id == scenario_id,
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            record = ThreatScenario(organization_id=organization_id, scenario_id=scenario_id)
+            session.add(record)
+        record.title = str(entry.get("title", ""))[:255]
+        record.category = str(entry.get("category", ""))[:64]
+        record.description = str(entry.get("description", ""))
+        record.rules = [str(r) for r in (entry.get("rules") or [])]
+        record.fixtures = [str(f) for f in (entry.get("fixtures") or [])]
+        record.playbook = str(entry.get("playbook", ""))[:64]
+        try:
+            record.severity = Severity(str(entry.get("severity", "medium")).lower())
+        except ValueError:
+            record.severity = Severity.MEDIUM
+        record.enabled = bool(entry.get("enabled", True))
+        loaded += 1
+    return loaded
+
+
+def _default_scenario_path() -> Path:
+    return _dataset_file("threat_scenarios.yaml")
+
+
+def _dataset_file(name: str) -> Path:
     for candidate in (
-        Path("/app/datasets/detection_gaps.yaml"),
-        Path(__file__).resolve().parents[4] / "datasets" / "detection_gaps.yaml",
+        Path("/app/datasets") / name,
+        Path(__file__).resolve().parents[4] / "datasets" / name,
     ):
         if candidate.is_file():
             return candidate
-    return Path("datasets/detection_gaps.yaml")
+    return Path("datasets") / name
+
+
+def _default_gap_path() -> Path:
+    return _dataset_file("detection_gaps.yaml")
 
 
 def sync_rule_registry(session: Session, organization_id: str) -> int:
