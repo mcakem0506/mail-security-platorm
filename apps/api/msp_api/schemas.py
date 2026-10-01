@@ -851,3 +851,20 @@ class ThreatScenarioOut(ApiModel):
     covered: bool
     active_rules: int
     shadow_rules: int
+
+
+class CampaignMergeRequest(ApiModel):
+    """Fold one campaign into another (ТЗ 1.0.3 §32)."""
+
+    source_campaign_id: str = Field(min_length=1, max_length=64)
+    #: Required, because a merge is hard to undo and the next reader needs to know why the two
+    #: waves were judged to be one.
+    reason: str = Field(min_length=5, max_length=2000)
+
+
+class CampaignSplitRequest(ApiModel):
+    """Pull messages out of a campaign into a new one (ТЗ 1.0.3 §32)."""
+
+    message_ids: list[str] = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=3, max_length=255)
+    reason: str = Field(default="", max_length=2000)

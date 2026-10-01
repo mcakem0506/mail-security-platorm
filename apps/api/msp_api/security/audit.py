@@ -72,6 +72,10 @@ class AuditAction:
     REEVALUATION_STARTED = "detection.reevaluation_started"
     DATASET_CHANGED = "detection.dataset_changed"
     INCIDENT_ASSIGNED = "incident.assigned"
+    # Campaign curation is audited because a merge or a split changes what later readers
+    # believe happened: a wave folded into another is one nobody investigates separately.
+    CAMPAIGN_MERGED = "campaign.merged"
+    CAMPAIGN_SPLIT = "campaign.split"
     # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
     INTAKE_DEAD_LETTER = "intake.dead_letter"
     MESSAGE_UNSCANNABLE = "intake.unscannable"

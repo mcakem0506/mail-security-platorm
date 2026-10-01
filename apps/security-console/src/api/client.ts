@@ -37,6 +37,134 @@ export interface Signal {
   suppressed_by: string | null;
 }
 
+/** ТЗ 1.0.3 §17, §18: a queue row. Priority is not the risk level. */
+export interface QueueItem {
+  incident_id: string;
+  number: number;
+  title: string;
+  priority: "P1" | "P2" | "P3" | "P4";
+  priority_score: number;
+  priority_factors: string[];
+  sla: { state: string; target: string | null; remaining_seconds: number | null; timers: Record<string, number> };
+  classification: string | null;
+  confidence: string;
+  status: string;
+  severity: Severity;
+  age_seconds: number;
+  affected_users: string[];
+  vip_involved: boolean;
+  campaign_size: number;
+  gateway_conflict: boolean;
+  employee_report: boolean;
+  assignee: string | null;
+  analyst_classification: string | null;
+}
+
+export type AnalystClassification =
+  | "CONFIRMED_PHISHING"
+  | "CONFIRMED_BEC"
+  | "CONFIRMED_MALWARE"
+  | "SPAM"
+  | "LEGITIMATE"
+  | "FALSE_POSITIVE"
+  | "BENIGN_SIMULATION"
+  | "UNKNOWN";
+
+/**
+ * ТЗ 1.0.3 §35. Every ratio here is nullable, and the console must render null as "—".
+ * Showing 0% false positives because nothing has been classified would read as success.
+ */
+export interface DetectionQuality {
+  period_start: string;
+  period_end: string;
+  total_analyzed: number;
+  classified: number;
+  confirmed_threats: number;
+  confirmed_benign: number;
+  precision: number | null;
+  false_positive_rate: number | null;
+  reported_misses: number;
+  unscannable: number;
+  unknown: number;
+  open_gaps: number;
+  shadow_rules: number;
+  noisy_rules: Record<string, unknown>[];
+  silent_rules: string[];
+  unowned_active_rules: string[];
+  coverage_by_scenario: Record<string, unknown>[];
+}
+
+export interface DetectionRule {
+  rule_id: string;
+  version: number;
+  title: string;
+  category: string;
+  severity: Severity;
+  status: "EXPERIMENTAL" | "SHADOW" | "ACTIVE" | "DEGRADED" | "DISABLED" | "DEPRECATED";
+  owner: string;
+  weight: number;
+  scores: boolean;
+  hard: boolean;
+  scenarios: string[];
+  condition: string | null;
+  trigger_count: number;
+  confirmed_tp: number;
+  confirmed_fp: number;
+  precision: number | null;
+}
+
+export interface DetectionGap {
+  gap_id: string;
+  category: string;
+  description: string;
+  root_cause: string;
+  severity: Severity;
+  status: string;
+  owner: string;
+  target_release: string;
+  examples: string[];
+  mitigation: string;
+  planned_fix: string;
+  reported_misses: number;
+}
+
+export interface ThreatScenarioView {
+  scenario_id: string;
+  title: string;
+  category: string;
+  description: string;
+  severity: Severity;
+  rules: string[];
+  fixtures: string[];
+  playbook: string;
+  enabled: boolean;
+  covered: boolean;
+  active_rules: number;
+  shadow_rules: number;
+}
+
+export interface SimulationResult {
+  message_id: string;
+  classification: RiskLevel;
+  score: number;
+  signals: {
+    rule_id: string;
+    rule_version: number;
+    title: string;
+    category: string;
+    severity: string;
+    weight: number;
+    confidence: number;
+    shadow: boolean;
+    suppressed: boolean;
+    condition: string | null;
+    evidence: Record<string, unknown>;
+  }[];
+  matched_facts: Record<string, unknown>;
+  missing_evidence: string[];
+  ruleset_fingerprint: string;
+}
+
 export interface MessageSummary {
   message_id: string;
   subject: string;
@@ -392,6 +520,101 @@ export const api = {
     request<{ unread: number; items: Record<string, unknown>[] }>(
       `/api/v1/notifications${query({ unread_only: unreadOnly })}`,
     ),
+
+  // --- ТЗ 1.0.3: очередь, классификация, качество детектирования ---------------------------
+  investigationQueue: (params: { mine?: boolean; include_closed?: boolean; limit?: number } = {}) =>
+    request<QueueItem[]>(`/api/v1/investigations/queue${query(params)}`),
+
+  assignIncident: (id: string, body: { assignee_email?: string; candidates?: string[] }) =>
+    request<Record<string, string>>(`/api/v1/incidents/${id}/assign`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  incidentTimeline: (id: string) =>
+    request<{ at: string; event: string; detail: string }[]>(`/api/v1/incidents/${id}/timeline`),
+
+  classifyIncident: (
+    id: string,
+    body: {
+      classification: AnalystClassification;
+      comment?: string;
+      confidence?: "high" | "medium" | "low";
+      offending_rules?: string[];
+      offending_signals?: string[];
+    },
+  ) =>
+    request<Record<string, unknown>>(`/api/v1/incidents/${id}/classification`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  employeeFeedback: (id: string) =>
+    request<{ incident_id: string; classification: string; classified: boolean; text: string }>(
+      `/api/v1/incidents/${id}/employee-feedback`,
+    ),
+
+  reportMissedDetection: (body: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/api/v1/detection/missed", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  detectionFeedback: (kind?: "false_positive" | "false_negative") =>
+    request<Record<string, unknown>[]>(`/api/v1/detection/feedback${query({ kind })}`),
+
+  detectionRules: (params: { status?: string; category?: string } = {}) =>
+    request<DetectionRule[]>(`/api/v1/detection/rules${query(params)}`),
+
+  syncDetectionRegistry: () =>
+    request<{ rules: number; gaps: number; scenarios: number }>("/api/v1/detection/rules/sync", {
+      method: "POST",
+    }),
+
+  changeRuleStatus: (ruleId: string, body: { status: string; reason: string; reviewer?: string }) =>
+    request<Record<string, unknown>>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ruleChanges: () => request<Record<string, unknown>[]>("/api/v1/detection/rules/changes"),
+
+  simulateRules: (body: { message_id: string; rule_id?: string }) =>
+    request<SimulationResult>("/api/v1/detection/simulate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  replayAnalysis: (jobId: string, apply = false) =>
+    request<Record<string, unknown>>(`/api/v1/analysis/${jobId}/replay`, {
+      method: "POST",
+      body: JSON.stringify({ apply }),
+    }),
+
+  reevaluate: (body: { days: number; dry_run: boolean; limit?: number }) =>
+    request<Record<string, unknown>>("/api/v1/detection/reevaluate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  detectionGaps: (status?: string) =>
+    request<DetectionGap[]>(`/api/v1/detection/gaps${query({ status })}`),
+
+  updateGap: (gapId: string, body: { status: string; note?: string }) =>
+    request<DetectionGap>(`/api/v1/detection/gaps/${encodeURIComponent(gapId)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  threatScenarios: () => request<ThreatScenarioView[]>("/api/v1/detection/scenarios"),
+
+  detectionQuality: (days = 30) =>
+    request<DetectionQuality>(`/api/v1/detection/quality${query({ days })}`),
+
+  shadowRules: (days = 30) =>
+    request<Record<string, unknown>[]>(`/api/v1/detection/shadow${query({ days })}`),
+
+  detectionVersions: () => request<Record<string, unknown>>("/api/v1/detection/versions"),
 
   markNotificationRead: (id: string) =>
     request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),

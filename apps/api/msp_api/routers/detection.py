@@ -45,6 +45,8 @@ from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..observability import false_positive_total
 from ..schemas import (
     AssignRequest,
+    CampaignMergeRequest,
+    CampaignSplitRequest,
     ClassificationOut,
     ClassificationRequest,
     DetectionFeedbackOut,
@@ -66,7 +68,7 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import detection_ops, triage
+from ..services import detection_ops, investigation, triage
 from ..services.analysis import get_ruleset
 
 logger = logging.getLogger(__name__)
@@ -1118,3 +1120,165 @@ def detection_versions(actor: QualityReader, settings: AppSettings) -> dict[str,
         "shadow_rules": sum(1 for r in ruleset.rules if r.status is RuleStatus.SHADOW),
         "rule_pack_path": str(detection_ops.rule_pack_path()),
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Related search, evidence graph, campaign curation, reporting quality
+# (ТЗ 1.0.3 §16, §30, §31, §32, §33)
+# ---------------------------------------------------------------------------------------------
+@router.get("/investigations/messages/{message_id}/related", response_model=list[dict])
+def related_messages(
+    message_id: str,
+    actor: Viewer,
+    session: DbSession,
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> list[dict[str, Any]]:
+    """Everything connected to one message, with each connection named (ТЗ 1.0.3 §30).
+
+    The reason is part of the answer: a "related message" with no stated relation is an
+    assertion the analyst has to take on faith.
+    """
+    message = session.get(MailMessage, message_id)
+    if message is None or message.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "сообщение не найдено")
+    found = investigation.find_related(
+        session,
+        organization_id=actor.organization_id,
+        message_id=message_id,
+        days=days,
+        limit=limit,
+    )
+    return [item.as_dict() for item in found]
+
+
+@router.get("/analysis/{job_id}/evidence-graph", response_model=dict)
+def evidence_graph(job_id: str, actor: Viewer, session: DbSession) -> dict[str, Any]:
+    """How the verdict was reached, as a graph (ТЗ 1.0.3 §16).
+
+    Built from the stored analysis rather than recomputed, so it shows what happened at the
+    time and not what today's rules would say.
+    """
+    job = session.get(AnalysisJob, job_id)
+    if job is None or job.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "задание анализа не найдено")
+    graph = investigation.build_evidence_graph(session, job_id=job_id)
+    if graph is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "нет сохранённого результата анализа")
+    return graph.as_dict()
+
+
+@router.get("/campaigns/merge-suggestions", response_model=list[dict])
+def campaign_merge_suggestions(
+    actor: Viewer,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> list[dict[str, Any]]:
+    """Campaigns that look like one wave (ТЗ 1.0.3 §31) — proposals, never applied."""
+    return [
+        item.as_dict() for item in investigation.suggest_merges(session, actor.organization_id, limit=limit)
+    ]
+
+
+@router.post("/campaigns/{campaign_id}/merge", response_model=dict)
+def merge_campaign(
+    campaign_id: str,
+    payload: CampaignMergeRequest,
+    actor: Classifier,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Fold one campaign into another (ТЗ 1.0.3 §32). An analyst decides, not correlation."""
+    merged = investigation.merge_campaigns(
+        session,
+        organization_id=actor.organization_id,
+        target_id=campaign_id,
+        source_id=payload.source_campaign_id,
+        actor=actor.email,
+    )
+    if merged is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "кампании не найдены или указана одна и та же кампания",
+        )
+    record(
+        session,
+        action=AuditAction.CAMPAIGN_MERGED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="campaign",
+        object_id=campaign_id,
+        detail={"source": payload.source_campaign_id, "reason": payload.reason[:500]},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {
+        "campaign_id": merged.id,
+        "message_count": merged.message_count,
+        "recipient_count": merged.recipient_count,
+    }
+
+
+@router.post("/campaigns/{campaign_id}/split", response_model=dict)
+def split_campaign_endpoint(
+    campaign_id: str,
+    payload: CampaignSplitRequest,
+    actor: Classifier,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Pull messages out into a campaign of their own (ТЗ 1.0.3 §32).
+
+    The more important half of curation: correlation that lumps two waves together hides the
+    smaller one, and nobody investigates a campaign they cannot see.
+    """
+    created = investigation.split_campaign(
+        session,
+        organization_id=actor.organization_id,
+        campaign_id=campaign_id,
+        message_ids=payload.message_ids,
+        name=payload.name,
+        actor=actor.email,
+    )
+    if created is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "кампания не найдена, письма не входят в неё, либо выделяются все письма сразу",
+        )
+    record(
+        session,
+        action=AuditAction.CAMPAIGN_SPLIT,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="campaign",
+        object_id=campaign_id,
+        detail={"created": created.id, "messages": len(payload.message_ids)},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {
+        "campaign_id": created.id,
+        "name": created.name,
+        "message_count": created.message_count,
+    }
+
+
+@router.get("/detection/reporting-quality", response_model=dict)
+def reporting_quality_report(
+    actor: QualityReader,
+    session: DbSession,
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+) -> dict[str, Any]:
+    """How useful employee reports are (ТЗ 1.0.3 §33).
+
+    Deliberately not a leaderboard: the numbers are for deciding where training helps and whose
+    reports to open first. An employee who reports ten harmless messages and one real attack
+    has paid for the other nine.
+    """
+    return investigation.reporting_quality(session, actor.organization_id, days=days)

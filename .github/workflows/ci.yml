@@ -243,6 +243,57 @@ jobs:
           path: acceptance-snapshot.md
           retention-days: 90
 
+  detection-gate:
+    name: Detection quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # Every rule condition must name a fact the engine can produce. A rule with a typo in a
+      # condition loads cleanly, validates cleanly and never fires — it looks like coverage on
+      # every dashboard and provides none (ТЗ 1.0.3 §12, §60).
+      - name: Rule vocabulary and scenario catalog
+        run: pytest -q tests/unit/test_rule_vocabulary.py tests/unit/test_threat_scenarios.py
+
+      # The gate compares against datasets/baseline.json and fails on a regression, on a
+      # precision or recall floor being broken, and on an ACTIVE rule without an owner.
+      # Known gaps from datasets/detection_gaps.yaml come back as warnings, not blockers:
+      # a limitation that has been reviewed and written down is not a surprise.
+      - name: Detection regression gate
+        run: python scripts/evaluate_detection.py --gate --markdown gate-report.md
+
+      - name: Report
+        if: always()
+        run: cat gate-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: detection-gate-${{ github.sha }}
+          path: gate-report.md
+          retention-days: 90
+
+  parser-robustness:
+    name: Parser robustness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # Fuzzing, the performance budget and regex safety run as their own job: they are slower
+      # than the rest and a timeout here must be readable as "robustness", not as a flaky test
+      # somewhere in the suite (ТЗ 1.0.3 §43–§47).
+      - name: Budget, regex safety, fuzzing, adversarial input
+        run: pytest -q tests/security/test_parser_robustness.py
+
   migrations:
     name: Migrations from scratch
     runs-on: ubuntu-latest
@@ -271,6 +322,41 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+
+      # An empty database hides the failure that matters: a NOT NULL column added without a
+      # server default applies fine to no rows and fails on a deployment that has data. This
+      # step seeds the previous revision and then upgrades over the seeded rows.
+      - name: Upgrade over existing data
+        working-directory: apps/api
+        run: |
+          alembic downgrade base
+          alembic upgrade 9201086b7406
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["MSP_DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(
+                  text(
+                      "INSERT INTO organizations (id, name, corporate_domains,"
+                      " trusted_infrastructure_domains, settings)"
+                      " VALUES ('ci-org', 'CI', '[]'::jsonb, '[]'::jsonb, '{}'::jsonb)"
+                  )
+              )
+              connection.execute(
+                  text(
+                      "INSERT INTO detection_exceptions (id, organization_id, exception_type,"
+                      " value, owner_email, reason, hit_count, scope, created_by,"
+                      " requires_approval)"
+                      " VALUES ('ci-exc', 'ci-org', 'SENDER_DOMAIN', 'partner.test',"
+                      " 'admin@corp.example', 'ci', 0, 'RULE', '', false)"
+                  )
+              )
+          print("seeded one organization and one exception")
+          PY
+          alembic upgrade head
+          alembic check
       - name: Schema matches the models
         working-directory: apps/api
         run: |

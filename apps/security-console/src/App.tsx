@@ -12,6 +12,8 @@ import { AdminPage } from "./pages/AdminPage";
 import { ThreatIntelPage } from "./pages/ThreatIntelPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { QueuePage } from "./pages/QueuePage";
+import { DetectionQualityPage } from "./pages/DetectionQualityPage";
 
 interface NavItem {
   to: string;
@@ -21,10 +23,12 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Обзор", permission: "view:investigations" },
+  { to: "/queue", label: "Очередь", permission: "view:incidents" },
   { to: "/investigations", label: "Расследования", permission: "view:investigations" },
   { to: "/incidents", label: "Инциденты", permission: "view:incidents" },
   { to: "/campaigns", label: "Кампании", permission: "view:campaigns" },
   { to: "/threat-intel", label: "Threat Intelligence", permission: "search:indicators" },
+  { to: "/detection", label: "Качество детектирования", permission: "quality:read" },
   { to: "/reports", label: "Отчёты", permission: "view:investigations" },
   { to: "/remediation", label: "Реагирование", permission: "view:incidents" },
   { to: "/gateways", label: "Почтовые шлюзы", permission: "view:investigations" },
@@ -103,11 +107,13 @@ export function App() {
               path="/"
               element={can("view:investigations") ? <DashboardPage /> : <Navigate to="/incidents" replace />}
             />
+            <Route path="/queue" element={<QueuePage user={user} />} />
             <Route path="/investigations" element={<InvestigationsPage />} />
             <Route path="/messages/:messageId" element={<MessagePage />} />
             <Route path="/incidents" element={<IncidentsPage user={user} />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/threat-intel" element={<ThreatIntelPage />} />
+            <Route path="/detection" element={<DetectionQualityPage user={user} />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
             <Route path="/gateways" element={<GatewaysPage user={user} />} />
