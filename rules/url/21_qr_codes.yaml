@@ -1,0 +1,84 @@
+# QR codes in mail (ТЗ 1.0.3 §38, registered gap GAP-002).
+#
+# A QR code moves the link out of the text the platform can read, and the victim follows it
+# from a personal phone — outside the corporate network, outside every proxy and every URL
+# check. Treating such a message as clean because it contains no URLs is precisely the failure
+# ТЗ §3 forbids: absence of detection is not safety.
+#
+# Until a decoder ships with the platform, these rules work on what can be established without
+# one: the shape of the image and the wording that asks the reader to scan it. That is a
+# heuristic, and the weights say so. The message is in any case marked as not fully scanned,
+# so it cannot settle into a clean verdict on the strength of what was never read.
+ruleset: qr_codes
+rules:
+  - id: URL-030
+    version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
+    name: Письмо предлагает отсканировать QR-код
+    category: phishing_url
+    severity: medium
+    confidence: 0.55
+    weight: 25
+    conditions:
+      all:
+        - qr_likely_quishing
+        - sender_external
+    evidence: [qr_likely_quishing, qr_candidate_image, qr_scan_prompt]
+    explanation: >-
+      Внешнее письмо содержит изображение, похожее на QR-код, и предлагает его отсканировать.
+      Ссылка внутри кода платформой не прочитана, а переход по ней происходит с личного
+      телефона, вне защищённого периметра.
+    recommendation: >-
+      Не сканируйте код. Если операция ожидаема, откройте нужный сервис самостоятельно, а не
+      по коду из письма.
+
+  - id: URL-031
+    version: 1
+    status: ACTIVE
+    owner: detection-url@corp.example
+    name: QR-код в письме о деньгах или учётных данных
+    category: phishing_url
+    severity: high
+    confidence: 0.7
+    weight: 40
+    conditions:
+      all:
+        - qr_likely_quishing
+        - sender_external
+        - any:
+            - intent_urgent_payment
+            - intent_invoice_fraud
+            - intent_bank_details_change
+            - intent_credential_request
+            - intent_mfa_code_request
+            - intent_fake_quota_or_expiry
+    evidence: [qr_likely_quishing, qr_scan_prompt]
+    explanation: >-
+      Письмо с QR-кодом требует платежа, смены реквизитов или ввода учётных данных. Это
+      типичная схема квишинга: код уводит получателя на поддельную страницу в обход проверки
+      ссылок.
+    recommendation: >-
+      Не сканируйте код. Подтвердите запрос по ранее известному номеру телефона, а не по
+      данным из письма.
+
+  - id: URL-032
+    version: 1
+    status: SHADOW
+    owner: detection-url@corp.example
+    name: Ссылка, распознанная из QR-кода
+    category: phishing_url
+    severity: high
+    confidence: 0.75
+    conditions:
+      all:
+        - qr_url_present
+        - sender_external
+    evidence: [qr_url_present]
+    explanation: >-
+      Ссылка, распознанная из QR-кода, ведёт на внешний ресурс.
+    recommendation: Не переходите по ссылке из кода.
+    change_reason: >-
+      Правило остаётся теневым, пока декодер QR не входит в стандартную поставку: без него
+      факт qr_url_present не появляется, и измерять правило не на чем (пробел GAP-002).
+      Перевод в ACTIVE — после включения декодера и прогона по золотому корпусу.

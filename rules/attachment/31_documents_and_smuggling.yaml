@@ -1,0 +1,137 @@
+# Office documents that fetch something, and files assembled in the browser
+# (ТЗ 1.0.3 §39, §40).
+#
+# These attacks share one property: the dangerous part is not in the attachment a scanner
+# reads. A document with a remote template carries no macro and no payload — it carries a
+# reference, and the payload arrives when the file opens. An HTML smuggling page carries no
+# attachment at all — the file is assembled in the victim's browser from text in the page.
+# Both pass every content check on the path, which is why they are detected structurally here.
+ruleset: documents_and_smuggling
+rules:
+  - id: ATT-040
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Документ загружает удалённый шаблон
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.85
+    weight: 45
+    conditions:
+      - attachment_remote_template
+    evidence: [attachment_remote_template, document_autoload_reference]
+    explanation: >-
+      Документ во вложении настроен на загрузку шаблона с внешнего сервера. Шаблон
+      запрашивается автоматически при открытии файла; макросов в самом документе при этом нет,
+      поэтому проверки, рассчитанные на макросы, такой документ пропускают.
+    recommendation: Не открывайте документ. Передайте письмо в службу ИБ.
+
+  - id: ATT-041
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Документ обращается к сетевому ресурсу по UNC-пути
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    weight: 40
+    conditions:
+      - attachment_unc_reference
+    evidence: [attachment_unc_reference, document_unc_reference]
+    explanation: >-
+      Документ ссылается на сетевой ресурс вида "\\\\сервер\\папка". При открытии файла Windows
+      попытается пройти аутентификацию на этом сервере, и учётные данные уйдут за пределы
+      организации до того, как пользователь что-либо нажмёт.
+    recommendation: Не открывайте документ. Передайте письмо в службу ИБ.
+
+  - id: ATT-042
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Поле DDE в документе
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.8
+    conditions:
+      - attachment_dde_field
+    evidence: [attachment_dde_field]
+    explanation: >-
+      Документ содержит поле динамического обмена данными (DDE), через которое при открытии
+      может быть запущена внешняя команда.
+    recommendation: Не открывайте документ.
+
+  - id: ATT-043
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Внешняя ссылка внутри документа от внешнего отправителя
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.6
+    conditions:
+      all:
+        - attachment_office_external_link
+        - sender_external
+    evidence: [attachment_office_external_link]
+    explanation: >-
+      Документ от внешнего отправителя содержит ссылку на внешний ресурс. Такая ссылка не
+      видна в тексте письма и не попадает в проверки, которые разбирают только тело письма.
+    recommendation: Проверьте, куда ведёт ссылка, прежде чем переходить по ней.
+
+  - id: ATT-044
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: HTML-вложение собирает файл в браузере
+    category: suspicious_attachment
+    severity: high
+    confidence: 0.85
+    weight: 50
+    conditions:
+      - attachment_html_smuggling_assembly
+    evidence: [attachment_html_smuggling_assembly]
+    explanation: >-
+      HTML-вложение содержит закодированные данные, код их декодирования и вызов сохранения
+      файла. Файл собирается прямо в браузере получателя, поэтому почтовые фильтры на пути
+      письма никакого вложения не видят.
+    recommendation: Не открывайте вложение. Передайте письмо в службу ИБ.
+
+  - id: ATT-045
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Зашифрованный архив с паролем из письма
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.6
+    conditions:
+      any:
+        - attachment_password_archive_instructions
+        - all:
+            - attachment_encrypted_archive
+            - sender_external
+    evidence: [attachment_password_archive_instructions, attachment_encrypted_archive]
+    explanation: >-
+      Во вложении зашифрованный архив, а пароль к нему передан в самом письме. Проверить
+      содержимое автоматически невозможно, а получатель откроет архив без затруднений — приём
+      используется именно ради обхода проверки.
+    recommendation: >-
+      Не открывайте архив до подтверждения отправителя по независимому каналу. Передайте
+      письмо в службу ИБ.
+
+  - id: ATT-046
+    version: 1
+    status: ACTIVE
+    owner: detection-attachment@corp.example
+    name: Признаки сборки файла в теле письма
+    category: suspicious_attachment
+    severity: medium
+    confidence: 0.55
+    conditions:
+      all:
+        - html_smuggling_assembly
+        - sender_external
+    evidence: [html_smuggling_assembly]
+    explanation: >-
+      Тело письма содержит код, который собирает и сохраняет файл в браузере получателя.
+    recommendation: Не взаимодействуйте с содержимым письма. Передайте его в службу ИБ.
