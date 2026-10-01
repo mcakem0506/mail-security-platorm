@@ -117,6 +117,13 @@ class AnalysisContext:
     reported_by: str | None = None
     recipient_department: str = ""
     recipient_is_protected: bool = False
+    #: Rules that are mid-rollout and do not apply to this recipient (ТЗ 1.0.3 §52).
+    #:
+    #: They still evaluate and are still recorded — that is what makes the untouched majority a
+    #: control group — but they contribute nothing to the verdict. The decision is passed in as
+    #: a plain set because the rule must not know who it applies to: scope is deployment state,
+    #: kept in the database, while the rule itself is a reviewed file in Git.
+    withheld_rules: frozenset[str] = frozenset()
     sender_history: SenderHistory = field(default_factory=SenderHistory)
     now: datetime = field(default_factory=utcnow)
 

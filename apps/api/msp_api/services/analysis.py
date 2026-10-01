@@ -66,6 +66,7 @@ from ..db.models import (
     RiskVerdictHistory,
 )
 from ..observability import rule_triggers
+from . import canary
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
 from .gateways import collect_findings as collect_gateway_findings
@@ -281,6 +282,14 @@ def build_context(
         reported_by=reported_by,
         recipient_department=recipient.department if recipient else "",
         recipient_is_protected=recipient_protected,
+        # Rules mid-rollout that do not apply to this recipient (ТЗ 1.0.3 §52). Resolved here,
+        # where the database is available, and handed to the engine as a plain set.
+        withheld_rules=canary.withheld_rules(
+            session,
+            organization_id=organization_id,
+            mailbox=recipient_mailbox,
+            department=recipient.department if recipient else "",
+        ),
         sender_history=_sender_history(
             session, organization_id, sender_address, exclude_message_id=exclude_message_id
         ),
@@ -579,6 +588,7 @@ def persist_result(
                 suppressed_by=detected.suppressed_by,
                 shadow=detected.shadow,
                 rule_status=detected.rule_status or "ACTIVE",
+                withheld_by=detected.withheld_by,
                 observed_at=detected.observed_at,
             )
         )

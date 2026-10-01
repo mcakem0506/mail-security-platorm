@@ -14,6 +14,8 @@ from typing import Any
 from msp_contracts import (
     AnalysisStatus,
     AnalystClassification,
+    CanaryScope,
+    CanaryState,
     ExceptionType,
     GapStatus,
     IncidentStatus,
@@ -400,6 +402,10 @@ class DetectionSignal(Base, IdMixin):
     #: The rule's lifecycle status at the moment it fired, so a later status change does not
     #: retroactively change how a historical verdict reads.
     rule_status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
+    #: Why a signal from a scoring rule did not count, when that was not its lifecycle status:
+    #: currently only ``canary`` (ТЗ 1.0.3 §52). Stored separately from ``shadow`` so a rollout
+    #: can be measured against the recipients it did not reach.
+    withheld_by: Mapped[str | None] = mapped_column(String(16), default=None, index=True)
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     result: Mapped[AnalysisResult] = relationship(back_populates="signals")
@@ -1297,3 +1303,60 @@ class ThreatScenario(Base, IdMixin, TimestampMixin):
     playbook: Mapped[str] = mapped_column(String(64), default="")
     severity: Mapped[Severity] = mapped_column(_enum(Severity, "severity_enum"), default=Severity.MEDIUM)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class RuleCanary(Base, IdMixin, TimestampMixin):
+    """A rule released to part of the organisation before all of it (ТЗ 1.0.3 §52).
+
+    Scope lives here rather than in the rule file on purpose. The rule is a reviewed artefact in
+    Git and describes *what* is dangerous; who it currently applies to is deployment state that
+    changes during a rollout and must not require a code review to adjust.
+
+    Outside the scope the rule still evaluates and is still recorded, contributing nothing to
+    the verdict. That is what makes the rest of the organisation a control group: the same rule,
+    the same mail flow, the only difference being whether its score counted.
+    """
+
+    __tablename__ = "rule_canaries"
+    __table_args__ = (
+        Index("ix_canary_org_rule", "organization_id", "rule_id"),
+        Index("ix_canary_state", "organization_id", "state"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(32), index=True)
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    scope: Mapped[CanaryScope] = mapped_column(
+        _enum(CanaryScope, "canary_scope_enum"), default=CanaryScope.MAILBOX
+    )
+    #: Mailboxes or departments, depending on ``scope``. Empty for PERCENT.
+    scope_values: Mapped[list[Any]] = mapped_column(default=list)
+    #: Share of mailboxes for PERCENT scope, 1–100.
+    percent: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[CanaryState] = mapped_column(
+        _enum(CanaryState, "canary_state_enum"), default=CanaryState.ACTIVE, index=True
+    )
+    #: When the rollout should have been decided. Required: a canary nobody ends is not a
+    #: canary, it is a rule that quietly protects some people and not others.
+    review_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+    decided_by: Mapped[str] = mapped_column(String(320), default="")
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+
+    @property
+    def active(self) -> bool:
+        return self.state is CanaryState.ACTIVE
+
+    def overdue(self, now: datetime | None = None) -> bool:
+        """Past its review date and still limiting the rule.
+
+        An overdue canary keeps its scope rather than expiring into one state or the other.
+        Lifting it automatically would release an unreviewed rule to everybody; dropping it
+        automatically would silently switch off detection. Both are decisions, so neither
+        happens without a person — the dashboard and the gate surface it instead.
+        """
+        if not self.active:
+            return False
+        return (now or utcnow()) > self.review_at

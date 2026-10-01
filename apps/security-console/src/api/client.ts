@@ -88,10 +88,38 @@ export interface DetectionQuality {
   unknown: number;
   open_gaps: number;
   shadow_rules: number;
+  active_canaries: number;
+  overdue_canaries: number;
   noisy_rules: Record<string, unknown>[];
   silent_rules: string[];
   unowned_active_rules: string[];
   coverage_by_scenario: Record<string, unknown>[];
+}
+
+/**
+ * A rule released to part of the organisation before all of it (ТЗ 1.0.3 §52).
+ *
+ * `outside_*` is the control group: the same rule, on the same mail, recorded but powerless.
+ * Precision is null until an analyst has judged something — an unjudged rollout showing 100%
+ * would be the argument for promoting it.
+ */
+export interface CanaryRollout {
+  rule_id: string;
+  state: "ACTIVE" | "PROMOTED" | "ABORTED";
+  scope: "MAILBOX" | "DEPARTMENT" | "PERCENT";
+  scope_values: string[];
+  percent: number;
+  review_at: string;
+  overdue: boolean;
+  inside_triggers: number;
+  outside_triggers: number;
+  inside_confirmed: number;
+  inside_false_positives: number;
+  outside_confirmed: number;
+  outside_false_positives: number;
+  inside_precision: number | null;
+  outside_precision: number | null;
+  ready_to_promote: boolean;
 }
 
 export interface DetectionRule {
@@ -596,6 +624,30 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  canaries: (includeDecided = false) =>
+    request<CanaryRollout[]>(`/api/v1/detection/canaries${query({ include_decided: includeDecided })}`),
+
+  startCanary: (
+    ruleId: string,
+    body: {
+      scope: "MAILBOX" | "DEPARTMENT" | "PERCENT";
+      scope_values?: string[];
+      percent?: number;
+      days?: number;
+      reason: string;
+    },
+  ) =>
+    request<CanaryRollout>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}/canary`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  decideCanary: (ruleId: string, body: { state: "PROMOTED" | "ABORTED"; note?: string }) =>
+    request<CanaryRollout>(
+      `/api/v1/detection/rules/${encodeURIComponent(ruleId)}/canary/decision`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 
   detectionGaps: (status?: string) =>
     request<DetectionGap[]>(`/api/v1/detection/gaps${query({ status })}`),

@@ -100,6 +100,11 @@ class Signal(BaseModel):
     observed_at: datetime = Field(default_factory=utcnow)
     suppressed: bool = False
     suppressed_by: str | None = None
+    #: Why a signal from an otherwise scoring rule did not count — currently only ``"canary"``,
+    #: meaning the rule is being rolled out and this recipient is outside its scope (ТЗ 1.0.3
+    #: §52). Kept separate from ``shadow`` because the two answer different questions: shadow
+    #: says the signal did not count, this says what withheld it.
+    withheld_by: str | None = None
 
 
 class Indicator(BaseModel):

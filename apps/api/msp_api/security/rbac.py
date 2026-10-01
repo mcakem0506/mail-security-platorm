@@ -42,6 +42,9 @@ class Permission(StrEnum):
     #: administrative act even though the rule file itself lives in Git.
     MANAGE_DETECTION_RULES = "detection:manage"
     MANAGE_DETECTION_GAPS = "gap:manage"
+    #: Starting or deciding a rollout changes who a rule decides for, which is the same
+    #: kind of power as changing its status.
+    MANAGE_CANARY = "detection:canary"
     #: Re-evaluating history can rewrite stored verdicts, which is why it is separate from
     #: simulating: a simulation changes nothing, a replay with apply does.
     EXECUTE_REPLAY = "detection:replay"
@@ -91,6 +94,7 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.APPROVE_EXCEPTION,
     Permission.MANAGE_DETECTION_RULES,
     Permission.MANAGE_DETECTION_GAPS,
+    Permission.MANAGE_CANARY,
     Permission.EXECUTE_REPLAY,
     Permission.APPROVE_REMEDIATION,
     Permission.EXECUTE_REMEDIATION,

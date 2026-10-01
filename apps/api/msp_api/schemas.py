@@ -8,6 +8,8 @@ from typing import Any, Literal
 from msp_contracts import (
     AnalysisStatus,
     AnalystClassification,
+    CanaryScope,
+    CanaryState,
     ExceptionType,
     FalseNegativeSource,
     GapStatus,
@@ -832,6 +834,11 @@ class DetectionQualityOut(ApiModel):
     unknown: int
     open_gaps: int
     shadow_rules: int
+    #: Rules currently limited to part of the organisation (ТЗ 1.0.3 §52).
+    active_canaries: int = 0
+    #: Rollouts past their review date. Nothing expires by itself, so this is the only place an
+    #: unfinished rollout becomes visible.
+    overdue_canaries: int = 0
     noisy_rules: list[dict[str, Any]]
     silent_rules: list[str]
     unowned_active_rules: list[str]
@@ -868,3 +875,45 @@ class CampaignSplitRequest(ApiModel):
     message_ids: list[str] = Field(min_length=1, max_length=500)
     name: str = Field(min_length=3, max_length=255)
     reason: str = Field(default="", max_length=2000)
+
+
+class CanaryStartRequest(ApiModel):
+    """Begin a limited rollout of an ACTIVE rule (ТЗ 1.0.3 §52)."""
+
+    scope: CanaryScope
+    #: Mailboxes or departments, depending on the scope. Empty for PERCENT.
+    scope_values: list[str] = Field(default_factory=list, max_length=500)
+    #: 1–99 for PERCENT. Not 100: that is not a canary.
+    percent: int = Field(default=0, ge=0, le=100)
+    #: When the rollout must be decided. A canary nobody ends is a rule that quietly protects
+    #: some people and not others.
+    days: int = Field(default=7, ge=1, le=30)
+    reason: str = Field(min_length=10, max_length=4000)
+
+
+class CanaryDecisionRequest(ApiModel):
+    state: CanaryState
+    note: str = Field(default="", max_length=4000)
+
+
+class CanaryOut(ApiModel):
+    """A rollout and what it has shown so far."""
+
+    rule_id: str
+    state: str
+    scope: str
+    scope_values: list[str]
+    percent: int
+    review_at: str
+    overdue: bool
+    inside_triggers: int
+    outside_triggers: int
+    inside_confirmed: int
+    inside_false_positives: int
+    outside_confirmed: int
+    outside_false_positives: int
+    #: Null until an analyst has judged something. An unjudged rollout has no precision, and
+    #: showing 100% would be the argument for promoting it.
+    inside_precision: float | None
+    outside_precision: float | None
+    ready_to_promote: bool

@@ -528,3 +528,139 @@ class TestQualityDashboardCannotFlatter:
         assert employee.get("/api/v1/detection/quality").status_code == 403
         assert employee.get("/api/v1/detection/rules").status_code == 403
         assert employee.get("/api/v1/investigations/queue").status_code == 403
+
+
+class TestCanaryRollout:
+    """Rolling a rule out to part of the organisation over HTTP (ТЗ 1.0.3 §52)."""
+
+    def _active_rule(self, actor: Actor) -> str:
+        rules = actor.get("/api/v1/detection/rules", params={"status": "ACTIVE"}).json()
+        return rules[0]["rule_id"]
+
+    def test_rollout_starts_and_is_listed_with_its_comparison(self, client, people) -> None:
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        rule_id = self._active_rule(admin)
+        started = admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary",
+            json={
+                "scope": "MAILBOX",
+                "scope_values": ["buh@corp.example"],
+                "days": 7,
+                "reason": "Проверяем на бухгалтерии перед включением всем",
+            },
+        )
+        assert started.status_code == 200, started.text
+        body = started.json()
+        assert body["state"] == "ACTIVE"
+        assert body["scope"] == "MAILBOX"
+        assert body["overdue"] is False
+        # Nothing has fired yet, so there is no precision to report and no recommendation.
+        assert body["inside_precision"] is None
+        assert body["ready_to_promote"] is False
+
+        listed = admin.get("/api/v1/detection/canaries").json()
+        assert [c["rule_id"] for c in listed] == [rule_id]
+
+    def test_rollout_shows_on_the_quality_dashboard(self, client, people) -> None:
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        rule_id = self._active_rule(admin)
+        admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary",
+            json={
+                "scope": "PERCENT",
+                "percent": 25,
+                "days": 3,
+                "reason": "Четверть ящиков на три дня",
+            },
+        )
+        quality = admin.get("/api/v1/detection/quality").json()
+        assert quality["active_canaries"] == 1
+        assert quality["overdue_canaries"] == 0
+
+    def test_promotion_is_audited_and_ends_the_rollout(self, client, people, db) -> None:
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        rule_id = self._active_rule(admin)
+        admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary",
+            json={
+                "scope": "MAILBOX",
+                "scope_values": ["buh@corp.example"],
+                "reason": "Ограниченный выпуск для проверки",
+            },
+        )
+        decided = admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary/decision",
+            json={"state": "PROMOTED", "note": "Срабатывания подтверждены аналитиком"},
+        )
+        assert decided.status_code == 200, decided.text
+        assert decided.json()["state"] == "PROMOTED"
+        assert admin.get("/api/v1/detection/canaries").json() == []
+
+        from msp_api.db.models import AuditEvent
+        from sqlalchemy import select
+
+        actions = set(db.execute(select(AuditEvent.action)).scalars().all())
+        assert "canary.started" in actions
+        assert "canary.promoted" in actions
+
+    def test_aborting_without_a_reason_is_refused(self, client, people) -> None:
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        rule_id = self._active_rule(admin)
+        admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary",
+            json={
+                "scope": "MAILBOX",
+                "scope_values": ["buh@corp.example"],
+                "reason": "Ограниченный выпуск для проверки",
+            },
+        )
+        refused = admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary/decision",
+            json={"state": "ABORTED", "note": ""},
+        )
+        assert refused.status_code == 400
+
+    def test_an_analyst_may_look_but_not_decide(self, client, people) -> None:
+        """Who a rule decides for is the same kind of power as changing its status."""
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        rule_id = self._active_rule(admin)
+        admin.post(
+            f"/api/v1/detection/rules/{rule_id}/canary",
+            json={
+                "scope": "MAILBOX",
+                "scope_values": ["buh@corp.example"],
+                "reason": "Ограниченный выпуск для проверки",
+            },
+        )
+        analyst = Actor(client, people["analyst"]["email"], people["analyst"]["password"])
+        assert analyst.get("/api/v1/detection/canaries").status_code == 200
+        assert (
+            analyst.post(
+                f"/api/v1/detection/rules/{rule_id}/canary",
+                json={
+                    "scope": "MAILBOX",
+                    "scope_values": ["x@corp.example"],
+                    "reason": "Попытка аналитика начать выпуск",
+                },
+            ).status_code
+            == 403
+        )
+        assert (
+            analyst.post(
+                f"/api/v1/detection/rules/{rule_id}/canary/decision",
+                json={"state": "PROMOTED", "note": "x"},
+            ).status_code
+            == 403
+        )
+
+    def test_a_rollout_for_an_unknown_rule_is_refused(self, client, people) -> None:
+        admin = Actor(client, people["admin"]["email"], people["admin"]["password"])
+        missing = admin.post(
+            "/api/v1/detection/rules/NOPE-999/canary",
+            json={
+                "scope": "MAILBOX",
+                "scope_values": ["buh@corp.example"],
+                "reason": "Правила с таким идентификатором нет",
+            },
+        )
+        assert missing.status_code == 404

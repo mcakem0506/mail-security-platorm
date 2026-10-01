@@ -22,6 +22,7 @@ from msp_contracts import (
     CONFIRMED_BENIGN,
     CONFIRMED_THREAT,
     AnalystClassification,
+    CanaryState,
     GapStatus,
     RiskLevel,
     RuleStatus,
@@ -49,6 +50,9 @@ from ..schemas import (
     AssignRequest,
     CampaignMergeRequest,
     CampaignSplitRequest,
+    CanaryDecisionRequest,
+    CanaryOut,
+    CanaryStartRequest,
     ClassificationOut,
     ClassificationRequest,
     DetectionFeedbackOut,
@@ -70,7 +74,7 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import detection_ops, investigation, triage
+from ..services import canary, detection_ops, investigation, triage
 from ..services.analysis import get_ruleset
 
 logger = logging.getLogger(__name__)
@@ -83,6 +87,7 @@ MissReporter = Annotated[Actor, Depends(require_permission(Permission.REPORT_MIS
 Simulator = Annotated[Actor, Depends(require_permission(Permission.SIMULATE_DETECTION))]
 RuleManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_DETECTION_RULES))]
 GapManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_DETECTION_GAPS))]
+CanaryManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_CANARY))]
 Replayer = Annotated[Actor, Depends(require_permission(Permission.EXECUTE_REPLAY))]
 
 
@@ -1054,6 +1059,7 @@ def detection_quality(
         unknown=unknown,
         open_gaps=open_gaps,
         shadow_rules=shadow_count,
+        **canary.coverage_summary(session, org),
         noisy_rules=noisy[:20],
         silent_rules=silent[:50],
         unowned_active_rules=unowned,
@@ -1284,3 +1290,122 @@ def reporting_quality_report(
     has paid for the other nine.
     """
     return investigation.reporting_quality(session, actor.organization_id, days=days)
+
+
+# ---------------------------------------------------------------------------------------------
+# Canary rollout (ТЗ 1.0.3 §52)
+# ---------------------------------------------------------------------------------------------
+@router.get("/detection/canaries", response_model=list[CanaryOut])
+def list_canaries(
+    actor: QualityReader,
+    session: DbSession,
+    include_decided: bool = False,
+) -> list[dict[str, Any]]:
+    """Rollouts in progress, each measured against the recipients it did not reach."""
+    return [
+        comparison.as_dict()
+        for comparison in canary.list_canaries(
+            session, actor.organization_id, include_decided=include_decided
+        )
+    ]
+
+
+@router.post("/detection/rules/{rule_id}/canary", response_model=CanaryOut)
+def start_canary(
+    rule_id: str,
+    payload: CanaryStartRequest,
+    actor: CanaryManager,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Limit an ACTIVE rule to part of the organisation before trusting it with all of it.
+
+    Outside the scope the rule keeps evaluating and keeps being recorded while contributing
+    nothing — so the rest of the organisation becomes a control group measured by the same code
+    on the same mail (ТЗ 1.0.3 §52).
+    """
+    rule = get_ruleset().get(rule_id)
+    if rule is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "правило не найдено")
+    try:
+        created = canary.start(
+            session,
+            organization_id=actor.organization_id,
+            rule_id=rule_id,
+            rule_status=rule.status,
+            rule_version=rule.version,
+            scope=payload.scope,
+            scope_values=payload.scope_values,
+            percent=payload.percent,
+            days=payload.days,
+            reason=payload.reason,
+            created_by=actor.email,
+        )
+    except canary.CanaryError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.CANARY_STARTED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule",
+        object_id=rule_id,
+        detail={
+            "scope": payload.scope.value,
+            "scope_values": payload.scope_values[:20],
+            "percent": payload.percent,
+            "days": payload.days,
+            "reason": payload.reason[:500],
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.flush()
+    result = canary.compare(session, created).as_dict()
+    session.commit()
+    return result
+
+
+@router.post("/detection/rules/{rule_id}/canary/decision", response_model=CanaryOut)
+def decide_canary(
+    rule_id: str,
+    payload: CanaryDecisionRequest,
+    actor: CanaryManager,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """End a rollout: widen the rule to everyone, or roll it back.
+
+    Both lift the scope. Aborting is expected to be accompanied by a reviewed change moving the
+    rule to DEGRADED or SHADOW in the rule pack — leaving a rule that misbehaved permanently
+    limited to a few mailboxes would be unreviewed, unmeasured, and still deciding for someone.
+    """
+    existing = canary.active_for(session, organization_id=actor.organization_id, rule_id=rule_id)
+    if existing is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "активный канареечный выпуск не найден")
+    try:
+        canary.decide(session, existing, state=payload.state, decided_by=actor.email, note=payload.note)
+    except canary.CanaryError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.CANARY_PROMOTED
+        if payload.state is CanaryState.PROMOTED
+        else AuditAction.CANARY_ABORTED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule",
+        object_id=rule_id,
+        detail={"state": payload.state.value, "note": payload.note[:500]},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = canary.compare(session, existing).as_dict()
+    session.commit()
+    return result

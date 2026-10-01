@@ -4,6 +4,7 @@ import {
   type CurrentUser,
   type DetectionGap,
   type DetectionQuality,
+  type CanaryRollout,
   type DetectionRule,
   type ThreatScenarioView,
 } from "../api/client";
@@ -25,6 +26,7 @@ const TABS = [
   { id: "gaps", label: "Известные пробелы" },
   { id: "coverage", label: "Карта покрытия" },
   { id: "shadow", label: "Теневые правила" },
+  { id: "canary", label: "Канареечные выпуски" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -47,6 +49,12 @@ const GAP_STATUS_LABELS: Record<string, string> = {
 };
 
 /** "—" for an undefined metric. Never 0, never 100%. */
+const CANARY_STATE_LABELS: Record<string, string> = {
+  ACTIVE: "идёт",
+  PROMOTED: "расширен на всех",
+  ABORTED: "откачен",
+};
+
 function ratio(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : `${(value * 100).toFixed(1)}%`;
 }
@@ -59,6 +67,7 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
   const [gaps, setGaps] = useState<DetectionGap[]>([]);
   const [scenarios, setScenarios] = useState<ThreatScenarioView[]>([]);
   const [shadow, setShadow] = useState<Record<string, unknown>[]>([]);
+  const [canaries, setCanaries] = useState<CanaryRollout[]>([]);
   const [versions, setVersions] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -73,6 +82,7 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
     void api.detectionGaps().then(setGaps).catch(fail);
     void api.threatScenarios().then(setScenarios).catch(fail);
     void api.shadowRules(days).then(setShadow).catch(fail);
+    void api.canaries(true).then(setCanaries).catch(fail);
     void api.detectionVersions().then(setVersions).catch(fail);
   }, [days]);
 
@@ -87,6 +97,21 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось синхронизировать");
+    }
+  };
+
+  const decide = async (ruleId: string, state: "PROMOTED" | "ABORTED") => {
+    // Aborting needs a reason: the next person has to know why a rule stopped deciding.
+    const note =
+      state === "ABORTED"
+        ? window.prompt("Причина отката (обязательно):")?.trim()
+        : window.prompt("Комментарий к расширению:")?.trim() || "";
+    if (state === "ABORTED" && !note) return;
+    try {
+      await api.decideCanary(ruleId, { state, note: note ?? "" });
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось завершить выпуск");
     }
   };
 
@@ -161,6 +186,14 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
             <div className={quality.open_gaps ? "tile tile--medium" : "tile"}>
               <div className="tile__label">Открытых пробелов</div>
               <div className="tile__value">{quality.open_gaps}</div>
+            </div>
+            <div className="tile">
+              <div className="tile__label">Канареечных выпусков</div>
+              <div className="tile__value">{quality.active_canaries}</div>
+            </div>
+            <div className={quality.overdue_canaries ? "tile tile--high" : "tile"}>
+              <div className="tile__label">Просрочено решение</div>
+              <div className="tile__value">{quality.overdue_canaries}</div>
             </div>
           </div>
 
@@ -427,6 +460,107 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
                     <td>{scenario.shadow_rules}</td>
                     <td>{scenario.fixtures.length}</td>
                     <td className="small">{scenario.playbook}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
+      {tab === "canary" && (
+        <section className="card">
+          <div className="card__header">
+            <h2>Канареечные выпуски</h2>
+          </div>
+          <p className="muted small">
+            Правило, выпущенное на часть организации. Вне области оно не выключено, а удержано:
+            продолжает срабатывать и записываться, но ничего не решает — поэтому остальная часть
+            организации служит контрольной группой, измеренной тем же кодом на той же почте
+            (ТЗ 1.0.3 §52).
+          </p>
+          <p className="muted small">
+            Срок — это не срабатывающий таймер. По его истечении область сохраняется: снять её
+            автоматически означало бы выпустить непроверенное правило на всех, а снять правило —
+            молча отключить детектирование. И то и другое — решения, поэтому срок лишь делает
+            незавершённый выпуск заметным.
+          </p>
+          {canaries.length === 0 ? (
+            <p className="muted">Канареечных выпусков нет.</p>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Правило</th>
+                  <th>Область</th>
+                  <th>Состояние</th>
+                  <th>Решить до</th>
+                  <th>В области</th>
+                  <th>Вне области</th>
+                  <th>Точность в области</th>
+                  <th>Готово к расширению</th>
+                  {canManage && <th />}
+                </tr>
+              </thead>
+              <tbody>
+                {canaries.map((rollout) => (
+                  <tr key={`${rollout.rule_id}-${rollout.review_at}`}>
+                    <td>{rollout.rule_id}</td>
+                    <td className="small">
+                      {rollout.scope === "PERCENT"
+                        ? `${rollout.percent}% ящиков`
+                        : rollout.scope_values.join(", ") || "—"}
+                    </td>
+                    <td>
+                      <span className={rollout.state === "ACTIVE" ? "tag" : "tag tag--ok"}>
+                        {CANARY_STATE_LABELS[rollout.state] ?? rollout.state}
+                      </span>
+                    </td>
+                    <td className={rollout.overdue ? "danger" : undefined}>
+                      {formatDate(rollout.review_at)}
+                      {rollout.overdue && <div className="small">срок прошёл</div>}
+                    </td>
+                    <td>
+                      {rollout.inside_triggers}
+                      <div className="small muted">
+                        подтверждено {rollout.inside_confirmed} · ложных{" "}
+                        {rollout.inside_false_positives}
+                      </div>
+                    </td>
+                    <td>
+                      {rollout.outside_triggers}
+                      <div className="small muted">удержано</div>
+                    </td>
+                    <td>{ratio(rollout.inside_precision)}</td>
+                    <td>
+                      {rollout.ready_to_promote ? (
+                        <span className="tag tag--ok">да</span>
+                      ) : (
+                        <span className="muted small">данных недостаточно</span>
+                      )}
+                    </td>
+                    {canManage && (
+                      <td>
+                        {rollout.state === "ACTIVE" && (
+                          <div className="actions">
+                            <button
+                              type="button"
+                              className="button button--tiny"
+                              onClick={() => void decide(rollout.rule_id, "PROMOTED")}
+                            >
+                              Расширить
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--tiny button--danger"
+                              onClick={() => void decide(rollout.rule_id, "ABORTED")}
+                            >
+                              Откатить
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

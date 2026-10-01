@@ -64,6 +64,11 @@ class AuditAction:
     FALSE_NEGATIVE_MARKED = "detection.false_negative_marked"
     RULE_STATUS_CHANGED = "rule.status_changed"
     RULE_SIMULATED = "rule.simulated"
+    # A rollout decides which people a rule protects, so starting and ending one are
+    # audited as separate events from the rule's own status changes.
+    CANARY_STARTED = "canary.started"
+    CANARY_PROMOTED = "canary.promoted"
+    CANARY_ABORTED = "canary.aborted"
     EXCEPTION_APPROVED = "exception.approved"
     EXCEPTION_REVIEW_DUE = "exception.review_due"
     GAP_REGISTERED = "gap.registered"

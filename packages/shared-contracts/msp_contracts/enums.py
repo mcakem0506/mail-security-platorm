@@ -355,3 +355,28 @@ class RootCause(StrEnum):
     RULE_FAILURE = "RULE_FAILURE"
     RISK_AGGREGATION_FAILURE = "RISK_AGGREGATION_FAILURE"
     UNKNOWN = "UNKNOWN"
+
+
+class CanaryScope(StrEnum):
+    """How a canary rollout picks the mailboxes a rule applies to (ТЗ 1.0.3 §52)."""
+
+    #: An explicit list of mailboxes. The most predictable, and the right choice for a rule
+    #: aimed at a specific group — the finance department, say.
+    MAILBOX = "MAILBOX"
+    #: Everyone in the named departments, as the directory reports them.
+    DEPARTMENT = "DEPARTMENT"
+    #: A deterministic share of mailboxes, chosen by hashing the address. Stable by
+    #: construction: the same person is always on the same side of the split, because a rule
+    #: that treats one person differently from one message to the next cannot be explained to
+    #: them and cannot be measured.
+    PERCENT = "PERCENT"
+
+
+class CanaryState(StrEnum):
+    """Where a canary rollout stands."""
+
+    ACTIVE = "ACTIVE"
+    #: Scope lifted, rule now applies to everyone.
+    PROMOTED = "PROMOTED"
+    #: Rolled back; the rule is expected to go to DEGRADED or SHADOW in the rule pack.
+    ABORTED = "ABORTED"
