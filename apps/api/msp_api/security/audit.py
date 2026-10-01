@@ -56,6 +56,22 @@ class AuditAction:
     GATEWAY_CREDENTIAL_ROTATED = "gateway.credential_rotated"  # nosec
     GATEWAY_CONFLICT_RESOLVED = "gateway.conflict_resolved"
     TRUSTED_HOP_CHANGED = "gateway.trusted_hop_changed"
+    # Detection quality, rule lifecycle and analyst decisions (ТЗ 1.0.3 §56).
+    # The analyst's classification is audited because every quality metric is derived from it:
+    # if the record of who decided what can be lost, the metrics cannot be defended.
+    INCIDENT_CLASSIFIED = "incident.classified"
+    FALSE_POSITIVE_MARKED = "detection.false_positive_marked"
+    FALSE_NEGATIVE_MARKED = "detection.false_negative_marked"
+    RULE_STATUS_CHANGED = "rule.status_changed"
+    RULE_SIMULATED = "rule.simulated"
+    EXCEPTION_APPROVED = "exception.approved"
+    EXCEPTION_REVIEW_DUE = "exception.review_due"
+    GAP_REGISTERED = "gap.registered"
+    GAP_CLOSED = "gap.closed"
+    ANALYSIS_REPLAYED = "analysis.replayed"
+    REEVALUATION_STARTED = "detection.reevaluation_started"
+    DATASET_CHANGED = "detection.dataset_changed"
+    INCIDENT_ASSIGNED = "incident.assigned"
     # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
     INTAKE_DEAD_LETTER = "intake.dead_letter"
     MESSAGE_UNSCANNABLE = "intake.unscannable"

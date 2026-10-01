@@ -40,6 +40,12 @@ celery_app.conf.update(
     worker_max_tasks_per_child=200,
     result_expires=3600,
     broker_connection_retry_on_startup=True,
+    # The API publishes with retry disabled; these bound how long a single attempt may take, so
+    # a Redis that accepts connections but never answers cannot hold a request open either.
+    broker_transport_options={"socket_timeout": 5, "socket_connect_timeout": 2},
+    redis_socket_connect_timeout=2,
+    redis_socket_timeout=5,
+    redis_retry_on_timeout=False,
     task_default_queue=QUEUE_MAIL_PARSE,
     task_queues=(
         Queue(QUEUE_MAIL_PARSE),

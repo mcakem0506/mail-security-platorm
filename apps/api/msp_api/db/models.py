@@ -13,7 +13,9 @@ from typing import Any
 
 from msp_contracts import (
     AnalysisStatus,
+    AnalystClassification,
     ExceptionType,
+    GapStatus,
     IncidentStatus,
     IntakeSource,
     IntakeState,
@@ -390,6 +392,14 @@ class DetectionSignal(Base, IdMixin):
     internal: Mapped[bool] = mapped_column(Boolean, default=False)
     suppressed: Mapped[bool] = mapped_column(Boolean, default=False)
     suppressed_by: Mapped[str | None] = mapped_column(String(128), default=None)
+    #: A shadow rule fired but contributed nothing to the score (ТЗ 1.0.3 §11).
+    #: Persisted because the only way to decide whether a candidate rule is ready to go ACTIVE
+    #: is to measure it against real mail. A flag the engine computes but never stores would
+    #: make shadow mode unmeasurable, and an unmeasurable shadow mode is pointless.
+    shadow: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    #: The rule's lifecycle status at the moment it fired, so a later status change does not
+    #: retroactively change how a historical verdict reads.
+    rule_status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     result: Mapped[AnalysisResult] = relationship(back_populates="signals")
@@ -548,6 +558,29 @@ class DetectionException(Base, IdMixin, TimestampMixin):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     revoked_by: Mapped[str | None] = mapped_column(String(320), default=None)
     hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    # -- governance v2 (ТЗ 1.0.3 §24, §25) ----------------------------------------------------
+    #: GLOBAL | DOMAIN | SENDER | RECIPIENT | DEPARTMENT | RULE | INDICATOR
+    scope: Mapped[str] = mapped_column(String(16), default="SENDER", index=True)
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+    #: A high-risk exception needs a second approval before it takes effect (§25). Until then
+    #: it exists but does not suppress anything.
+    approved_by: Mapped[str | None] = mapped_column(String(320), default=None)
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: When someone should look at this again, separate from when it expires.
+    review_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None, index=True)
+    last_hit_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+    @property
+    def active(self) -> bool:
+        """Whether this exception currently suppresses anything.
+
+        An exception awaiting its second approval is deliberately inert: creating it must not
+        be enough to silence a malware or VIP-impersonation signal (§25).
+        """
+        if self.revoked_at is not None:
+            return False
+        return not (self.requires_approval and self.approved_by is None)
 
 
 class RemediationAction(Base, IdMixin, TimestampMixin):
@@ -1002,3 +1035,265 @@ class PilotMetricSnapshot(Base, IdMixin):
     period_end: Mapped[datetime] = mapped_column(UTCDateTime)
     metrics: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Detection quality and rule lifecycle (ТЗ 1.0.3 §8, §11, §51)
+# ---------------------------------------------------------------------------------------------
+class RuleRegistryEntry(Base, IdMixin, TimestampMixin):
+    """The deployed state of one rule, and who answers for it (ТЗ 1.0.3 §8, §11).
+
+    The rule *definition* lives in the rule pack, which is data under review. This table holds
+    what the deployment did with it: status, owner, and the lifecycle history. Keeping them
+    apart means a rule can be put into SHADOW for one organisation without editing a file every
+    organisation shares.
+    """
+
+    __tablename__ = "rule_registry"
+    __table_args__ = (UniqueConstraint("organization_id", "rule_id", name="uq_rule_registry"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    #: EXPERIMENTAL | SHADOW | ACTIVE | DEGRADED | DISABLED | DEPRECATED
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    owner: Mapped[str] = mapped_column(String(320), default="")
+    category: Mapped[str] = mapped_column(String(64), default="")
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    #: Threat scenarios this rule covers (ТЗ 1.0.3 §28).
+    scenarios: Mapped[list[Any]] = mapped_column(default=list)
+    last_status_change: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    last_false_positive_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class RuleChange(Base, IdMixin):
+    """One lifecycle transition, with the metrics on either side (ТЗ 1.0.3 §11).
+
+    ``before_metrics`` and ``after_metrics`` are what make a change reviewable later: "we moved
+    this to ACTIVE" is not an argument, "precision went from 0.62 to 0.94 on 40 cases" is.
+    """
+
+    __tablename__ = "rule_changes"
+    __table_args__ = (Index("ix_rule_changes_rule", "rule_id", "created_at"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(32), index=True)
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    from_status: Mapped[str] = mapped_column(String(16), default="")
+    to_status: Mapped[str] = mapped_column(String(16), default="")
+    author: Mapped[str] = mapped_column(String(320), default="")
+    reviewer: Mapped[str] = mapped_column(String(320), default="")
+    change_reason: Mapped[str] = mapped_column(String(1000), default="")
+    before_metrics: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    after_metrics: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    activated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+
+class DetectionRelease(Base, IdMixin):
+    """A published detection release (ТЗ 1.0.3 §51)."""
+
+    __tablename__ = "detection_releases"
+    __table_args__ = (UniqueConstraint("organization_id", "version", name="uq_detection_release"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    #: vYYYY.MM.N
+    version: Mapped[str] = mapped_column(String(32), index=True)
+    ruleset_fingerprint: Mapped[str] = mapped_column(Text, default="")
+    dataset_version: Mapped[str] = mapped_column(String(32), default="")
+    dataset_checksum: Mapped[str] = mapped_column(String(64), default="")
+    new_rules: Mapped[list[Any]] = mapped_column(default=list)
+    changed_rules: Mapped[list[Any]] = mapped_column(default=list)
+    removed_rules: Mapped[list[Any]] = mapped_column(default=list)
+    metrics: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    gate_result: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    known_limitations: Mapped[list[Any]] = mapped_column(default=list)
+    changelog: Mapped[str] = mapped_column(Text, default="")
+    published_by: Mapped[str] = mapped_column(String(320), default="")
+    published_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class DetectionGapRecord(Base, IdMixin, TimestampMixin):
+    """A known limitation, with an owner and a target release (ТЗ 1.0.3 §27).
+
+    A miss that falls into a registered gap is an accepted limitation; a miss without one is a
+    regression. The registry exists so that "we knew about that" cannot be said after the fact.
+    """
+
+    __tablename__ = "detection_gaps"
+    __table_args__ = (UniqueConstraint("organization_id", "gap_id", name="uq_detection_gap"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    gap_id: Mapped[str] = mapped_column(String(32), index=True)
+    category: Mapped[str] = mapped_column(String(64), default="", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    root_cause: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[Severity] = mapped_column(
+        _enum(Severity, "severity_enum"), default=Severity.MEDIUM, index=True
+    )
+    status: Mapped[GapStatus] = mapped_column(
+        _enum(GapStatus, "gap_status_enum"), default=GapStatus.OPEN, index=True
+    )
+    owner: Mapped[str] = mapped_column(String(320), default="")
+    target_release: Mapped[str] = mapped_column(String(32), default="")
+    examples: Mapped[list[Any]] = mapped_column(default=list)
+    mitigation: Mapped[str] = mapped_column(Text, default="")
+    planned_fix: Mapped[str] = mapped_column(Text, default="")
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+
+# ---------------------------------------------------------------------------------------------
+# Analyst workflow (ТЗ 1.0.3 §17-§23, §26)
+# ---------------------------------------------------------------------------------------------
+class IncidentClassification(Base, IdMixin):
+    """An analyst's verdict about a message (ТЗ 1.0.3 §22).
+
+    Kept apart from ``Incident.status``: the workflow state of a ticket and the conclusion about
+    the mail are different facts, and conflating them would make every quality metric depend on
+    whether somebody remembered to close a ticket.
+    """
+
+    __tablename__ = "incident_classifications"
+    __table_args__ = (Index("ix_classification_incident", "incident_id", "created_at"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), index=True)
+    classification: Mapped[AnalystClassification] = mapped_column(
+        _enum(AnalystClassification, "analyst_classification_enum"), index=True
+    )
+    previous_classification: Mapped[str | None] = mapped_column(String(32), default=None)
+    analyst_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), default=None)
+    analyst_email: Mapped[str] = mapped_column(String(320), default="")
+    confidence: Mapped[str] = mapped_column(String(16), default="high")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    #: Signals the analyst identified as wrong, when the verdict is FALSE_POSITIVE (§23).
+    offending_signals: Mapped[list[Any]] = mapped_column(default=list)
+    offending_rules: Mapped[list[Any]] = mapped_column(default=list)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class DetectionFeedback(Base, IdMixin):
+    """One piece of analyst feedback about detection quality (ТЗ 1.0.3 §23, §26).
+
+    Both directions are recorded through the same table because they answer the same question
+    from opposite sides: which rule was wrong, and which rule was missing.
+    """
+
+    __tablename__ = "detection_feedback"
+    __table_args__ = (Index("ix_feedback_rule", "rule_id", "created_at"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    #: false_positive | false_negative
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="SET NULL"), default=None, index=True
+    )
+    incident_id: Mapped[str | None] = mapped_column(
+        ForeignKey("incidents.id", ondelete="SET NULL"), default=None, index=True
+    )
+    rule_id: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    analyst_email: Mapped[str] = mapped_column(String(320), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    #: For a false negative: where the detection should have come from (§26).
+    source: Mapped[str] = mapped_column(String(32), default="")
+    root_cause: Mapped[str] = mapped_column(String(32), default="")
+    expected_detection: Mapped[str] = mapped_column(String(255), default="")
+    missing_fact: Mapped[str] = mapped_column(String(255), default="")
+    gap_id: Mapped[str | None] = mapped_column(String(32), default=None, index=True)
+    #: The exception proposed in response, when one was. Never created automatically (§23).
+    proposed_exception_id: Mapped[str | None] = mapped_column(String(32), default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class IncidentAssignment(Base, IdMixin):
+    """Who is working on an incident, and since when (ТЗ 1.0.3 §20)."""
+
+    __tablename__ = "incident_assignments"
+
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id", ondelete="CASCADE"), index=True)
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), default=None, index=True)
+    assignee_email: Mapped[str] = mapped_column(String(320), default="")
+    assigned_by: Mapped[str] = mapped_column(String(320), default="")
+    #: manual | round_robin | category | department | severity
+    method: Mapped[str] = mapped_column(String(16), default="manual")
+    assigned_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    released_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+
+class AnalysisRevision(Base, IdMixin):
+    """A re-run of an analysis with a newer engine (ТЗ 1.0.3 §49, §50).
+
+    The original analysis is never overwritten. Replacing it would destroy the only record of
+    what the platform actually told people at the time, which is exactly what an investigation
+    needs months later.
+    """
+
+    __tablename__ = "analysis_revisions"
+    __table_args__ = (Index("ix_revision_job", "analysis_job_id", "created_at"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    analysis_job_id: Mapped[str] = mapped_column(
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="CASCADE"), default=None, index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    #: dry_run means the revision was computed and recorded but did not replace the verdict.
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True)
+    original_classification: Mapped[str] = mapped_column(String(16), default="")
+    new_classification: Mapped[str] = mapped_column(String(16), default="")
+    original_score: Mapped[int] = mapped_column(Integer, default=0)
+    new_score: Mapped[int] = mapped_column(Integer, default=0)
+    added_rules: Mapped[list[Any]] = mapped_column(default=list)
+    removed_rules: Mapped[list[Any]] = mapped_column(default=list)
+    #: Engine versions used for the re-run, so the comparison is reproducible (§48).
+    versions: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    requested_by: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class ReevaluationRun(Base, IdMixin):
+    """A bulk re-evaluation over a time window (ТЗ 1.0.3 §50). Dry-run by default."""
+
+    __tablename__ = "reevaluation_runs"
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    window_days: Mapped[int] = mapped_column(Integer, default=7)
+    dry_run: Mapped[bool] = mapped_column(Boolean, default=True)
+    ruleset_fingerprint: Mapped[str] = mapped_column(Text, default="")
+    messages_examined: Mapped[int] = mapped_column(Integer, default=0)
+    verdict_changed: Mapped[int] = mapped_column(Integer, default=0)
+    newly_suspicious: Mapped[int] = mapped_column(Integer, default=0)
+    newly_cleared: Mapped[int] = mapped_column(Integer, default=0)
+    affected_campaigns: Mapped[list[Any]] = mapped_column(default=list)
+    affected_users: Mapped[list[Any]] = mapped_column(default=list)
+    sample: Mapped[list[Any]] = mapped_column(default=list)
+    requested_by: Mapped[str] = mapped_column(String(320), default="")
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+
+
+class ThreatScenario(Base, IdMixin, TimestampMixin):
+    """A catalogued attack scenario (ТЗ 1.0.3 §28).
+
+    The catalogue ties a scenario to the rules meant to cover it, the fixtures that exercise it
+    and the playbook an analyst follows. That link is what turns "we cover BEC" from a claim
+    into something checkable.
+    """
+
+    __tablename__ = "threat_scenarios"
+    __table_args__ = (UniqueConstraint("organization_id", "scenario_id", name="uq_threat_scenario"),)
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    #: THR-BEC-001 and so on.
+    scenario_id: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    category: Mapped[str] = mapped_column(String(64), default="", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    rules: Mapped[list[Any]] = mapped_column(default=list)
+    fixtures: Mapped[list[Any]] = mapped_column(default=list)
+    playbook: Mapped[str] = mapped_column(String(64), default="")
+    severity: Mapped[Severity] = mapped_column(_enum(Severity, "severity_enum"), default=Severity.MEDIUM)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)

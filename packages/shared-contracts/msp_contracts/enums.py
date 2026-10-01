@@ -334,11 +334,11 @@ class FalseNegativeSource(StrEnum):
     means a human or another system noticed something the platform did not.
     """
 
-    ANALYST = "analyst"
-    EMPLOYEE_REPORT = "employee_report"
-    GATEWAY = "gateway"
-    POST_INCIDENT = "post_incident"
-    EXTERNAL_TI = "external_ti"
+    ANALYST = "ANALYST"
+    EMPLOYEE_REPORT = "EMPLOYEE_REPORT"
+    GATEWAY = "GATEWAY"
+    POST_INCIDENT = "POST_INCIDENT"
+    EXTERNAL_TI = "EXTERNAL_TI"
 
 
 class RootCause(StrEnum):
@@ -348,10 +348,10 @@ class RootCause(StrEnum):
     different from one caused by a rule that never fired.
     """
 
-    MISSING_FACT = "missing_fact"
-    MISSING_RULE = "missing_rule"
-    PARSER_FAILURE = "parser_failure"
-    PROVIDER_FAILURE = "provider_failure"
-    RULE_FAILURE = "rule_failure"
-    RISK_AGGREGATION_FAILURE = "risk_aggregation_failure"
-    UNKNOWN = "unknown"
+    MISSING_FACT = "MISSING_FACT"
+    MISSING_RULE = "MISSING_RULE"
+    PARSER_FAILURE = "PARSER_FAILURE"
+    PROVIDER_FAILURE = "PROVIDER_FAILURE"
+    RULE_FAILURE = "RULE_FAILURE"
+    RISK_AGGREGATION_FAILURE = "RISK_AGGREGATION_FAILURE"
+    UNKNOWN = "UNKNOWN"

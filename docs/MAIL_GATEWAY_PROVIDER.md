@@ -142,8 +142,8 @@ def lowers_risk(self) -> bool:
 ```python
 @dataclass
 class GatewayContext:
-    verification: ChainVerification   # какие узлы подтверждены в этом письме
-    registered: bool                  # использует ли организация этот шлюз вообще
+    verification: ChainVerification  # какие узлы подтверждены в этом письме
+    registered: bool  # использует ли организация этот шлюз вообще
     internet_message_id: str
 ```
 
@@ -222,7 +222,7 @@ RFC Message-ID · queue-id · отправитель · получатель
 
 ```python
 verification = provider.verify(plan, targets)
-verification.complete   # False, если хоть одно письмо осталось на месте
+verification.complete  # False, если хоть одно письмо осталось на месте
 ```
 
 Реагирование на шлюзе на этапе 1.0.2 отключено **не настройкой**: запись не реализована, и план
@@ -248,6 +248,7 @@ verification.complete   # False, если хоть одно письмо ост�
 
 ```python
 from msp_mail_gateway import SKELETONS
+
 provider = SKELETONS["fortimail"].build("fortimail-edge")
 ```
 

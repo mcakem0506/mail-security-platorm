@@ -35,7 +35,18 @@ def _send(task_name: str, queue: str, *args: object) -> str | None:
         logger.info("tasks.worker_unavailable", extra={"task": task_name})
         return None
     try:
-        result = celery_app.send_task(task_name, args=list(args), queue=queue)
+        # ``retry=False`` is what makes the promise above true. Celery's default publish retry
+        # policy reconnects up to twenty times before giving up, which turns a broker outage
+        # into a request that hangs for well over a minute — the employee waits, then the call
+        # fails anyway. Failing immediately and standing on the local verdict is the behaviour
+        # this module exists to provide.
+        result = celery_app.send_task(
+            task_name,
+            args=list(args),
+            queue=queue,
+            retry=False,
+            ignore_result=True,
+        )
         return str(result.id)
     except Exception as exc:  # noqa: BLE001 - broker problems must not fail the request
         logger.warning("tasks.enqueue_failed", extra={"task": task_name, "error": type(exc).__name__})

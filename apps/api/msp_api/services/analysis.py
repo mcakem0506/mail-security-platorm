@@ -577,6 +577,8 @@ def persist_result(
                 internal=detected.internal,
                 suppressed=detected.suppressed,
                 suppressed_by=detected.suppressed_by,
+                shadow=detected.shadow,
+                rule_status=detected.rule_status or "ACTIVE",
                 observed_at=detected.observed_at,
             )
         )
