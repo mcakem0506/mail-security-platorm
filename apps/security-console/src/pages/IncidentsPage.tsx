@@ -55,7 +55,8 @@ const CLASSIFICATIONS: { value: AnalystClassification; label: string }[] = [
   { value: "CONFIRMED_PHISHING", label: "Подтверждён фишинг" },
   { value: "CONFIRMED_BEC", label: "Подтверждён BEC" },
   { value: "CONFIRMED_MALWARE", label: "Подтверждено ВПО" },
-  { value: "SPAM", label: "Нежелательная почта" },
+  { value: "CONFIRMED_IMPERSONATION", label: "Подтверждена имитация" },
+  { value: "CONFIRMED_SPAM", label: "Нежелательная почта" },
   { value: "LEGITIMATE", label: "Легитимное письмо" },
   { value: "FALSE_POSITIVE", label: "Ложное срабатывание" },
   { value: "BENIGN_SIMULATION", label: "Учебная рассылка" },
@@ -66,12 +67,17 @@ const CLASSIFICATIONS: { value: AnalystClassification; label: string }[] = [
 const BENIGN: AnalystClassification[] = ["LEGITIMATE", "FALSE_POSITIVE", "BENIGN_SIMULATION"];
 
 const ROOT_CAUSES = [
-  { value: "MISSING_FACT", label: "признак не извлечён" },
   { value: "MISSING_RULE", label: "нет подходящего правила" },
+  { value: "MISSING_FACT", label: "признак не извлечён" },
   { value: "PARSER_FAILURE", label: "не разобрано письмо или вложение" },
+  { value: "NORMALIZATION_FAILURE", label: "нормализация потеряла значимое" },
+  { value: "TI_MISSING", label: "внешний источник ничего не знал об индикаторе" },
   { value: "PROVIDER_FAILURE", label: "не ответил внешний источник" },
-  { value: "RULE_FAILURE", label: "правило есть, но не сработало" },
-  { value: "RISK_AGGREGATION_FAILURE", label: "признаков хватало, но баллов — нет" },
+  { value: "RULE_LOGIC", label: "правило есть, условие не совпало" },
+  { value: "RISK_AGGREGATION", label: "признаков хватало, но баллов — нет" },
+  { value: "EXCEPTION_SUPPRESSION", label: "сигнал подавлен исключением" },
+  { value: "UNSUPPORTED_FORMAT", label: "формат вложения не разбирается" },
+  { value: "OTHER", label: "другая причина" },
   { value: "UNKNOWN", label: "причина не установлена" },
 ];
 

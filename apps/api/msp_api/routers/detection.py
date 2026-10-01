@@ -753,7 +753,7 @@ def reevaluate_history(
 #: A gap stops being open when it is fixed or when the organisation decides not to fix it.
 #: "Won't fix" is a terminal state on purpose: an accepted risk that stays on the open list
 #: forever trains everyone to ignore the list.
-_TERMINAL_GAP_STATES: frozenset[GapStatus] = frozenset({GapStatus.FIXED, GapStatus.WONT_FIX})
+_TERMINAL_GAP_STATES: frozenset[GapStatus] = frozenset({GapStatus.RESOLVED, GapStatus.WONT_FIX})
 
 
 @router.get("/detection/gaps", response_model=list[DetectionGapOut])

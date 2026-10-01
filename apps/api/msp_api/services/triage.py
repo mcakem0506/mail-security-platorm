@@ -768,13 +768,19 @@ EMPLOYEE_FEEDBACK: dict[AnalystClassification, str] = {
     AnalystClassification.CONFIRMED_MALWARE: (
         "Спасибо. Во вложении обнаружено вредоносное содержимое. Не открывайте его."
     ),
-    AnalystClassification.SPAM: ("Спасибо. Письмо отнесено к нежелательной почте. Угрозы не выявлено."),
+    AnalystClassification.CONFIRMED_SPAM: (
+        "Спасибо. Письмо отнесено к нежелательной почте. Угрозы не выявлено."
+    ),
     AnalystClassification.LEGITIMATE: (
         "Письмо проверено службой информационной безопасности. Признаков угрозы не подтверждено."
     ),
     AnalystClassification.FALSE_POSITIVE: (
         "Письмо проверено службой информационной безопасности. Признаков угрозы не подтверждено, "
         "предупреждение было излишним."
+    ),
+    AnalystClassification.CONFIRMED_IMPERSONATION: (
+        "Спасибо. Подтверждено, что отправитель выдавал себя за другого человека или "
+        "организацию. Не отвечайте на письмо и не выполняйте просьбы из него."
     ),
     AnalystClassification.BENIGN_SIMULATION: (
         "Это письмо — часть учебной рассылки службы информационной безопасности. Вы поступили "

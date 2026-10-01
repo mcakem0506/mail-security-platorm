@@ -260,7 +260,12 @@ class AnalystClassification(StrEnum):
     CONFIRMED_PHISHING = "CONFIRMED_PHISHING"
     CONFIRMED_BEC = "CONFIRMED_BEC"
     CONFIRMED_MALWARE = "CONFIRMED_MALWARE"
-    SPAM = "SPAM"
+    #: Unwanted mail, confirmed as such. Separate from the attack verdicts on purpose: flagging
+    #: spam is not a false positive, and treating it as an attack is an error.
+    CONFIRMED_SPAM = "CONFIRMED_SPAM"
+    #: Someone was impersonated, but the message asked for nothing yet — reconnaissance, or the
+    #: opening move. Confirmed as a threat without being phishing, BEC or malware.
+    CONFIRMED_IMPERSONATION = "CONFIRMED_IMPERSONATION"
     LEGITIMATE = "LEGITIMATE"
     FALSE_POSITIVE = "FALSE_POSITIVE"
     BENIGN_SIMULATION = "BENIGN_SIMULATION"
@@ -273,8 +278,13 @@ CONFIRMED_THREAT: frozenset[AnalystClassification] = frozenset(
         AnalystClassification.CONFIRMED_PHISHING,
         AnalystClassification.CONFIRMED_BEC,
         AnalystClassification.CONFIRMED_MALWARE,
+        AnalystClassification.CONFIRMED_IMPERSONATION,
     }
 )
+#: Spam sits in neither set. It is unwanted but not an attack, so counting it as a confirmed
+#: threat would inflate precision and counting it as benign would turn every spam flag into a
+#: false positive.
+CONFIRMED_UNWANTED: frozenset[AnalystClassification] = frozenset({AnalystClassification.CONFIRMED_SPAM})
 #: Classifications that say the platform was wrong to flag the message.
 CONFIRMED_BENIGN: frozenset[AnalystClassification] = frozenset(
     {
@@ -323,7 +333,10 @@ class GapStatus(StrEnum):
     OPEN = "OPEN"
     ACCEPTED = "ACCEPTED"
     IN_PROGRESS = "IN_PROGRESS"
-    FIXED = "FIXED"
+    #: Fixed in a candidate pack and waiting for the golden corpus to agree. A gap is not closed
+    #: by a code change, it is closed by a case that used to fail and now passes.
+    VALIDATION = "VALIDATION"
+    RESOLVED = "RESOLVED"
     WONT_FIX = "WONT_FIX"
 
 
@@ -339,6 +352,10 @@ class FalseNegativeSource(StrEnum):
     GATEWAY = "GATEWAY"
     POST_INCIDENT = "POST_INCIDENT"
     EXTERNAL_TI = "EXTERNAL_TI"
+    #: Found by a planned exercise rather than by an attack. Counted separately because a miss
+    #: a red team had to construct says something different about exposure than one a real
+    #: campaign walked through.
+    RED_TEAM = "RED_TEAM"
 
 
 class RootCause(StrEnum):
@@ -348,12 +365,24 @@ class RootCause(StrEnum):
     different from one caused by a rule that never fired.
     """
 
-    MISSING_FACT = "MISSING_FACT"
     MISSING_RULE = "MISSING_RULE"
+    MISSING_FACT = "MISSING_FACT"
     PARSER_FAILURE = "PARSER_FAILURE"
+    #: Extracted, but the normalised form lost what mattered — a decoded header, a folded
+    #: subject, a punycode host rendered back to Unicode.
+    NORMALIZATION_FAILURE = "NORMALIZATION_FAILURE"
+    #: External intelligence had nothing on an indicator that later proved malicious.
+    TI_MISSING = "TI_MISSING"
     PROVIDER_FAILURE = "PROVIDER_FAILURE"
-    RULE_FAILURE = "RULE_FAILURE"
-    RISK_AGGREGATION_FAILURE = "RISK_AGGREGATION_FAILURE"
+    #: The rule exists and the facts were there; its condition did not match.
+    RULE_LOGIC = "RULE_LOGIC"
+    #: Signals fired, but the score never reached the threshold.
+    RISK_AGGREGATION = "RISK_AGGREGATION"
+    #: An exception suppressed the signal that would have caught it. The most dangerous of
+    #: these, because the platform was not blind — it had been told to look away.
+    EXCEPTION_SUPPRESSION = "EXCEPTION_SUPPRESSION"
+    UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
+    OTHER = "OTHER"
     UNKNOWN = "UNKNOWN"
 
 
@@ -380,3 +409,104 @@ class CanaryState(StrEnum):
     PROMOTED = "PROMOTED"
     #: Rolled back; the rule is expected to go to DEGRADED or SHADOW in the rule pack.
     ABORTED = "ABORTED"
+
+
+class SignalDisposition(StrEnum):
+    """What an analyst thought of one signal inside a verdict (ТЗ 1.0.3B §4).
+
+    Per-signal rather than per-message, because "the platform was wrong" is not actionable and
+    "rule BEC-014 fired on an ordinary supplier letter" is. The middle values matter most: a
+    rule that is right about the fact and wrong about how much it matters needs its weight
+    changed, not its condition.
+    """
+
+    CORRECT = "CORRECT"
+    INCORRECT = "INCORRECT"
+    #: Right about the fact, too loud about it.
+    TOO_SEVERE = "TOO_SEVERE"
+    #: Right about the fact, too quiet to matter.
+    TOO_WEAK = "TOO_WEAK"
+    #: True, but not evidence of anything here.
+    IRRELEVANT = "IRRELEVANT"
+    #: Says the same thing another signal already said.
+    DUPLICATE = "DUPLICATE"
+
+
+class FalsePositiveReason(StrEnum):
+    """Why a detection was wrong (ТЗ 1.0.3B §5).
+
+    The reason decides who fixes it and how. "Overbroad rule" goes to the rule owner, "parser
+    context loss" goes to the parser, and "known vendor" may need no rule change at all — only
+    an exception with an owner and a review date. A free-text comment alone cannot be counted,
+    sorted or assigned.
+    """
+
+    LEGITIMATE_BUSINESS_PATTERN = "LEGITIMATE_BUSINESS_PATTERN"
+    TRUSTED_EXTERNAL_SERVICE = "TRUSTED_EXTERNAL_SERVICE"
+    SHARED_ROLE_NAME = "SHARED_ROLE_NAME"
+    EXPECTED_FORWARDING = "EXPECTED_FORWARDING"
+    EXPECTED_DOMAIN_ALIAS = "EXPECTED_DOMAIN_ALIAS"
+    KNOWN_VENDOR = "KNOWN_VENDOR"
+    AUTHENTICATION_EDGE_CASE = "AUTHENTICATION_EDGE_CASE"
+    PARSER_CONTEXT_LOSS = "PARSER_CONTEXT_LOSS"
+    OVERBROAD_RULE = "OVERBROAD_RULE"
+    OTHER = "OTHER"
+
+
+class RuleHealth(StrEnum):
+    """How a rule is doing in production (ТЗ 1.0.3B §8).
+
+    Health never switches a rule off by itself. A rule is disabled by a reviewed change, because
+    an automatic rule that silences detection when the data looks odd is a way for an attacker,
+    or an unlucky week, to turn off a control.
+    """
+
+    HEALTHY = "HEALTHY"
+    #: Fires, but nobody has judged any of it — precision is unknown, not good.
+    NO_DATA = "NO_DATA"
+    NOISY = "NOISY"
+    #: Precision fell against the previous period.
+    REGRESSED = "REGRESSED"
+    #: Barely fires; the scenario it covers may be unmeasured rather than absent.
+    LOW_COVERAGE = "LOW_COVERAGE"
+    DEGRADED = "DEGRADED"
+
+
+class CandidateState(StrEnum):
+    """Review state of a candidate rule pack (ТЗ 1.0.3B §12)."""
+
+    DRAFT = "DRAFT"
+    READY_FOR_REVIEW = "READY_FOR_REVIEW"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    APPROVED = "APPROVED"
+    PUBLISHED = "PUBLISHED"
+    REJECTED = "REJECTED"
+
+
+class CampaignMatchReason(StrEnum):
+    """Why a message was put in a campaign (ТЗ 1.0.3B §20).
+
+    Stored per match rather than per campaign: an analyst disagreeing with one message's
+    membership needs to see what tied *that* message in, not the campaign's general shape.
+    """
+
+    SAME_URL = "SAME_URL"
+    SAME_HASH = "SAME_HASH"
+    SAME_SENDER = "SAME_SENDER"
+    SAME_DOMAIN = "SAME_DOMAIN"
+    SUBJECT_SIMILARITY = "SUBJECT_SIMILARITY"
+    BODY_SIMILARITY = "BODY_SIMILARITY"
+    TEMPORAL_CLUSTER = "TEMPORAL_CLUSTER"
+    SAME_INFRASTRUCTURE = "SAME_INFRASTRUCTURE"
+    SAME_GATEWAY_SIGNATURE = "SAME_GATEWAY_SIGNATURE"
+
+
+class ReanalysisState(StrEnum):
+    """Lifecycle of a bulk re-evaluation job (ТЗ 1.0.3B §23)."""
+
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    PAUSED = "PAUSED"
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"

@@ -450,10 +450,10 @@ class TestGapRegistryIsPublished:
         gap_id = admin.get("/api/v1/detection/gaps").json()[0]["gap_id"]
         closed = admin.post(
             f"/api/v1/detection/gaps/{gap_id}/status",
-            json={"status": "FIXED", "note": "Разбор архивов добавлен"},
+            json={"status": "RESOLVED", "note": "Разбор архивов добавлен"},
         )
         assert closed.status_code == 200, closed.text
-        assert closed.json()["status"] == "FIXED"
+        assert closed.json()["status"] == "RESOLVED"
 
         from msp_api.db.models import AuditEvent
         from sqlalchemy import select
