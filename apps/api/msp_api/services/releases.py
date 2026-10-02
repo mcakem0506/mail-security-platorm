@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import DetectionGapRecord, DetectionRelease, RuleCandidate
+from ..observability import detection_gap_open, detection_release_info
 
 logger = logging.getLogger(__name__)
 
@@ -400,6 +401,17 @@ def publish_release(
         candidate.published_at = utcnow()
         candidate.release_id = release.id
 
+    detection_release_info.labels(
+        release.version,
+        release.dataset_version,
+        release.parser_version,
+        release.risk_engine_version,
+    ).set(1)
+    severities: dict[str, int] = {}
+    for gap in gaps:
+        severities[gap.severity.value] = severities.get(gap.severity.value, 0) + 1
+    for severity, count in severities.items():
+        detection_gap_open.labels(severity).set(count)
     logger.info("release.published", extra={"version": release.version})
     return release
 

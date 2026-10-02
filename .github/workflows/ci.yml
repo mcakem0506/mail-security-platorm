@@ -294,6 +294,125 @@ jobs:
       - name: Budget, regex safety, fuzzing, adversarial input
         run: pytest -q tests/security/test_parser_robustness.py
 
+  rule-safety:
+    name: Rule schema and safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # Rules are data, and the data has to be checkable: every condition must name a fact the
+      # engine can produce, every ACTIVE rule must have an owner, and nothing in a rule file may
+      # be executable. A rule with a typo loads cleanly and never fires — coverage on a
+      # dashboard that protects nothing.
+      - name: Rule vocabulary, schema and ownership
+        run: pytest -q tests/unit/test_rule_vocabulary.py tests/unit/test_threat_scenarios.py
+
+      - name: No executable YAML tags in the rule pack
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+
+          # yaml.safe_load already refuses these; the grep is the second lock, because the day
+          # someone swaps safe_load for load is the day the first lock stops existing.
+          forbidden = ("!!python/", "!!binary", "!!map:", "tag:yaml.org,2002:python")
+          bad = []
+          for path in pathlib.Path("rules").rglob("*.yaml"):
+              text = path.read_text(encoding="utf-8")
+              for marker in forbidden:
+                  if marker in text:
+                      bad.append(f"{path}: {marker}")
+          if bad:
+              print("executable YAML tags found:", *bad, sep="\n  ")
+              sys.exit(1)
+          print("rule pack carries no executable tags")
+          PY
+
+      - name: Regex safety
+        run: pytest -q tests/security/test_parser_robustness.py -k Regex
+
+  dataset-validation:
+    name: Golden dataset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # The dataset validates itself: ids unique, expectations present, no case claiming a gap
+      # that is not registered. A corpus that silently lost its assertions would make every
+      # later metric meaningless while still reporting a number.
+      - name: Validate the corpus
+        run: |
+          python - <<'PY'
+          import sys
+
+          from msp_detection_eval.corpus import build_golden_dataset
+
+          dataset, messages = build_golden_dataset()
+          problems = dataset.validate()
+          if problems:
+              print("dataset invalid:", *problems, sep="\n  ")
+              sys.exit(1)
+          print(f"{len(dataset.cases)} cases, {len(messages)} messages, checksum ok")
+          PY
+
+  fuzz-smoke:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # A short fuzz run on every change; the long one is scheduled separately. The point of the
+      # smoke run is that a parser change that crashes on malformed input fails here rather than
+      # on the first malformed message in production.
+      - name: MIME, headers, URLs, archives, rule evaluator
+        run: pytest -q tests/security/test_parser_robustness.py -k Fuzzing
+
+  detection-performance:
+    name: Detection performance budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Local analysis budget
+        run: pytest -q tests/security/test_parser_robustness.py -k Performance
+      # The corpus run reports P50/P95/P99. A regression here means every analyst waits longer,
+      # which is the kind of change that never gets noticed without a number attached.
+      - name: Measure latency on the golden corpus
+        run: |
+          python scripts/detection_baseline.py --json baseline.json >/dev/null
+          python - <<'PY'
+          import json
+          import sys
+
+          data = json.load(open("baseline.json", encoding="utf-8"))
+          latency = data["evaluation"]["latency_ms"]
+          print(f"P50 {latency['p50']} ms, P95 {latency['p95']} ms, P99 {latency['p99']} ms")
+          budget_ms = 5000
+          if latency["p95"] is None:
+              print("latency unknown — refusing to report a budget as met")
+              sys.exit(1)
+          if latency["p95"] > budget_ms:
+              print(f"P95 {latency['p95']} ms exceeds the {budget_ms} ms budget")
+              sys.exit(1)
+          PY
+
   migrations:
     name: Migrations from scratch
     runs-on: ubuntu-latest
@@ -380,6 +499,33 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+
+      # The detection pages are where an analyst spends the stage's new functionality. A build
+      # that drops one of them should fail here, not be discovered by someone opening the menu.
+      - name: Detection pages are present in the bundle
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const dir = path.join('dist', 'assets');
+            const bundle = fs.readdirSync(dir)
+              .filter((name) => name.endsWith('.js'))
+              .map((name) => fs.readFileSync(path.join(dir, name), 'utf8'))
+              .join('');
+            const required = [
+              'Качество детектирования',
+              'Очередь расследований',
+              'Канареечные выпуски',
+              'Известные пробелы',
+              'Карта покрытия',
+            ];
+            const missing = required.filter((text) => !bundle.includes(text));
+            if (missing.length) {
+              console.error('missing detection pages:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('detection pages present');
+          "
       # Blocking: a High or Critical advisory in a dependency that ships to the browser is a
       # release blocker, not a warning.
       - name: Audit dependencies

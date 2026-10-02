@@ -48,6 +48,14 @@ from ..db.models import (
     RuleStatistic,
     SignalFeedback,
 )
+from ..observability import (
+    RULE_HEALTH_LEVEL,
+    false_negative_total,
+    feedback_total,
+    rule_fp_total,
+    rule_health,
+    rule_tp_total,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +145,7 @@ def record_feedback(
         )
 
     _apply_to_statistics(session, organization_id, classification, judgements, job)
+    feedback_total.labels(classification.value).inc()
     logger.info(
         "feedback.recorded",
         extra={
@@ -205,6 +214,7 @@ def _apply_to_statistics(
             session.flush()
         if rule_id in wrong or classification in CONFIRMED_BENIGN:
             stat.confirmed_fp += 1
+            rule_fp_total.labels(rule_id).inc()
             entry = session.execute(
                 select(RuleRegistryEntry).where(
                     RuleRegistryEntry.organization_id == organization_id,
@@ -215,6 +225,7 @@ def _apply_to_statistics(
                 entry.last_false_positive_at = now
         elif classification in CONFIRMED_THREAT:
             stat.confirmed_tp += 1
+            rule_tp_total.labels(rule_id).inc()
 
 
 def record_missed_detection(
@@ -277,6 +288,7 @@ def record_missed_detection(
         gap_id=gap_id,
     )
     session.add(feedback)
+    false_negative_total.labels(root_cause.value).inc()
     return feedback
 
 
@@ -510,6 +522,7 @@ def snapshot_rules(
         )
         session.add(snapshot)
         created.append(snapshot)
+        rule_health.labels(rule_id).set(RULE_HEALTH_LEVEL.get(health.value, 1))
     return created
 
 

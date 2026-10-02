@@ -52,6 +52,7 @@ from ..db.models import (
     ProtectedIdentity,
     User,
 )
+from ..observability import incident_sla_breached, investigation_queue_depth
 
 # ---------------------------------------------------------------------------------------------
 # Priority
@@ -524,6 +525,19 @@ def build_queue(
                 ),
             )
         )
+
+    # Published here rather than on a timer: the queue is recomputed whenever anyone looks at
+    # it, and a gauge refreshed by the same code that produces the page cannot drift from it.
+    depth: dict[str, int] = {}
+    breached: dict[str, int] = {}
+    for entry in entries:
+        band = entry.priority.priority.value
+        depth[band] = depth.get(band, 0) + 1
+        if entry.sla.state is SlaState.BREACHED:
+            breached[band] = breached.get(band, 0) + 1
+    for band_value in Priority:
+        investigation_queue_depth.labels(band_value.value).set(depth.get(band_value.value, 0))
+        incident_sla_breached.labels(band_value.value).set(breached.get(band_value.value, 0))
 
     entries.sort(key=lambda e: (PRIORITY_ORDER[e.priority.priority], -e.age_seconds))
     return entries[:limit]

@@ -232,3 +232,87 @@ class Timer:
     @property
     def elapsed(self) -> float:
         return time.monotonic() - self._start
+
+
+# ---------------------------------------------------------------------------------------------
+# Detection operations (ТЗ 1.0.3B §41)
+# ---------------------------------------------------------------------------------------------
+#: Analyst decisions, by classification. The denominator of every quality metric: when this
+#: stops growing, precision and recall stop meaning anything, and the dashboards start showing
+#: an old answer with a fresh timestamp.
+feedback_total = Counter(
+    "msp_feedback_total",
+    "Analyst feedback recorded",
+    ["classification"],
+    registry=REGISTRY,
+)
+false_negative_total = Counter(
+    "msp_false_negative_total",
+    "Missed detections reported",
+    ["root_cause"],
+    registry=REGISTRY,
+)
+#: Open detection gaps, by severity. A gauge rather than a counter: what matters is how many
+#: are open now, not how many have ever been opened.
+detection_gap_open = Gauge(
+    "msp_detection_gap_open",
+    "Open detection gaps",
+    ["severity"],
+    registry=REGISTRY,
+)
+rule_trigger_total = Counter("msp_rule_trigger_total", "Rule triggers", ["rule_id"], registry=REGISTRY)
+rule_tp_total = Counter(
+    "msp_rule_tp_total", "Rule triggers confirmed by an analyst", ["rule_id"], registry=REGISTRY
+)
+rule_fp_total = Counter(
+    "msp_rule_fp_total", "Rule triggers rejected by an analyst", ["rule_id"], registry=REGISTRY
+)
+#: Rule health as a number, so an alert can fire on a rule turning noisy without anyone opening
+#: the console. 0 healthy, 1 no data, 2 low coverage, 3 degraded, 4 regressed, 5 noisy.
+rule_health = Gauge("msp_rule_health", "Rule health (0 healthy … 5 noisy)", ["rule_id"], registry=REGISTRY)
+replay_jobs_total = Counter(
+    "msp_replay_jobs_total", "Replay and re-evaluation jobs", ["kind"], registry=REGISTRY
+)
+replay_duration = Histogram(
+    "msp_replay_duration_seconds",
+    "Duration of a re-evaluation job",
+    buckets=(1, 5, 15, 60, 300, 900, 3600),
+    registry=REGISTRY,
+)
+investigation_queue_depth = Gauge(
+    "msp_investigation_queue_depth",
+    "Open incidents in the analyst queue",
+    ["priority"],
+    registry=REGISTRY,
+)
+#: Incidents currently past their acknowledgement target, by priority.
+#:
+#: A gauge rather than the counter ТЗ 1.0.3B §41 names, and deliberately so. The queue is
+#: recomputed every time anyone opens it, so a counter incremented from that path would count
+#: the same breach once per page view — a number that grows with how often people look rather
+#: than with how often the organisation is late. What an alert needs is "how many are late now",
+#: and that is a gauge.
+incident_sla_breached = Gauge(
+    "msp_incident_sla_breached",
+    "Incidents currently past their acknowledgement target",
+    ["priority"],
+    registry=REGISTRY,
+)
+#: The current detection release, as a labelled constant. Lets a dashboard answer "which rules
+#: produced these verdicts" without joining anything.
+detection_release_info = Gauge(
+    "msp_detection_release_info",
+    "Published detection release (always 1; the labels carry the information)",
+    ["version", "dataset_version", "parser_version", "risk_engine_version"],
+    registry=REGISTRY,
+)
+
+#: Health as a number, in the order an alert would want: higher is worse.
+RULE_HEALTH_LEVEL: dict[str, int] = {
+    "HEALTHY": 0,
+    "NO_DATA": 1,
+    "LOW_COVERAGE": 2,
+    "DEGRADED": 3,
+    "REGRESSED": 4,
+    "NOISY": 5,
+}

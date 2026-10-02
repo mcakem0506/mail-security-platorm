@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings
 from ..db.models import AnalysisJob, AnalysisResult, MailMessage, ReanalysisJob
+from ..observability import replay_duration, replay_jobs_total
 from . import detection_ops
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ def create_job(
     session.add(job)
     session.flush()
     job.total_messages = _count_candidates(session, job)
+    replay_jobs_total.labels("dry_run" if dry_run else "applied").inc()
     logger.info(
         "reanalysis.created",
         extra={"job_id": job.id, "dry_run": dry_run, "messages": job.total_messages},
@@ -246,6 +248,8 @@ def run_slice(
 def finish(job: ReanalysisJob) -> ReanalysisJob:
     job.state = ReanalysisState.COMPLETED
     job.finished_at = utcnow()
+    if job.started_at is not None:
+        replay_duration.observe((job.finished_at - job.started_at).total_seconds())
     logger.info(
         "reanalysis.finished",
         extra={
