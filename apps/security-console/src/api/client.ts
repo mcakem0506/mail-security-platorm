@@ -142,6 +142,92 @@ export interface DetectionRule {
   precision: number | null;
 }
 
+/** ТЗ 1.0.3B §8. Precision is null until enough has been judged — never 0, never 1. */
+export interface RuleQuality {
+  rule_id: string;
+  rule_version: number;
+  trigger_count: number;
+  analyst_reviewed: number;
+  true_positive: number;
+  false_positive: number;
+  unknown: number;
+  suppressed: number;
+  precision: number | null;
+  affected_messages: number;
+  affected_incidents: number;
+  health: "HEALTHY" | "NO_DATA" | "NOISY" | "REGRESSED" | "LOW_COVERAGE" | "DEGRADED";
+  health_reasons: string[];
+}
+
+/** ТЗ 1.0.3B §10–§12: a proposed rule pack under review. */
+export interface RuleCandidate {
+  candidate_id: string;
+  name: string;
+  description: string;
+  source: string;
+  state: "DRAFT" | "READY_FOR_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "REJECTED";
+  added_rules: string[];
+  changed_rules: string[];
+  removed_rules: string[];
+  critical_change: boolean;
+  critical_reasons: string[];
+  author: string;
+  reviewer: string;
+  review_comment: string;
+  benchmark: Record<string, unknown>;
+  benchmarked_at: string | null;
+  published_at: string | null;
+  release_id: string | null;
+  created_at: string;
+}
+
+/** ТЗ 1.0.3B §24: everything needed to reproduce what a release detected. */
+export interface DetectionRelease {
+  release_id: string;
+  version: string;
+  ruleset_fingerprint: string;
+  parser_version: string;
+  risk_engine_version: string;
+  dataset_version: string;
+  dataset_checksum: string;
+  commit_sha: string;
+  candidate_id: string | null;
+  approved_by: string;
+  published_by: string;
+  metrics: Record<string, unknown>;
+  metric_deltas: Record<string, number | null>;
+  known_limitations: Record<string, unknown>[];
+  new_rules: string[];
+  changed_rules: string[];
+  removed_rules: string[];
+  changelog: string;
+  published_at: string;
+}
+
+/** ТЗ 1.0.3B §23: a bulk re-evaluation. Dry run unless told otherwise, pausable, cancellable. */
+export interface ReanalysisJob {
+  job_id: string;
+  state: "QUEUED" | "RUNNING" | "PAUSED" | "CANCELLED" | "COMPLETED" | "FAILED";
+  dry_run: boolean;
+  window_from: string;
+  window_to: string;
+  filters: Record<string, unknown>;
+  max_messages: number;
+  total_messages: number;
+  processed: number;
+  /** Null until the batch size is known: "not started" and "nothing to do" differ. */
+  progress: number | null;
+  verdict_changed: number;
+  newly_suspicious: number;
+  newly_cleared: number;
+  sample: Record<string, unknown>[];
+  requested_by: string;
+  cancelled_by: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface DetectionGap {
   gap_id: string;
   category: string;
@@ -649,6 +735,94 @@ export const api = {
       `/api/v1/detection/rules/${encodeURIComponent(ruleId)}/canary/decision`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+
+  ruleQuality: (days = 30) =>
+    request<RuleQuality[]>(`/api/v1/detection/rules/quality${query({ days })}`),
+
+  snapshotRuleQuality: (days = 30) =>
+    request<{ snapshots: number; period_days: number }>(
+      `/api/v1/detection/rules/quality/snapshot${query({ days })}`,
+      { method: "POST" },
+    ),
+
+  rule: (ruleId: string) =>
+    request<Record<string, unknown>>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}`),
+
+  candidates: () => request<RuleCandidate[]>("/api/v1/detection/candidates"),
+
+  createCandidate: (body: { name: string; source: string; description?: string }) =>
+    request<RuleCandidate>("/api/v1/detection/candidates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  benchmarkCandidate: (id: string) =>
+    request<Record<string, unknown>>(`/api/v1/detection/candidates/${id}/benchmark`, {
+      method: "POST",
+    }),
+
+  submitCandidate: (id: string) =>
+    request<RuleCandidate>(`/api/v1/detection/candidates/${id}/submit`, { method: "POST" }),
+
+  reviewCandidate: (id: string, body: { approve: boolean; comment?: string }) =>
+    request<RuleCandidate>(`/api/v1/detection/candidates/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  releases: () => request<DetectionRelease[]>("/api/v1/detection/releases"),
+
+  publishRelease: (body: { candidate_id?: string; note?: string }) =>
+    request<DetectionRelease>("/api/v1/detection/releases", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  reanalysisJobs: () => request<ReanalysisJob[]>("/api/v1/reanalysis/jobs"),
+
+  createReanalysisJob: (body: {
+    days?: number;
+    dry_run: boolean;
+    max_messages?: number;
+    filters?: Record<string, string>;
+  }) =>
+    request<ReanalysisJob>("/api/v1/reanalysis/jobs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  runReanalysisJob: (id: string, slices = 20) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/run${query({ slices })}`, {
+      method: "POST",
+    }),
+
+  pauseReanalysisJob: (id: string) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/pause`, { method: "POST" }),
+
+  cancelReanalysisJob: (id: string) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/cancel`, { method: "POST" }),
+
+  messageGraph: (messageId: string) =>
+    request<{
+      nodes: { id: string; kind: string; label: string; detail: Record<string, unknown> }[];
+      edges: { source: string; target: string; kind: string; label: string }[];
+      truncated: string[];
+      complete: boolean;
+    }>(`/api/v1/investigations/messages/${encodeURIComponent(messageId)}/graph`),
+
+  relatedMessages: (messageId: string, days = 90) =>
+    request<Record<string, unknown>[]>(
+      `/api/v1/investigations/messages/${encodeURIComponent(messageId)}/related${query({ days })}`,
+    ),
+
+  analysisFeedback: (analysisId: string, body: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/v1/analysis/${analysisId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  analysisRevisions: (analysisId: string) =>
+    request<Record<string, unknown>[]>(`/api/v1/analysis/${analysisId}/revisions`),
 
   detectionGaps: (status?: string) =>
     request<DetectionGap[]>(`/api/v1/detection/gaps${query({ status })}`),

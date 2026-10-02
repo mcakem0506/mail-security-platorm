@@ -1206,7 +1206,10 @@ def evidence_graph(job_id: str, actor: Viewer, session: DbSession) -> dict[str, 
     return graph.as_dict()
 
 
-@router.get("/campaigns/merge-suggestions", response_model=list[dict])
+# Under /detection/ rather than /campaigns/: the incidents router already owns
+# GET /campaigns/{campaign_id} and is included first, so a literal path at that depth is
+# read as a campaign id and answered 404. See tests/unit/test_route_shadowing.py.
+@router.get("/detection/campaigns/merge-suggestions", response_model=list[dict])
 def campaign_merge_suggestions(
     actor: Viewer,
     session: DbSession,
@@ -2266,7 +2269,8 @@ def reject_campaign_message(
     return {"campaign_id": campaign_id, "message_id": message_id, "rejected": True}
 
 
-@router.get("/campaigns/match-quality", response_model=dict)
+# See the note on merge-suggestions above: a literal /campaigns/<word> path is unreachable.
+@router.get("/detection/campaigns/match-quality", response_model=dict)
 def campaign_match_quality(actor: QualityReader, session: DbSession) -> dict[str, Any]:
     """How often analysts disagree with correlation (ТЗ 1.0.3B §20).
 

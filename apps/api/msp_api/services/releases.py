@@ -13,6 +13,7 @@ same thing, which is the property every other guarantee in this stage rests on.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess  # nosec B404 - reads the current commit for the manifest, fixed argv
@@ -295,6 +296,15 @@ def next_version(session: Session, organization_id: str, *, now: Any = None) -> 
 
 
 def _commit_sha() -> str:
+    """The commit this deployment was built from.
+
+    Read from the environment first: a runtime image has no git and no repository, so asking git
+    there returns nothing and the manifest loses the one field that ties a release to a diff.
+    The build stamps ``MSP_COMMIT_SHA``; the git call is the fallback for running from a checkout.
+    """
+    stamped = os.environ.get("MSP_COMMIT_SHA", "").strip()
+    if stamped:
+        return stamped[:64]
     git = shutil.which("git")
     if git is None:
         return ""

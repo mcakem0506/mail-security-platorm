@@ -159,7 +159,7 @@ P1  score=114  [verdict_high_risk:20, protected_recipient:12, finance_recipient:
 
 ## Кампании
 
-- `GET /api/v1/campaigns/merge-suggestions` — что похоже на одну волну, с причинами.
+- `GET /api/v1/detection/campaigns/merge-suggestions` — что похоже на одну волну, с причинами.
 - `POST /api/v1/campaigns/{id}/merge` — объединить (требует причину).
 - `POST /api/v1/campaigns/{id}/split` — выделить письма в отдельную кампанию.
 

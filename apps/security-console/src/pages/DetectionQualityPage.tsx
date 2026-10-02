@@ -6,6 +6,7 @@ import {
   type DetectionQuality,
   type CanaryRollout,
   type DetectionRule,
+  type RuleQuality,
   type ThreatScenarioView,
 } from "../api/client";
 import { SEVERITY_LABELS, formatDate } from "../types";
@@ -23,6 +24,7 @@ import { SEVERITY_LABELS, formatDate } from "../types";
 const TABS = [
   { id: "quality", label: "Качество" },
   { id: "rules", label: "Правила" },
+  { id: "health", label: "Качество правил" },
   { id: "gaps", label: "Известные пробелы" },
   { id: "coverage", label: "Карта покрытия" },
   { id: "shadow", label: "Теневые правила" },
@@ -49,6 +51,26 @@ const GAP_STATUS_LABELS: Record<string, string> = {
 };
 
 /** "—" for an undefined metric. Never 0, never 100%. */
+const RULE_HEALTH_LABELS: Record<string, string> = {
+  HEALTHY: "в норме",
+  NO_DATA: "нет данных",
+  NOISY: "шумит",
+  REGRESSED: "ухудшилось",
+  LOW_COVERAGE: "не срабатывает",
+  DEGRADED: "подавляется исключениями",
+};
+
+// Health decides the colour, never the rule's fate: a control that switches itself off can be
+// switched off by an unlucky week.
+const RULE_HEALTH_CLASS: Record<string, string> = {
+  HEALTHY: "tag tag--ok",
+  NOISY: "tag tag--critical",
+  REGRESSED: "tag tag--high",
+  DEGRADED: "tag tag--medium",
+  LOW_COVERAGE: "tag",
+  NO_DATA: "tag",
+};
+
 const CANARY_STATE_LABELS: Record<string, string> = {
   ACTIVE: "идёт",
   PROMOTED: "расширен на всех",
@@ -68,6 +90,7 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
   const [scenarios, setScenarios] = useState<ThreatScenarioView[]>([]);
   const [shadow, setShadow] = useState<Record<string, unknown>[]>([]);
   const [canaries, setCanaries] = useState<CanaryRollout[]>([]);
+  const [ruleQuality, setRuleQuality] = useState<RuleQuality[]>([]);
   const [versions, setVersions] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -83,6 +106,7 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
     void api.threatScenarios().then(setScenarios).catch(fail);
     void api.shadowRules(days).then(setShadow).catch(fail);
     void api.canaries(true).then(setCanaries).catch(fail);
+    void api.ruleQuality(days).then(setRuleQuality).catch(fail);
     void api.detectionVersions().then(setVersions).catch(fail);
   }, [days]);
 
@@ -369,6 +393,82 @@ export function DetectionQualityPage({ user }: { user: CurrentUser }) {
               ))}
             </tbody>
           </table>
+        </section>
+      )}
+
+      {tab === "health" && (
+        <section className="card">
+          <div className="card__header">
+            <h2>Качество правил за период</h2>
+            {canManage && (
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => {
+                  void api
+                    .snapshotRuleQuality(days)
+                    .then((result) =>
+                      setNotice(`Сохранён срез по ${result.snapshots} правилам.`),
+                    )
+                    .catch((e) =>
+                      setError(e instanceof Error ? e.message : "Не удалось сохранить срез"),
+                    );
+                }}
+              >
+                Сохранить срез
+              </button>
+            )}
+          </div>
+          <p className="muted small">
+            Точность показывается как «—», пока решений аналитика меньше пяти: по двум решениям
+            это не измерение, а случай. Состояние здоровья — ярлык, оно никогда не отключает
+            правило: контроль, выключающий себя при странных данных, может быть выключен
+            неудачной неделей.
+          </p>
+          {ruleQuality.length === 0 ? (
+            <p className="muted">За период правила не срабатывали.</p>
+          ) : (
+            <table className="table table--compact">
+              <thead>
+                <tr>
+                  <th>Правило</th>
+                  <th>Срабатываний</th>
+                  <th>Разобрано</th>
+                  <th>Подтверждено</th>
+                  <th>Ложных</th>
+                  <th>Точность</th>
+                  <th>Писем</th>
+                  <th>Инцидентов</th>
+                  <th>Состояние</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ruleQuality.map((row) => (
+                  <tr key={row.rule_id}>
+                    <td>
+                      {row.rule_id}
+                      <div className="small muted">v{row.rule_version}</div>
+                    </td>
+                    <td>{row.trigger_count}</td>
+                    <td>{row.analyst_reviewed}</td>
+                    <td>{row.true_positive}</td>
+                    <td>{row.false_positive}</td>
+                    <td>{ratio(row.precision)}</td>
+                    <td>{row.affected_messages}</td>
+                    <td>{row.affected_incidents}</td>
+                    <td>
+                      <span className={RULE_HEALTH_CLASS[row.health] ?? "tag"}>
+                        {RULE_HEALTH_LABELS[row.health] ?? row.health}
+                      </span>
+                      {row.health_reasons.length > 0 && (
+                        <div className="small muted">{row.health_reasons[0]}</div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </section>
       )}
 
