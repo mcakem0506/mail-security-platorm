@@ -337,6 +337,46 @@ def _ooxml(
     return _zip(entries)
 
 
+def _qr_png(payload: str, scale: int = 6) -> bytes:
+    """A real, scannable QR code, or a placeholder when the optional decoder is absent.
+
+    The corpus must describe the same message whether or not a deployment installed the decoder,
+    so the fixture is generated the same way either way; what changes is only whether the
+    platform can read it. The placeholder is a plain square of the same shape, which is exactly
+    what the platform sees when it cannot decode.
+    """
+    try:
+        import cv2  # type: ignore[import-not-found]
+        import numpy  # type: ignore[import-not-found]
+    except ImportError:
+        return _square_png(33 * scale)
+
+    matrix = cv2.QRCodeEncoder.create().encode(payload)
+    # The encoder already returns 0/255; scaling it again would overflow uint8 into noise.
+    bordered = cv2.copyMakeBorder(matrix.astype(numpy.uint8), 4, 4, 4, 4, cv2.BORDER_CONSTANT, value=255)
+    image = cv2.resize(bordered, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+    ok, buffer = cv2.imencode(".png", image)
+    return bytes(buffer) if ok else _square_png(33 * scale)
+
+
+def _square_png(side: int) -> bytes:
+    """A square greyscale PNG, written by hand so the corpus needs no imaging dependency."""
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + tag + payload + struct.pack(">I", zlib.crc32(tag + payload))
+
+    header = struct.pack(">IIBBBBB", side, side, 8, 0, 0, 0, 0)
+    pixels = b"".join(b"\x00" + b"\xff" * side for _ in range(side))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(pixels))
+        + chunk(b"IEND", b"")
+    )
+
+
 # ---------------------------------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------------------------------
@@ -1052,6 +1092,44 @@ class GoldenCorpusBuilder:
             labels=["internal_document"],
             notes="Внутренний документ со ссылкой на корпоративный портал — не повод для сигнала.",
         )
+
+        # Codes the platform can actually read, once the optional decoder is installed. Kept
+        # separate from QRP-001…004 (which stay attached to the gap) so the corpus measures both
+        # states: what is caught from the shape alone, and what is caught from the link.
+        for variant, (payload, subject, text_body) in enumerate(
+            [
+                (
+                    "https://corp-portal-login.test/verify?id=8821",
+                    "Подтвердите учётную запись",
+                    "Отсканируйте QR-код, чтобы подтвердить учётную запись.",
+                ),
+                (
+                    "https://pay-invoice-secure.test/pay/4417",
+                    "Счёт на оплату №4417",
+                    "Счёт во вложении. Для оплаты отсканируйте QR-код.",
+                ),
+            ],
+            start=1,
+        ):
+            self._add(
+                f"QRD-{variant:03d}",
+                DatasetCategory.QR_PHISHING,
+                _build(
+                    subject=subject,
+                    from_addr=f"service@qr-decoded-{variant}.test",
+                    from_name="Сервис уведомлений",
+                    to=f"buh@{CORP}",
+                    text=text_body,
+                    attachments=[(f"code{variant}.png", _qr_png(payload), "image/png")],
+                    auth="spf=fail; dkim=none; dmarc=fail",
+                    source_host=f"mx.qr-decoded-{variant}.test",
+                    source_ip=f"198.51.100.{200 + variant}",
+                ),
+                RiskLevel.SUSPICIOUS,
+                scenarios=["THR-PHISH-004"],
+                labels=["qr_phishing", "decodable"],
+                notes="QR содержит ссылку; читается при установленном декодере (ТЗ 1.0.3B §31).",
+            )
 
     def _internal_abuse(self) -> None:
         """Misuse from inside: a real internal account asking for something it should not."""

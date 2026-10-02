@@ -95,6 +95,7 @@ from ..services import (
     evaluation,
     feedback,
     investigation,
+    investigation_graph,
     reanalysis,
     releases,
     triage,
@@ -1169,15 +1170,17 @@ def related_messages(
     days: Annotated[int, Query(ge=1, le=365)] = 90,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[dict[str, Any]]:
-    """Everything connected to one message, with each connection named (ТЗ 1.0.3 §30).
+    """Everything connected to one message, across twelve relations (ТЗ 1.0.3B §19).
 
     The reason is part of the answer: a "related message" with no stated relation is an
-    assertion the analyst has to take on faith.
+    assertion the analyst has to take on faith. Relations are weighted, so a message tied by a
+    shared attachment outranks one tied only by a subject line — «Счёт на оплату» is half the
+    corporate mail.
     """
     message = session.get(MailMessage, message_id)
     if message is None or message.organization_id != actor.organization_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "сообщение не найдено")
-    found = investigation.find_related(
+    found = investigation_graph.find_related_v2(
         session,
         organization_id=actor.organization_id,
         message_id=message_id,
@@ -2173,3 +2176,101 @@ def republish_release(release_id: str, actor: ReleasePublisher, session: DbSessi
     if release is None or release.organization_id != actor.organization_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "релиз не найден")
     return _release_out(release)
+
+
+@router.get("/investigations/messages/{message_id}/graph", response_model=dict)
+def message_graph(message_id: str, actor: Viewer, session: DbSession) -> dict[str, Any]:
+    """The neighbourhood of a message as entities and named relations (ТЗ 1.0.3B §18).
+
+    Distinct from the verdict graph on an analysis: that one explains *why the platform decided*,
+    this one shows *what the message is connected to*. Bounded, and it says so when a bound was
+    reached — a truncated graph presented as complete would let an analyst conclude "nothing
+    else is connected" from a picture that merely stopped drawing.
+    """
+    graph = investigation_graph.build_graph(
+        session, organization_id=actor.organization_id, message_id=message_id
+    )
+    if graph is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "сообщение не найдено")
+    return graph.as_dict()
+
+
+@router.post("/campaigns/{campaign_id}/messages/{message_id}/attach", response_model=dict)
+def attach_campaign_message(
+    campaign_id: str,
+    message_id: str,
+    actor: Classifier,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Add a message to a campaign by hand (ТЗ 1.0.3B §21)."""
+    match = investigation_graph.attach_message(
+        session,
+        organization_id=actor.organization_id,
+        campaign_id=campaign_id,
+        message_id=message_id,
+        decided_by=actor.email,
+    )
+    if match is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "кампания или письмо не найдены")
+    record(
+        session,
+        action=AuditAction.CAMPAIGN_MESSAGE_ATTACHED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="campaign",
+        object_id=campaign_id,
+        detail={"message_id": message_id},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {"campaign_id": campaign_id, "message_id": message_id, "manual": True}
+
+
+@router.post("/campaigns/{campaign_id}/messages/{message_id}/reject", response_model=dict)
+def reject_campaign_message(
+    campaign_id: str,
+    message_id: str,
+    actor: Classifier,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Say a message does not belong in a campaign (ТЗ 1.0.3B §21).
+
+    The membership row is kept and marked rejected rather than deleted, so correlation can be
+    measured against human judgement instead of quietly forgetting where it was wrong — and so
+    the engine does not re-add the message on its next run.
+    """
+    match = investigation_graph.reject_match(
+        session, campaign_id=campaign_id, message_id=message_id, decided_by=actor.email
+    )
+    if match is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "связь не найдена")
+    record(
+        session,
+        action=AuditAction.CAMPAIGN_MESSAGE_REJECTED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="campaign",
+        object_id=campaign_id,
+        detail={"message_id": message_id},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {"campaign_id": campaign_id, "message_id": message_id, "rejected": True}
+
+
+@router.get("/campaigns/match-quality", response_model=dict)
+def campaign_match_quality(actor: QualityReader, session: DbSession) -> dict[str, Any]:
+    """How often analysts disagree with correlation (ТЗ 1.0.3B §20).
+
+    A rejection rate climbing above a few per cent means the engine is grouping things people do
+    not consider one wave. Null while correlation has produced nothing.
+    """
+    return investigation_graph.match_quality(session, actor.organization_id)

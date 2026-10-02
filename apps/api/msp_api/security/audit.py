@@ -91,6 +91,8 @@ class AuditAction:
     # believe happened: a wave folded into another is one nobody investigates separately.
     CAMPAIGN_MERGED = "campaign.merged"
     CAMPAIGN_SPLIT = "campaign.split"
+    CAMPAIGN_MESSAGE_ATTACHED = "campaign.message_attached"
+    CAMPAIGN_MESSAGE_REJECTED = "campaign.message_rejected"
     # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
     INTAKE_DEAD_LETTER = "intake.dead_letter"
     MESSAGE_UNSCANNABLE = "intake.unscannable"

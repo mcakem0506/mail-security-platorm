@@ -120,11 +120,7 @@ class TestFeedbackBelongsToAnAnalysis:
             classification=AnalystClassification.CONFIRMED_BEC,
             analyst_email="analyst@corp.example",
             comment="Подтверждена смена реквизитов",
-            signals=[
-                feedback.SignalJudgement(
-                    rule_id="BEC-001", disposition=SignalDisposition.CORRECT
-                )
-            ],
+            signals=[feedback.SignalJudgement(rule_id="BEC-001", disposition=SignalDisposition.CORRECT)],
         )
         db.commit()
         assert record.analysis_id == job.id
@@ -154,9 +150,7 @@ class TestFeedbackBelongsToAnAnalysis:
                 analyst_email="a@corp.example",
                 comment="Легитимное письмо подрядчика",
                 signals=[
-                    feedback.SignalJudgement(
-                        rule_id="BEC-001", disposition=SignalDisposition.INCORRECT
-                    )
+                    feedback.SignalJudgement(rule_id="BEC-001", disposition=SignalDisposition.INCORRECT)
                 ],
             )
 
@@ -187,19 +181,13 @@ class TestFeedbackBelongsToAnAnalysis:
             analysis_id=job.id,
             classification=AnalystClassification.CONFIRMED_BEC,
             analyst_email="a@corp.example",
-            signals=[
-                feedback.SignalJudgement(
-                    rule_id="BEC-001", disposition=SignalDisposition.TOO_SEVERE
-                )
-            ],
+            signals=[feedback.SignalJudgement(rule_id="BEC-001", disposition=SignalDisposition.TOO_SEVERE)],
         )
         db.commit()
         from msp_api.db.models import RuleStatistic
         from sqlalchemy import select
 
-        stat = db.execute(
-            select(RuleStatistic).where(RuleStatistic.rule_id == "BEC-001")
-        ).scalar_one()
+        stat = db.execute(select(RuleStatistic).where(RuleStatistic.rule_id == "BEC-001")).scalar_one()
         assert stat.confirmed_fp == 0
 
 
@@ -257,9 +245,7 @@ class TestRuleHealth:
         assert health is RuleHealth.LOW_COVERAGE
 
     def test_a_noisy_rule_is_named(self) -> None:
-        health, reasons = feedback.assess_health(
-            self._quality(true_positive=3, false_positive=7)
-        )
+        health, reasons = feedback.assess_health(self._quality(true_positive=3, false_positive=7))
         assert health is RuleHealth.NOISY
         assert "точность" in reasons[0]
 
@@ -313,9 +299,7 @@ class TestCandidateReview:
             benchmarked_at=utcnow(),
         )
         with pytest.raises(releases.ReleaseError, match="не может быть утверждено его автором"):
-            releases.review_candidate(
-                candidate, approve=True, reviewer="author@corp.example", comment="ок"
-            )
+            releases.review_candidate(candidate, approve=True, reviewer="author@corp.example", comment="ок")
 
     def test_someone_else_may_approve_it(self, db, org_id) -> None:  # type: ignore[no-untyped-def]
         candidate = self._candidate(
@@ -326,9 +310,7 @@ class TestCandidateReview:
             critical_reasons=["изменяет жёсткое правило ATT-030"],
             benchmarked_at=utcnow(),
         )
-        releases.review_candidate(
-            candidate, approve=True, reviewer="lead@corp.example", comment="проверено"
-        )
+        releases.review_candidate(candidate, approve=True, reviewer="lead@corp.example", comment="проверено")
         assert candidate.state is CandidateState.APPROVED
 
     def test_an_author_may_approve_a_non_critical_change(self, db, org_id) -> None:  # type: ignore[no-untyped-def]
@@ -483,7 +465,7 @@ class TestReanalysisIsSafe:
             self._job(db, org_id, days=400)
 
     def test_progress_is_null_before_the_size_is_known(self, db, org_id) -> None:  # type: ignore[no-untyped-def]
-        """"Not started" and "nothing to do" must not look the same."""
+        """ "Not started" and "nothing to do" must not look the same."""
         job = self._job(db, org_id)
         db.commit()
         assert job.total_messages == 0
@@ -552,9 +534,8 @@ class TestEvaluationService:
         import sys
 
         sys.path.insert(0, "scripts")
-        from msp_detection_eval import evaluation_context as package_context
-
         from msp_api.services.evaluation import evaluation_context as api_context
+        from msp_detection_eval import evaluation_context as package_context
 
         assert api_context is package_context
 

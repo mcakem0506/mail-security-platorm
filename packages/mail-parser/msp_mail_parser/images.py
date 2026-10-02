@@ -22,8 +22,12 @@ heuristic rather than a decode.
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import struct
+import subprocess  # nosec B404 - runs the decoder in its own process, fixed argv
+import sys
 from dataclasses import dataclass, field
 
 from msp_contracts import ExtractedUrl
@@ -190,31 +194,87 @@ class QrReport:
         }
 
 
-def _load_decoder():  # type: ignore[no-untyped-def]
-    """Return a callable decoding image bytes to payload strings, or ``None``.
+#: How long the decoder may run for a whole batch, in seconds. The bound is enforced from
+#: outside the process doing the work, which is the only place a bound on that work can be
+#: trusted.
+DECODE_TIMEOUT_SECONDS = 10.0
+#: Images handed to the decoder in one batch.
+MAX_DECODED_IMAGES = 20
+#: Largest image the decoder is asked to look at.
+MAX_DECODE_BYTES = 8 * 1024 * 1024
 
-    The decoder is an optional extra (``pip install mail-security-platform[qr]``). It is
-    imported lazily and never required: a deployment that declines the dependency keeps a
-    working platform and an honest "could not read this code" instead of a silent pass.
-    """
-    try:  # pragma: no cover - exercised only where the optional extra is installed
-        import cv2  # type: ignore[import-not-found]
-        import numpy  # type: ignore[import-not-found]
+
+def decoder_available() -> bool:
+    """Whether the optional decoding extra is installed."""
+    try:  # pragma: no cover - depends on the deployment
+        import cv2  # type: ignore[import-not-found]  # noqa: F401
+        import numpy  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
-        return None
+        return False
+    return True
 
-    def decode(data: bytes) -> list[str]:  # pragma: no cover - requires the optional extra
-        array = numpy.frombuffer(data, dtype=numpy.uint8)
-        image = cv2.imdecode(array, cv2.IMREAD_GRAYSCALE)
-        if image is None:
-            raise ValueError("undecodable image")
-        detector = cv2.QRCodeDetector()
-        ok, payloads, _, _ = detector.detectAndDecodeMulti(image)
-        if not ok:
-            return []
-        return [p for p in payloads if p]
 
-    return decode
+def decode_images(
+    images: list[tuple[str, bytes]], *, timeout: float = DECODE_TIMEOUT_SECONDS
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Decode QR codes, in a separate process (ТЗ 1.0.3B §31).
+
+    Returns ``(payloads_by_image, errors)``. The decoder runs as its own process on purpose:
+    decoding the pixels of an attacker's image is the one step that hands attacker-controlled
+    bytes to a large C++ library, and in its own process a crash is an error message rather
+    than a dead worker. The timeout is enforced by the parent, which is the only place a bound
+    on that work means anything.
+
+    The subprocess performs no network and no file access: everything it needs arrives on stdin.
+    """
+    if not images or not decoder_available():
+        return {}, []
+
+    job = {
+        "max_images": MAX_DECODED_IMAGES,
+        "images": [
+            {"name": name, "data": base64.b64encode(data).decode("ascii")}
+            for name, data in images[:MAX_DECODED_IMAGES]
+            if data and len(data) <= MAX_DECODE_BYTES
+        ],
+    }
+    if not job["images"]:
+        return {}, []
+
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [sys.executable, "-m", "msp_mail_parser.qr_worker"],
+            input=json.dumps(job),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # A decode that will not finish is a decode that did not happen. Saying so is the whole
+        # point: the alternative is a message that looks checked because nothing complained.
+        return {}, ["DECODE_TIMEOUT"]
+    except OSError as exc:  # pragma: no cover - interpreter or packaging problem
+        return {}, [f"DECODER_UNAVAILABLE:{type(exc).__name__}"]
+
+    if completed.returncode != 0:
+        return {}, [f"DECODER_FAILED:{completed.returncode}"]
+    try:
+        payload = json.loads(completed.stdout or "{}")
+    except ValueError:
+        return {}, ["DECODER_BAD_OUTPUT"]
+
+    decoded: dict[str, list[str]] = {}
+    errors: list[str] = []
+    for item in payload.get("results", []) or []:
+        name = str(item.get("name", ""))
+        if item.get("error"):
+            errors.append(f"{name[:60]}:{item['error']}")
+            continue
+        payloads = [str(value) for value in (item.get("payloads") or [])]
+        if payloads:
+            decoded[name] = payloads
+    return decoded, errors
 
 
 def inspect_images(
@@ -233,9 +293,9 @@ def inspect_images(
     report = QrReport()
     report.scan_prompt = bool(body_text) and _SCAN_PROMPT_RE.search(body_text) is not None
 
-    decoder = _load_decoder() if decode else None
-    report.decoder_available = decoder is not None
+    report.decoder_available = decode and decoder_available()
 
+    candidates: list[tuple[str, bytes]] = []
     for name, data in images[:max_images]:
         if not data or len(data) > max_bytes:
             continue
@@ -243,19 +303,21 @@ def inspect_images(
         if not info.qr_shaped(prompted=report.scan_prompt):
             continue
         report.candidate_images.append(name[:255])
-        if decoder is None:
-            continue
-        try:  # pragma: no cover - requires the optional extra
-            payloads = decoder(data)
-        except Exception as exc:  # noqa: BLE001 - a broken image is a fact, not a crash
-            report.decode_errors.append(f"{name[:80]}:{type(exc).__name__}")
-            continue
-        for payload in payloads:  # pragma: no cover - requires the optional extra
+        candidates.append((name[:255], data))
+
+    if not candidates or not report.decoder_available:
+        return report
+
+    decoded, errors = decode_images(candidates)
+    report.decode_errors.extend(errors)
+    for name, payloads in decoded.items():
+        for payload in payloads:
             report.decoded_payloads.append(payload[:2000])
             lowered = payload.strip().lower()
             if lowered.startswith(("http://", "https://", "www.")):
                 url = normalize_url(payload.strip(), source="qr")
                 if not url.parse_error and url.host:
                     report.urls.append(url)
+        _ = name
 
     return report

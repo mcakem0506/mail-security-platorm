@@ -34,6 +34,14 @@ dependencies = [
 exchange = [
   "exchangelib>=5.4",
 ]
+# QR decoding is optional (ТЗ 1.0.3B §31). Without it the platform still reports that a message
+# carries something shaped like a QR code and marks the scan incomplete; it simply cannot say
+# where the code points. Decoding runs in a separate process, so the dependency never parses
+# attacker-controlled pixels inside a worker.
+qr = [
+  "opencv-python-headless>=4.10",
+  "numpy>=1.26",
+]
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
