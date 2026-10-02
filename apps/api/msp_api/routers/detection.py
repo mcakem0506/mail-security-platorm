@@ -24,6 +24,7 @@ from msp_contracts import (
     AnalystClassification,
     CanaryState,
     GapStatus,
+    ReanalysisState,
     RiskLevel,
     RuleStatus,
     ScanCompleteness,
@@ -34,12 +35,16 @@ from sqlalchemy import func, select
 from ..db.models import (
     AnalysisJob,
     AnalysisResult,
+    AnalysisRevision,
     DetectionFeedback,
     DetectionGapRecord,
+    DetectionRelease,
     DetectionSignal,
     Incident,
     IncidentClassification,
     MailMessage,
+    ReanalysisJob,
+    RuleCandidate,
     RuleChange,
     RuleStatistic,
     ThreatScenario,
@@ -47,12 +52,16 @@ from ..db.models import (
 from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..observability import false_positive_total
 from ..schemas import (
+    AnalysisFeedbackRequest,
     AssignRequest,
     CampaignMergeRequest,
     CampaignSplitRequest,
     CanaryDecisionRequest,
     CanaryOut,
     CanaryStartRequest,
+    CandidateCreateRequest,
+    CandidateOut,
+    CandidateReviewRequest,
     ClassificationOut,
     ClassificationRequest,
     DetectionFeedbackOut,
@@ -60,12 +69,18 @@ from ..schemas import (
     DetectionQualityOut,
     GapUpdateRequest,
     MissedDetectionRequest,
+    MissedDetectionRequestV2,
     QueueItemOut,
+    ReanalysisCreateRequest,
+    ReanalysisOut,
     ReevaluationOut,
     ReevaluationRequest,
+    ReleaseOut,
+    ReleasePublishRequest,
     ReplayOut,
     ReplayRequest,
     RuleOut,
+    RuleQualityOut,
     RuleStatusChangeRequest,
     SimulationOut,
     SimulationRequest,
@@ -74,7 +89,16 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import canary, detection_ops, investigation, triage
+from ..services import (
+    canary,
+    detection_ops,
+    evaluation,
+    feedback,
+    investigation,
+    reanalysis,
+    releases,
+    triage,
+)
 from ..services.analysis import get_ruleset
 
 logger = logging.getLogger(__name__)
@@ -88,6 +112,9 @@ Simulator = Annotated[Actor, Depends(require_permission(Permission.SIMULATE_DETE
 RuleManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_DETECTION_RULES))]
 GapManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_DETECTION_GAPS))]
 CanaryManager = Annotated[Actor, Depends(require_permission(Permission.MANAGE_CANARY))]
+RuleProposer = Annotated[Actor, Depends(require_permission(Permission.EDIT_RULES))]
+RuleReviewer = Annotated[Actor, Depends(require_permission(Permission.REVIEW_RULES))]
+ReleasePublisher = Annotated[Actor, Depends(require_permission(Permission.PUBLISH_RULES))]
 Replayer = Annotated[Actor, Depends(require_permission(Permission.EXECUTE_REPLAY))]
 
 
@@ -1409,3 +1436,740 @@ def decide_canary(
     result = canary.compare(session, existing).as_dict()
     session.commit()
     return result
+
+
+# ---------------------------------------------------------------------------------------------
+# Feedback on an analysis, rule quality (ТЗ 1.0.3B §4–§8, §38)
+# ---------------------------------------------------------------------------------------------
+@router.post("/analysis/{analysis_id}/feedback", response_model=dict)
+def analysis_feedback(
+    analysis_id: str,
+    payload: AnalysisFeedbackRequest,
+    actor: Classifier,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Record what an analyst concluded about one analysis (ТЗ 1.0.3B §4, §5).
+
+    Feedback is attached to the analysis rather than the message: a verdict belongs to one
+    revision, and after a replay the same message has several.
+    """
+    try:
+        record_row = feedback.record_feedback(
+            session,
+            organization_id=actor.organization_id,
+            analysis_id=analysis_id,
+            classification=payload.classification,
+            analyst_email=actor.email,
+            analyst_id=actor.user_id,
+            confidence=payload.confidence,
+            comment=payload.comment,
+            incident_id=payload.incident_id,
+            fp_reason=payload.fp_reason,
+            signals=[
+                feedback.SignalJudgement(
+                    rule_id=item.rule_id,
+                    disposition=item.disposition,
+                    signal_id=item.signal_id,
+                    rule_version=item.rule_version,
+                    comment=item.comment,
+                )
+                for item in payload.signals
+            ],
+        )
+    except feedback.FeedbackError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.FEEDBACK_RECORDED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="analysis",
+        object_id=analysis_id,
+        detail={
+            "classification": payload.classification.value,
+            "fp_reason": payload.fp_reason.value if payload.fp_reason else None,
+            "signals": [
+                {"rule_id": item.rule_id, "disposition": item.disposition.value}
+                for item in payload.signals[:20]
+            ],
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    if payload.classification is AnalystClassification.FALSE_POSITIVE:
+        false_positive_total.inc()
+    session.commit()
+    return {
+        "feedback_id": record_row.id,
+        "analysis_id": analysis_id,
+        "classification": payload.classification.value,
+        "signals": len(payload.signals),
+        "note": "Обратная связь зафиксирована. Правила автоматически не изменяются.",
+    }
+
+
+@router.post("/detection/missed-detections", response_model=dict)
+def missed_detection_v2(
+    payload: MissedDetectionRequestV2,
+    actor: MissReporter,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Register a miss with the fields that make it a task (ТЗ 1.0.3B §6)."""
+    if payload.gap_id:
+        known = session.execute(
+            select(DetectionGapRecord).where(
+                DetectionGapRecord.organization_id == actor.organization_id,
+                DetectionGapRecord.gap_id == payload.gap_id,
+            )
+        ).scalar_one_or_none()
+        if known is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "указан неизвестный идентификатор пробела")
+    try:
+        created = feedback.record_missed_detection(
+            session,
+            organization_id=actor.organization_id,
+            source=payload.source,
+            root_cause=payload.root_cause,
+            analyst_email=actor.email,
+            expected_category=payload.expected_category,
+            minimum_classification=payload.minimum_classification,
+            severity=payload.severity.value,
+            owner=payload.owner,
+            target_release=payload.target_release,
+            analysis_id=payload.analysis_id,
+            message_id=payload.message_id,
+            incident_id=payload.incident_id,
+            expected_detection=payload.expected_detection,
+            missing_fact=payload.missing_fact,
+            comment=payload.comment,
+            gap_id=payload.gap_id,
+        )
+    except feedback.FeedbackError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.FALSE_NEGATIVE_MARKED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="analysis",
+        object_id=payload.analysis_id or payload.message_id or "",
+        detail={
+            "source": payload.source.value,
+            "root_cause": payload.root_cause.value,
+            "owner": payload.owner,
+            "target_release": payload.target_release,
+            "gap_id": payload.gap_id,
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {"feedback_id": created.id, "root_cause": payload.root_cause.value}
+
+
+@router.get("/detection/rules/quality", response_model=list[RuleQualityOut])
+def rule_quality(
+    actor: QualityReader,
+    session: DbSession,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> list[dict[str, Any]]:
+    """Measured quality per rule (ТЗ 1.0.3B §8). Precision is null until enough is judged."""
+    measured = feedback.measure_rules(session, actor.organization_id, days=days)
+    out: list[dict[str, Any]] = []
+    for rule_id, quality in sorted(measured.items()):
+        health, reasons = feedback.assess_health(quality)
+        quality.health = health
+        quality.health_reasons = reasons
+        _ = rule_id
+        out.append(quality.as_dict())
+    return out
+
+
+@router.post("/detection/rules/quality/snapshot", response_model=dict)
+def snapshot_rule_quality(
+    actor: RuleManager,
+    session: DbSession,
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> dict[str, Any]:
+    """Store a measurement for the period, so "precision fell" compares two periods."""
+    created = feedback.snapshot_rules(
+        session,
+        actor.organization_id,
+        days=days,
+        ruleset_version=get_ruleset().version_fingerprint[:64],
+    )
+    record(
+        session,
+        action=AuditAction.RULE_QUALITY_SNAPSHOT,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="ruleset",
+        object_id=get_ruleset().version_fingerprint[:64],
+        detail={"rules": len(created), "days": days},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return {"snapshots": len(created), "period_days": days}
+
+
+# ---------------------------------------------------------------------------------------------
+# Candidate rule packs and releases (ТЗ 1.0.3B §10–§12, §24)
+# ---------------------------------------------------------------------------------------------
+def _candidate_out(candidate: RuleCandidate) -> dict[str, Any]:
+    return {
+        "candidate_id": candidate.id,
+        "name": candidate.name,
+        "description": candidate.description,
+        "source": candidate.source,
+        "state": candidate.state.value,
+        "added_rules": list(candidate.added_rules or []),
+        "changed_rules": list(candidate.changed_rules or []),
+        "removed_rules": list(candidate.removed_rules or []),
+        "critical_change": candidate.critical_change,
+        "critical_reasons": list(candidate.critical_reasons or []),
+        "author": candidate.author,
+        "reviewer": candidate.reviewer,
+        "review_comment": candidate.review_comment,
+        "benchmark": candidate.benchmark or {},
+        "benchmarked_at": candidate.benchmarked_at,
+        "published_at": candidate.published_at,
+        "release_id": candidate.release_id,
+        "created_at": candidate.created_at,
+    }
+
+
+@router.get("/detection/candidates", response_model=list[CandidateOut])
+def list_candidates(actor: QualityReader, session: DbSession) -> list[dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(RuleCandidate)
+            .where(RuleCandidate.organization_id == actor.organization_id)
+            .order_by(RuleCandidate.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return [_candidate_out(row) for row in rows]
+
+
+@router.post("/detection/candidates", response_model=CandidateOut)
+def create_candidate(
+    payload: CandidateCreateRequest,
+    actor: RuleProposer,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Register a candidate pack and validate it immediately (ТЗ 1.0.3B §10).
+
+    Validation at creation is deliberate: a pack that does not load is not a proposal, and
+    finding that out at review time wastes the reviewer rather than the author.
+    """
+    try:
+        candidate = releases.create_candidate(
+            session,
+            organization_id=actor.organization_id,
+            name=payload.name,
+            source=payload.source,
+            description=payload.description,
+            source_kind=payload.source_kind,
+            author=actor.email,
+        )
+    except releases.ReleaseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.CANDIDATE_CREATED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule_candidate",
+        object_id=candidate.id,
+        detail={
+            "name": payload.name,
+            "added": len(candidate.added_rules or []),
+            "changed": len(candidate.changed_rules or []),
+            "removed": len(candidate.removed_rules or []),
+            "critical": candidate.critical_change,
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = _candidate_out(candidate)
+    session.commit()
+    return result
+
+
+@router.post("/detection/candidates/{candidate_id}/benchmark", response_model=dict)
+def benchmark_candidate(
+    candidate_id: str,
+    actor: RuleProposer,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Run the golden corpus against the candidate and store the result (ТЗ 1.0.3B §10, §11).
+
+    Without this a reviewer would be asked to judge a rule change by reading it, which is
+    exactly what the corpus exists to avoid.
+    """
+    candidate = _candidate_or_404(session, actor, candidate_id)
+    try:
+        result = evaluation.benchmark_candidate(candidate)
+    except releases.ReleaseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    candidate.benchmark = result
+    candidate.benchmarked_at = utcnow()
+    record(
+        session,
+        action=AuditAction.CANDIDATE_BENCHMARKED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule_candidate",
+        object_id=candidate.id,
+        detail={
+            "precision": result.get("precision"),
+            "recall": result.get("recall"),
+            "gate_passed": result.get("gate_passed"),
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return result
+
+
+@router.post("/detection/candidates/{candidate_id}/submit", response_model=CandidateOut)
+def submit_candidate(
+    candidate_id: str, actor: RuleProposer, session: DbSession, request: Request
+) -> dict[str, Any]:
+    candidate = _candidate_or_404(session, actor, candidate_id)
+    try:
+        releases.submit_for_review(candidate, actor=actor.email)
+    except releases.ReleaseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    record(
+        session,
+        action=AuditAction.CANDIDATE_SUBMITTED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule_candidate",
+        object_id=candidate.id,
+        detail={"critical": candidate.critical_change},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = _candidate_out(candidate)
+    session.commit()
+    return result
+
+
+@router.post("/detection/candidates/{candidate_id}/review", response_model=CandidateOut)
+def review_candidate(
+    candidate_id: str,
+    payload: CandidateReviewRequest,
+    actor: RuleReviewer,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Approve a candidate or send it back (ТЗ 1.0.3B §12).
+
+    A change touching a hard signal, malware, credential theft, impersonation or payment fraud
+    cannot be approved by its author: those are the rules whose mistakes are expensive in both
+    directions, and "the author read it twice" is not a review.
+    """
+    candidate = _candidate_or_404(session, actor, candidate_id)
+    try:
+        releases.review_candidate(
+            candidate, approve=payload.approve, reviewer=actor.email, comment=payload.comment
+        )
+    except releases.ReleaseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.CANDIDATE_REVIEWED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="rule_candidate",
+        object_id=candidate.id,
+        detail={"approved": payload.approve, "comment": payload.comment[:500]},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = _candidate_out(candidate)
+    session.commit()
+    return result
+
+
+def _candidate_or_404(session: DbSession, actor: Actor, candidate_id: str) -> RuleCandidate:
+    candidate = session.get(RuleCandidate, candidate_id)
+    if candidate is None or candidate.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "кандидат не найден")
+    return candidate
+
+
+@router.get("/detection/releases", response_model=list[ReleaseOut])
+def list_releases(actor: QualityReader, session: DbSession) -> list[dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(DetectionRelease)
+            .where(DetectionRelease.organization_id == actor.organization_id)
+            .order_by(DetectionRelease.published_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    return [_release_out(row) for row in rows]
+
+
+def _release_out(release: DetectionRelease) -> dict[str, Any]:
+    return {
+        "release_id": release.id,
+        "version": release.version,
+        "ruleset_fingerprint": release.ruleset_fingerprint[:200],
+        "parser_version": release.parser_version,
+        "risk_engine_version": release.risk_engine_version,
+        "dataset_version": release.dataset_version,
+        "dataset_checksum": release.dataset_checksum,
+        "commit_sha": release.commit_sha,
+        "candidate_id": release.candidate_id,
+        "approved_by": release.approved_by,
+        "published_by": release.published_by,
+        "metrics": release.metrics or {},
+        "metric_deltas": release.metric_deltas or {},
+        "known_limitations": list(release.known_limitations or []),
+        "new_rules": list(release.new_rules or []),
+        "changed_rules": list(release.changed_rules or []),
+        "removed_rules": list(release.removed_rules or []),
+        "changelog": release.changelog,
+        "published_at": release.published_at,
+    }
+
+
+@router.post("/detection/releases", response_model=ReleaseOut)
+def publish_release(
+    payload: ReleasePublishRequest,
+    actor: ReleasePublisher,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Publish a release manifest (ТЗ 1.0.3B §24).
+
+    The manifest records every version a verdict depends on, not only the rules: the same rules
+    on a different parser are not the same detection.
+    """
+    candidate = None
+    if payload.candidate_id:
+        candidate = _candidate_or_404(session, actor, payload.candidate_id)
+
+    metrics = evaluation.current_metrics()
+    try:
+        release = releases.publish_release(
+            session,
+            organization_id=actor.organization_id,
+            candidate=candidate,
+            metrics=metrics["metrics"],
+            dataset_version=metrics["dataset_version"],
+            dataset_checksum=metrics["dataset_checksum"],
+            parser_version=detection_ops.PARSER_VERSION,
+            risk_engine_version=detection_ops.ENGINE_VERSION_INFO["risk_engine"],
+            published_by=actor.email,
+            gate_result=metrics.get("gate"),
+        )
+    except releases.ReleaseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.RELEASE_PUBLISHED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="detection_release",
+        object_id=release.id,
+        detail={
+            "version": release.version,
+            "candidate_id": payload.candidate_id,
+            "known_gaps": len(release.known_limitations or []),
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = _release_out(release)
+    session.commit()
+    return result
+
+
+# ---------------------------------------------------------------------------------------------
+# Historical re-evaluation (ТЗ 1.0.3B §23)
+# ---------------------------------------------------------------------------------------------
+@router.post("/reanalysis/jobs", response_model=ReanalysisOut)
+def create_reanalysis_job(
+    payload: ReanalysisCreateRequest,
+    actor: Replayer,
+    session: DbSession,
+    request: Request,
+) -> dict[str, Any]:
+    """Queue a bulk re-evaluation. Dry run unless explicitly told otherwise."""
+    try:
+        job = reanalysis.create_job(
+            session,
+            organization_id=actor.organization_id,
+            requested_by=actor.email,
+            days=payload.days,
+            window_from=payload.window_from,
+            window_to=payload.window_to,
+            dry_run=payload.dry_run,
+            filters=dict(payload.filters),
+            max_messages=payload.max_messages,
+            ruleset_source=payload.ruleset_source,
+        )
+    except reanalysis.ReanalysisError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.REEVALUATION_STARTED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="reanalysis_job",
+        object_id=job.id,
+        detail={
+            "dry_run": payload.dry_run,
+            "messages": job.total_messages,
+            "filters": payload.filters,
+        },
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = reanalysis.as_dict(job)
+    session.commit()
+    return result
+
+
+@router.get("/reanalysis/jobs", response_model=list[ReanalysisOut])
+def list_reanalysis_jobs(actor: QualityReader, session: DbSession) -> list[dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(ReanalysisJob)
+            .where(ReanalysisJob.organization_id == actor.organization_id)
+            .order_by(ReanalysisJob.created_at.desc())
+            .limit(50)
+        )
+        .scalars()
+        .all()
+    )
+    return [reanalysis.as_dict(row) for row in rows]
+
+
+@router.get("/reanalysis/jobs/{job_id}", response_model=ReanalysisOut)
+def get_reanalysis_job(job_id: str, actor: QualityReader, session: DbSession) -> dict[str, Any]:
+    return reanalysis.as_dict(_reanalysis_or_404(session, actor, job_id))
+
+
+@router.post("/reanalysis/jobs/{job_id}/run", response_model=ReanalysisOut)
+def run_reanalysis_job(
+    job_id: str,
+    actor: Replayer,
+    session: DbSession,
+    settings: AppSettings,
+    slices: Annotated[int, Query(ge=1, le=200)] = 20,
+) -> dict[str, Any]:
+    """Drive a job for a bounded number of slices.
+
+    Bounded on purpose: the request returns while the job is still mid-flight, so a pause or a
+    cancel takes effect between slices rather than after everything is done.
+    """
+    job = _reanalysis_or_404(session, actor, job_id)
+    try:
+        reanalysis.start(job)
+        for _ in range(slices):
+            if job.state is not ReanalysisState.RUNNING:
+                break
+            reanalysis.run_slice(session, settings, job)
+    except reanalysis.ReanalysisError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    result = reanalysis.as_dict(job)
+    session.commit()
+    return result
+
+
+@router.post("/reanalysis/jobs/{job_id}/pause", response_model=ReanalysisOut)
+def pause_reanalysis_job(job_id: str, actor: Replayer, session: DbSession) -> dict[str, Any]:
+    job = _reanalysis_or_404(session, actor, job_id)
+    try:
+        reanalysis.pause(job, actor=actor.email)
+    except reanalysis.ReanalysisError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    result = reanalysis.as_dict(job)
+    session.commit()
+    return result
+
+
+@router.post("/reanalysis/jobs/{job_id}/cancel", response_model=ReanalysisOut)
+def cancel_reanalysis_job(
+    job_id: str, actor: Replayer, session: DbSession, request: Request
+) -> dict[str, Any]:
+    job = _reanalysis_or_404(session, actor, job_id)
+    try:
+        reanalysis.cancel(job, actor=actor.email)
+    except reanalysis.ReanalysisError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    record(
+        session,
+        action=AuditAction.REEVALUATION_CANCELLED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="reanalysis_job",
+        object_id=job.id,
+        detail={"processed": job.processed},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    result = reanalysis.as_dict(job)
+    session.commit()
+    return result
+
+
+def _reanalysis_or_404(session: DbSession, actor: Actor, job_id: str) -> ReanalysisJob:
+    job = session.get(ReanalysisJob, job_id)
+    if job is None or job.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "задание переоценки не найдено")
+    return job
+
+
+@router.get("/analysis/{analysis_id}/revisions", response_model=list[dict])
+def analysis_revisions(analysis_id: str, actor: Viewer, session: DbSession) -> list[dict[str, Any]]:
+    """Every revision of one analysis (ТЗ 1.0.3B §22, §38).
+
+    The original is never overwritten, so this is the history of what the platform said about a
+    message and when — the thing an investigation needs months later.
+    """
+    job = session.get(AnalysisJob, analysis_id)
+    if job is None or job.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "задание анализа не найдено")
+    rows = (
+        session.execute(
+            select(AnalysisRevision)
+            .where(AnalysisRevision.analysis_job_id == analysis_id)
+            .order_by(AnalysisRevision.revision)
+        )
+        .scalars()
+        .all()
+    )
+    current = session.execute(
+        select(AnalysisResult).where(AnalysisResult.job_id == analysis_id)
+    ).scalar_one_or_none()
+    out: list[dict[str, Any]] = []
+    if current is not None:
+        out.append(
+            {
+                "revision": 0,
+                "kind": "original",
+                "classification": current.classification.value,
+                "score": current.score,
+                "engine_version": current.engine_version,
+                "ruleset_fingerprint": current.ruleset_fingerprint[:120],
+                "created_at": current.created_at.isoformat(),
+            }
+        )
+    for row in rows:
+        out.append(
+            {
+                "revision": row.revision,
+                "kind": "replay" if row.dry_run else "replay_applied",
+                "classification": row.new_classification,
+                "previous_classification": row.original_classification,
+                "score": row.new_score,
+                "previous_score": row.original_score,
+                "added_rules": list(row.added_rules or []),
+                "removed_rules": list(row.removed_rules or []),
+                "versions": row.versions,
+                "requested_by": row.requested_by,
+                "created_at": row.created_at.isoformat(),
+            }
+        )
+    return out
+
+
+@router.get("/detection/rules/{rule_id}", response_model=dict)
+def get_rule(rule_id: str, actor: QualityReader, session: DbSession) -> dict[str, Any]:
+    """One rule with its definition and its measured quality (ТЗ 1.0.3B §38).
+
+    Registered after the literal ``/detection/rules/...`` paths on purpose: FastAPI matches in
+    registration order, and a parameter route declared earlier would swallow them.
+    """
+    rule = get_ruleset().get(rule_id)
+    if rule is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "правило не найдено")
+    stat = session.execute(
+        select(RuleStatistic).where(
+            RuleStatistic.organization_id == actor.organization_id,
+            RuleStatistic.rule_id == rule_id,
+        )
+    ).scalar_one_or_none()
+    judged = (stat.confirmed_tp + stat.confirmed_fp) if stat else 0
+    canary_rollout = canary.active_for(session, organization_id=actor.organization_id, rule_id=rule_id)
+    return {
+        "rule_id": rule.id,
+        "version": rule.version,
+        "title": rule.name,
+        "category": rule.category,
+        "severity": rule.severity.value,
+        "status": rule.status.value,
+        "owner": rule.owner,
+        "weight": rule.effective_weight,
+        "confidence": rule.confidence,
+        "hard": rule.hard,
+        "scores": rule.scores,
+        "scenarios": list(rule.scenarios),
+        "condition": rule.conditions.render(),
+        "evidence_keys": list(rule.evidence_keys),
+        "explanation": rule.explanation,
+        "recommendation": rule.recommendation,
+        "trigger_count": stat.trigger_count if stat else 0,
+        "confirmed_tp": stat.confirmed_tp if stat else 0,
+        "confirmed_fp": stat.confirmed_fp if stat else 0,
+        # Null rather than 1.0 when nothing has been judged: an untested rule is not a perfect
+        # rule, and a number here would be read as measured.
+        "precision": (stat.confirmed_tp / judged) if stat and judged else None,
+        "canary": canary.compare(session, canary_rollout).as_dict() if canary_rollout else None,
+    }
+
+
+@router.post("/detection/releases/{release_id}/publish", response_model=ReleaseOut)
+def republish_release(release_id: str, actor: ReleasePublisher, session: DbSession) -> dict[str, Any]:
+    """Return an existing release manifest.
+
+    Publishing happens once, when the candidate is approved: a release is a record of what
+    shipped, and re-publishing one would make the version number mean two different things.
+    """
+    release = session.get(DetectionRelease, release_id)
+    if release is None or release.organization_id != actor.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "релиз не найден")
+    return _release_out(release)

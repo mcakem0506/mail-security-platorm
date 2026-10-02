@@ -64,6 +64,16 @@ class AuditAction:
     FALSE_NEGATIVE_MARKED = "detection.false_negative_marked"
     RULE_STATUS_CHANGED = "rule.status_changed"
     RULE_SIMULATED = "rule.simulated"
+    FEEDBACK_RECORDED = "detection.feedback"
+    RULE_QUALITY_SNAPSHOT = "rule.quality_snapshot"
+    # A candidate pack moves through review before it can ship; each step is audited so the
+    # question "who approved this rule" has an answer that does not depend on memory.
+    CANDIDATE_CREATED = "candidate.created"
+    CANDIDATE_BENCHMARKED = "candidate.benchmarked"
+    CANDIDATE_SUBMITTED = "candidate.submitted"
+    CANDIDATE_REVIEWED = "candidate.reviewed"
+    RELEASE_PUBLISHED = "release.published"
+    REEVALUATION_CANCELLED = "detection.reevaluation_cancelled"
     # A rollout decides which people a rule protects, so starting and ending one are
     # audited as separate events from the rule's own status changes.
     CANARY_STARTED = "canary.started"

@@ -10,18 +10,23 @@ from msp_contracts import (
     AnalystClassification,
     CanaryScope,
     CanaryState,
+    CandidateState,
     ExceptionType,
     FalseNegativeSource,
+    FalsePositiveReason,
     GapStatus,
     IncidentStatus,
     IOCType,
+    ReanalysisState,
     RemediationState,
     RemediationType,
     RiskLevel,
     Role,
     RootCause,
+    RuleHealth,
     RuleStatus,
     Severity,
+    SignalDisposition,
 )
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -917,3 +922,177 @@ class CanaryOut(ApiModel):
     inside_precision: float | None
     outside_precision: float | None
     ready_to_promote: bool
+
+
+# ---------------------------------------------------------------------------------------------
+# Feedback, rule quality, candidates, releases, re-evaluation (ТЗ 1.0.3B §38)
+# ---------------------------------------------------------------------------------------------
+class SignalJudgementIn(ApiModel):
+    """One analyst judgement about one signal (ТЗ 1.0.3B §4)."""
+
+    rule_id: str = Field(min_length=1, max_length=32)
+    disposition: SignalDisposition
+    signal_id: str | None = Field(default=None, max_length=64)
+    rule_version: int = Field(default=1, ge=1)
+    comment: str = Field(default="", max_length=2000)
+
+
+class AnalysisFeedbackRequest(ApiModel):
+    """Feedback on one analysis. Attached to the analysis, not the message: a verdict belongs
+    to a revision, and a message may have several."""
+
+    classification: AnalystClassification
+    confidence: Literal["high", "medium", "low"] = "high"
+    comment: str = Field(default="", max_length=4000)
+    incident_id: str | None = Field(default=None, max_length=64)
+    signals: list[SignalJudgementIn] = Field(default_factory=list, max_length=100)
+    #: Required for FALSE_POSITIVE. The reason decides who fixes it, which a free-text comment
+    #: cannot express in a way anyone can sort or assign.
+    fp_reason: FalsePositiveReason | None = None
+
+
+class MissedDetectionRequestV2(ApiModel):
+    """Report a miss with everything needed to act on it (ТЗ 1.0.3B §6)."""
+
+    source: FalseNegativeSource
+    root_cause: RootCause
+    expected_category: str = Field(min_length=2, max_length=64)
+    minimum_classification: Literal["SUSPICIOUS", "HIGH_RISK", "MALICIOUS"]
+    severity: Severity
+    owner: str = Field(min_length=3, max_length=320)
+    target_release: str = Field(min_length=2, max_length=32)
+    analysis_id: str | None = Field(default=None, max_length=64)
+    message_id: str | None = Field(default=None, max_length=64)
+    incident_id: str | None = Field(default=None, max_length=64)
+    expected_detection: str = Field(default="", max_length=255)
+    missing_fact: str = Field(default="", max_length=255)
+    comment: str = Field(default="", max_length=4000)
+    gap_id: str | None = Field(default=None, max_length=32)
+
+
+class RuleQualityOut(ApiModel):
+    rule_id: str
+    rule_version: int
+    trigger_count: int
+    analyst_reviewed: int
+    true_positive: int
+    false_positive: int
+    unknown: int
+    suppressed: int
+    #: Null until enough has been judged. An unreviewed rule has unknown precision, not perfect
+    #: precision, and a number here would be read as measured.
+    precision: float | None
+    affected_messages: int
+    affected_incidents: int
+    health: RuleHealth
+    health_reasons: list[str]
+
+
+class CandidateCreateRequest(ApiModel):
+    name: str = Field(min_length=3, max_length=128)
+    source: str = Field(min_length=1, max_length=512)
+    description: str = Field(default="", max_length=4000)
+    source_kind: Literal["path"] = "path"
+
+
+class CandidateReviewRequest(ApiModel):
+    approve: bool
+    comment: str = Field(default="", max_length=4000)
+
+
+class CandidateOut(ApiModel):
+    candidate_id: str
+    name: str
+    description: str
+    source: str
+    state: CandidateState
+    added_rules: list[str]
+    changed_rules: list[str]
+    removed_rules: list[str]
+    #: True when the change touches a hard signal, malware, credential theft, impersonation or
+    #: payment fraud. Such a change may not be approved by its own author.
+    critical_change: bool
+    critical_reasons: list[str]
+    author: str
+    reviewer: str
+    review_comment: str
+    benchmark: dict[str, Any]
+    benchmarked_at: datetime | None
+    published_at: datetime | None
+    release_id: str | None
+    created_at: datetime
+
+
+class CandidateDiffOut(ApiModel):
+    """Before/after for a candidate (ТЗ 1.0.3B §11)."""
+
+    messages_examined: int
+    messages_changed: int
+    verdict_transitions: list[dict[str, Any]]
+    newly_detected: list[str]
+    newly_missed: list[str]
+    new_false_positives: list[str]
+    resolved_false_positives: list[str]
+    affected_campaigns: list[str]
+
+
+class ReleasePublishRequest(ApiModel):
+    candidate_id: str | None = Field(default=None, max_length=64)
+    note: str = Field(default="", max_length=4000)
+
+
+class ReleaseOut(ApiModel):
+    release_id: str
+    version: str
+    ruleset_fingerprint: str
+    parser_version: str
+    risk_engine_version: str
+    dataset_version: str
+    dataset_checksum: str
+    commit_sha: str
+    candidate_id: str | None
+    approved_by: str
+    published_by: str
+    metrics: dict[str, Any]
+    metric_deltas: dict[str, Any]
+    known_limitations: list[dict[str, Any]]
+    new_rules: list[str]
+    changed_rules: list[str]
+    removed_rules: list[str]
+    changelog: str
+    published_at: datetime
+
+
+class ReanalysisCreateRequest(ApiModel):
+    """Start a bulk re-evaluation (ТЗ 1.0.3B §23). Dry run unless explicitly told otherwise."""
+
+    days: int | None = Field(default=7, ge=1, le=365)
+    window_from: datetime | None = None
+    window_to: datetime | None = None
+    dry_run: bool = True
+    max_messages: int = Field(default=5000, ge=1, le=20000)
+    filters: dict[str, str] = Field(default_factory=dict)
+    ruleset_source: str = Field(default="", max_length=512)
+
+
+class ReanalysisOut(ApiModel):
+    job_id: str
+    state: ReanalysisState
+    dry_run: bool
+    window_from: str
+    window_to: str
+    filters: dict[str, Any]
+    max_messages: int
+    total_messages: int
+    processed: int
+    #: Null until the batch size is known: "not started" and "nothing to do" must not look alike.
+    progress: float | None
+    verdict_changed: int
+    newly_suspicious: int
+    newly_cleared: int
+    sample: list[dict[str, Any]]
+    requested_by: str
+    cancelled_by: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None

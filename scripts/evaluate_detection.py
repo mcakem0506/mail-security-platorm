@@ -25,15 +25,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from msp_contracts import (  # noqa: E402
-    ProtectedCategory,
     Severity,
-    TrustedMailHop,
-)
-from msp_detection import (  # noqa: E402
-    AnalysisContext,
-    DirectoryUser,
-    GatewayFindings,
-    ProtectedIdentity,
 )
 from msp_detection.rules import RuleSet, find_rule_pack  # noqa: E402
 from msp_detection_eval import (  # noqa: E402
@@ -41,108 +33,17 @@ from msp_detection_eval import (  # noqa: E402
     EvaluationRunner,
     GateThresholds,
     check,
+    evaluation_context,
+    findings_factory,
+    gateway_registry,
     render_markdown,
     render_text,
 )
 from msp_detection_eval.corpus import build_golden_dataset  # noqa: E402
-from msp_mail_gateway import (  # noqa: E402
-    GatewayProviderConfig,
-    GatewayRegistry,
-    KsmgGatewayProvider,
-)
 
 CORP = "corp.example"
 DEFAULT_BASELINE = REPO_ROOT / "datasets" / "baseline.json"
 DEFAULT_GATE = REPO_ROOT / "datasets" / "detection_gate.yaml"
-
-
-def evaluation_context() -> AnalysisContext:
-    """The organisation the golden corpus is written against.
-
-    Its topology is described in full — gateway *and* mail relay — because a half-described
-    topology produces a tampering signal on ordinary mail, and an evaluation run against that
-    would measure the configuration rather than the rules (ТЗ 1.0.1 §4.3).
-    """
-    return AnalysisContext(
-        organization_id="evaluation",
-        organization_name="Corp",
-        corporate_domains=(CORP,),
-        trusted_infrastructure_domains=("mailer.trusted-service.example",),
-        protected_identities=(
-            ProtectedIdentity(
-                "pi-ceo",
-                "Иван Петров",
-                f"ceo@{CORP}",
-                (ProtectedCategory.EXECUTIVE,),
-                risk_class="critical",
-                vip=True,
-            ),
-            ProtectedIdentity(
-                "pi-cfo",
-                "Мария Кузнецова",
-                f"cfo@{CORP}",
-                (ProtectedCategory.FINANCE,),
-                risk_class="high",
-            ),
-            ProtectedIdentity(
-                "pi-hr", "Анна Петрова", f"hr@{CORP}", (ProtectedCategory.HR,), risk_class="high"
-            ),
-            ProtectedIdentity(
-                "pi-it",
-                "Сергей Иванов",
-                f"it-admin@{CORP}",
-                (ProtectedCategory.ADMINISTRATOR,),
-                risk_class="critical",
-            ),
-        ),
-        directory_users=tuple(
-            DirectoryUser(f"{local}@{CORP}", display, department=department)
-            for display, local, department in [
-                ("Сергей Иванов", "ivanov", "ИТ"),
-                ("Анна Петрова", "petrova", "Отдел кадров"),
-                ("Пётр Сидоров", "sidorov", "Закупки"),
-                ("Ольга Морозова", "morozova", "Финансовый отдел"),
-                ("Дмитрий Волков", "volkov", "Коммерческий отдел"),
-                ("Елена Соколова", "sokolova", "Юридический отдел"),
-                ("Алексей Новиков", "novikov", "ИТ"),
-                ("Наталья Зайцева", "zaytseva", "Финансовый отдел"),
-                ("Бухгалтерия", "buh", "Финансовый отдел"),
-            ]
-        ),
-        recipient_department="Финансовый отдел",
-    )
-
-
-def gateway_registry() -> GatewayRegistry:
-    """The organisation's mail path: gateway in front, relay behind."""
-    return GatewayRegistry(
-        [
-            KsmgGatewayProvider(
-                GatewayProviderConfig(
-                    provider_id="ksmg",
-                    provider_type="ksmg",
-                    display_name="KSMG",
-                    trusted_hops=[
-                        TrustedMailHop(
-                            id="hop-ksmg",
-                            provider_id="ksmg",
-                            hostname=f"ksmg-01.{CORP}",
-                            ip_networks=["10.20.0.0/24"],
-                            authserv_ids=[f"ksmg-01.{CORP}"],
-                        )
-                    ],
-                )
-            )
-        ],
-        extra_hops=[
-            TrustedMailHop(
-                id="hop-relay",
-                type="exchange_mailbox",
-                hostname=f"mx.{CORP}",
-                authserv_ids=[f"mx.{CORP}"],
-            )
-        ],
-    )
 
 
 def main() -> int:
@@ -169,26 +70,7 @@ def main() -> int:
 
     # Gateway trust is decided per message: a header is forged only relative to that message's
     # own delivery chain, so findings are computed per case rather than once for the run.
-    registry = gateway_registry()
-
-    def findings_for(parsed):  # type: ignore[no-untyped-def]
-        analysis = registry.analyze_message(
-            parsed.headers,
-            received=parsed.received,
-            authentication_results=parsed.authentication_results,
-            internet_message_id=parsed.message_id,
-        )
-        verification = analysis.verification
-        return GatewayFindings(
-            evidence=list(analysis.evidence),
-            state=analysis.state,
-            trusted_auth_results=list(analysis.trusted_auth_results),
-            untrusted_auth_results=list(analysis.untrusted_auth_results),
-            auth_tampering_suspected=analysis.auth_tampering_suspected,
-            unverified_gateways=list(analysis.untrusted_gateways),
-            position_mismatches=list(verification.position_mismatches) if verification else [],
-            chain_verified=bool(verification and verification.matches),
-        )
+    findings_for = findings_factory(gateway_registry())
 
     runner = EvaluationRunner(
         ruleset=ruleset,

@@ -38,6 +38,16 @@ class Permission(StrEnum):
     REPORT_MISSED_DETECTION = "detection:report_miss"
     SIMULATE_DETECTION = "detection:simulate"
     PROPOSE_RULE = "detection:propose"
+    #: Edit a candidate pack: create it, benchmark it, send it for review.
+    EDIT_RULES = "detection:edit"
+    #: Review someone else's candidate. Separate from editing so that the person who wrote
+    #: a change and the person who approves it can be required to differ (§12).
+    REVIEW_RULES = "detection:review"
+    #: Publish a release. Deliberately not given to an analyst by default (§39): publishing
+    #: decides what the whole organisation is protected by.
+    PUBLISH_RULES = "detection:publish"
+    #: Run a bulk re-evaluation of history.
+    REEVALUATE = "detection:reevaluate"
     #: Changing a rule's lifecycle status changes what every future verdict says, so it is an
     #: administrative act even though the rule file itself lives in Git.
     MANAGE_DETECTION_RULES = "detection:manage"
@@ -83,6 +93,7 @@ _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.REPORT_MISSED_DETECTION,
     Permission.SIMULATE_DETECTION,
     Permission.PROPOSE_RULE,
+    Permission.EDIT_RULES,
     Permission.MANAGE_INCIDENTS,
     Permission.CLASSIFY_MESSAGE,
     Permission.CREATE_EXCEPTION,
@@ -95,6 +106,9 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.MANAGE_DETECTION_RULES,
     Permission.MANAGE_DETECTION_GAPS,
     Permission.MANAGE_CANARY,
+    Permission.REVIEW_RULES,
+    Permission.PUBLISH_RULES,
+    Permission.REEVALUATE,
     Permission.EXECUTE_REPLAY,
     Permission.APPROVE_REMEDIATION,
     Permission.EXECUTE_REMEDIATION,
