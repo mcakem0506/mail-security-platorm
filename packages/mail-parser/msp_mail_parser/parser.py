@@ -162,6 +162,22 @@ def parse_mail_date(value: str) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
+def _unfold(text: str) -> str:
+    """Join a header that was folded across lines (RFC 5322 2.2.3).
+
+    A decoded header must be one line. Leaving the CRLF in means a subject can carry text that a
+    one-line view never shows, and that rules matching on the subject read differently from the
+    person reading the mail — which is the whole appeal of folding to someone writing a phishing
+    message.
+    """
+    if "\n" not in text and "\r" not in text:
+        return text
+    collapsed = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Folding whitespace belongs to the fold, not to the value: joining the parts with a single
+    # space is what a reader sees.
+    return " ".join(part.strip() for part in collapsed.split("\n") if part.strip())
+
+
 def decode_header_value(value: object) -> str:
     if value is None:
         return ""
@@ -175,7 +191,7 @@ def decode_header_value(value: object) -> str:
             parts.append(_decode_raw_bytes(payload, charset))
         else:
             parts.append(payload)
-    text = "".join(parts)
+    text = _unfold("".join(parts))
     # Repair mojibake produced upstream when raw UTF-8 was read as a single-byte charset.
     if "�" in text:
         try:
