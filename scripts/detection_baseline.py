@@ -37,18 +37,48 @@ UNKNOWN = "unknown"
 _COLLECTED_RE = re.compile(r"^tests[\\/]\S*?\.py: (\d+)$", re.MULTILINE)
 
 
+#: Tools this script may invoke, mapped to the module name ``python -m`` accepts. Looked up in
+#: the running interpreter's environment when they are not on PATH: bandit and pip-audit live in
+#: the project virtualenv, and a snapshot that says ``unknown`` merely because the shell has no
+#: activated venv reports absence of tooling as absence of evidence. Honest, but needlessly
+#: uninformative — and an acceptance document is read for what it establishes.
+_MODULES = {"bandit": "bandit", "pip-audit": "pip_audit", "pytest": "pytest"}
+
+
+def _argv(command: list[str]) -> list[str] | None:
+    """Resolve ``command`` to something runnable, or ``None`` when the tool is absent."""
+    executable = shutil.which(command[0])
+    if executable is not None:
+        return [executable, *command[1:]]
+    module = _MODULES.get(command[0])
+    if module is None:
+        return None
+    probe = subprocess.run(  # noqa: S603  # nosec B603 - fixed argv, no shell
+        [sys.executable, "-c", f"import {module}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return None
+    # ``-m`` takes the module name, not the console-script name: ``-m pip-audit`` fails to
+    # start, and a tool that never started had been reported as "vulnerabilities" — the exact
+    # class of untrue statement this script exists to prevent.
+    return [sys.executable, "-m", module, *command[1:]]
+
+
 def _run(command: list[str], timeout: int = 900) -> tuple[int | None, str]:
     """Run a local tool, returning ``(None, "")`` when it is not installed.
 
     A missing tool is not a failure and not a success — it is the absence of evidence, and the
     caller turns it into ``unknown``.
     """
-    executable = shutil.which(command[0])
-    if executable is None:
+    argv = _argv(command)
+    if argv is None:
         return None, ""
     try:
         completed = subprocess.run(  # noqa: S603  # nosec B603 - fixed argv, no shell
-            [executable, *command[1:]],
+            argv,
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -291,17 +321,18 @@ def _fmt(value: Any, digits: int = 3) -> str:
     return str(value)
 
 
-def render_markdown(snapshot: dict[str, Any]) -> str:
+def render_markdown(snapshot: dict[str, Any], *, title: str = "Baseline MSP 1.0.3B",
+                    moment: str = "**до** изменений этапа") -> str:
     git = snapshot["git"]
     rules = snapshot["rules"]
     dataset = snapshot["dataset"]
     evaluation = snapshot["evaluation"]
     latency = evaluation["latency_ms"]
     lines = [
-        "# Baseline MSP 1.0.3B",
+        f"# {title}",
         "",
-        "ТЗ 1.0.3B §3. Состояние детектирования **до** изменений этапа, зафиксированное",
-        "автоматически: `python scripts/detection_baseline.py --out docs/MSP_1_0_3B_BASELINE.md`.",
+        f"ТЗ 1.0.3B §3. Состояние детектирования {moment}, зафиксированное",
+        "автоматически: `python scripts/detection_baseline.py`.",
         "",
         "> Значение `unknown` означает, что в этом запуске проверка не выполнялась. Это не",
         "> «пройдено»: baseline, сообщающий о зелёном сканировании, которого никто не запускал,",
@@ -415,10 +446,20 @@ def main() -> int:
     parser.add_argument("--json", metavar="FILE", help="записать машинный снимок")
     parser.add_argument("--with-tests", action="store_true", help="прогнать тесты")
     parser.add_argument("--with-scans", action="store_true", help="выполнить bandit и pip-audit")
+    parser.add_argument("--title", help="заголовок снимка")
+    parser.add_argument(
+        "--final",
+        action="store_true",
+        help="снимок по итогам этапа, а не до его начала (меняет формулировки заголовка)",
+    )
     args = parser.parse_args()
 
     snapshot = collect(run_tests=args.with_tests, run_scans=args.with_scans)
-    markdown = render_markdown(snapshot)
+    markdown = render_markdown(
+        snapshot,
+        title=args.title or ("Итоговый снимок MSP 1.0.3B" if args.final else "Baseline MSP 1.0.3B"),
+        moment="**по итогам** этапа" if args.final else "**до** изменений этапа",
+    )
 
     if args.out:
         Path(args.out).write_text(markdown, encoding="utf-8")

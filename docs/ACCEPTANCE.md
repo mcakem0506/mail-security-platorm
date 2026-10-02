@@ -231,6 +231,8 @@ NEXT PHASE:
 | MSP 1.0 | настоящий документ | READY WITH WARNINGS |
 | MSP 1.0.1 — production-интеграция, теневой пилот, валидация детектирования | [MSP_1_0_1_ACCEPTANCE.md](MSP_1_0_1_ACCEPTANCE.md) | код готов, ожидает пилота |
 | MSP 1.0.2 — работа с произвольным почтовым шлюзом | [MSP_1_0_2_ACCEPTANCE.md](MSP_1_0_2_ACCEPTANCE.md) | код готов, ожидает среды |
+| MSP 1.0.3 — качество детектирования и работа аналитика | [MSP_1_0_3_ACCEPTANCE.md](MSP_1_0_3_ACCEPTANCE.md) | READY WITH WARNINGS |
+| MSP 1.0.3B — операции детектирования | [MSP_1_0_3B_ACCEPTANCE.md](MSP_1_0_3B_ACCEPTANCE.md) | см. документ этапа |
 
 Актуальные цифры по текущему HEAD — `python scripts/generate_acceptance_snapshot.py`. Показатель,
 который скрипту установить не удалось, помечается `unknown`: непроверенное не считается
