@@ -105,7 +105,7 @@ class TestRegexSafety:
         "run_then_mismatch": "a" * 2000 + "!",
         "long_host_chain": "https://" + "a." * 1000 + "test",
         "whitespace": " " * 5000,
-        "bidi_controls": "‮" * 2000,
+        "bidi_controls": "\u202e" * 2000,  # RIGHT-TO-LEFT OVERRIDE, as an escape
         "repeated_keyword": "реквизит " * 600,
         "repeated_phrase": "изменились реквизиты " * 300,
         "angle_brackets": "<" * 3000,
@@ -332,7 +332,7 @@ class TestAdversarialInput:
     HOSTILE_SUBJECTS: ClassVar[dict[str, str]] = {
         "huge_base64_word": "=?utf-8?B?" + "QUJD" * 2000 + "?=",
         "unknown_charset": "=?unknown-charset?Q?" + "=41" * 2000 + "?=",
-        "bidi_prefix": "‮" * 500 + "счёт",
+        "bidi_prefix": "\u202e" * 500 + "счёт",
         "very_long_plain": "a" * 10_000,
     }
 

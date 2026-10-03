@@ -99,7 +99,7 @@ class TestEvasionTechniques:
             "--b\r\nContent-Type: text/plain\r\n\r\nсм. вложение\r\n"
             "--b\r\nContent-Type: application/octet-stream\r\n"
             'Content-Disposition: attachment; filename="=?utf-8?B?'
-            + base64.b64encode("счет‮gnp.exe".encode()).decode()
+            + base64.b64encode("счет\u202egnp.exe".encode()).decode()
             + '?="\r\n\r\ndata\r\n--b--\r\n'
         ).encode()
         parsed, result, verdict = _analyse(raw)

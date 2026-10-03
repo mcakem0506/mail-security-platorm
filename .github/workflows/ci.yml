@@ -612,7 +612,12 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-postgres-password/' .env
-          sed -i 's/^MSP_COOKIE_SECURE=true/MSP_COOKIE_SECURE=false/' .env
+          # MSP_COOKIE_SECURE stays true. The job starts the stack with
+          # MSP_ENVIRONMENT=production from .env.example, and the configuration refuses
+          # production with insecure cookies — so turning it off here asked for a setup the
+          # platform rejects by design, and this step had never got past it. The job generates
+          # a TLS certificate and nginx serves 443, so secure cookies are the correct setting;
+          # the checks below talk to the API over the container's own loopback and do not log in.
           umask 077
           openssl rand -base64 48 | tr -d '\n' > infrastructure/compose/secrets/msp_secret_key
           openssl rand -base64 32 | tr -d '\n' > infrastructure/compose/secrets/minio_password
