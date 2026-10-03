@@ -295,15 +295,28 @@ def score(outcomes: Iterable[CaseOutcome], ruleset: RuleSet | None = None) -> Ev
     return metrics
 
 
+def _metric(metrics: EvaluationMetrics, rule_lookup: dict[str, Any], rule_id: str) -> Any:
+    """Fetch a rule's metric row, always carrying its metadata.
+
+    Metadata is attached here rather than at each call site because a rule that is *expected*
+    and does not fire is created through this path too. Leaving its owner and status at the
+    dataclass defaults made such a rule look ownerless, and the ownership gate then blocked a
+    release over a rule that has an owner — a false alarm that teaches people to ignore the
+    gate.
+    """
+    rule_metric = metrics.rule(rule_id)
+    rule = rule_lookup.get(rule_id)
+    if rule is not None:
+        rule_metric.version = rule.version
+        rule_metric.status = rule.status.value
+        rule_metric.owner = rule.owner
+    return rule_metric
+
+
 def _score_rules(metrics: EvaluationMetrics, outcome: CaseOutcome, rule_lookup: dict[str, Any]) -> None:
     case = outcome.case
     for rule_id in outcome.fired_rules:
-        rule_metric = metrics.rule(rule_id)
-        rule = rule_lookup.get(rule_id)
-        if rule is not None:
-            rule_metric.version = rule.version
-            rule_metric.status = rule.status.value
-            rule_metric.owner = rule.owner
+        rule_metric = _metric(metrics, rule_lookup, rule_id)
         rule_metric.total_triggers += 1
         if case.is_ambiguous:
             rule_metric.confirmed_unknown += 1
@@ -315,18 +328,15 @@ def _score_rules(metrics: EvaluationMetrics, outcome: CaseOutcome, rule_lookup: 
             rule_metric.forbidden_hits += 1
 
     for rule_id in outcome.suppressed_rules:
-        metrics.rule(rule_id).suppressed += 1
-        metrics.rule(rule_id).total_triggers += 1
+        rule_metric = _metric(metrics, rule_lookup, rule_id)
+        rule_metric.suppressed += 1
+        rule_metric.total_triggers += 1
     for rule_id in outcome.shadow_rules:
-        rule_metric = metrics.rule(rule_id)
-        rule = rule_lookup.get(rule_id)
-        if rule is not None:
-            rule_metric.status = rule.status.value
-            rule_metric.owner = rule.owner
+        rule_metric = _metric(metrics, rule_lookup, rule_id)
         rule_metric.total_triggers += 1
         if case.is_benign:
             rule_metric.false_positive += 1
         elif not case.is_ambiguous:
             rule_metric.true_positive += 1
     for rule_id in outcome.missing_expected_rules:
-        metrics.rule(rule_id).missed_expectations += 1
+        _metric(metrics, rule_lookup, rule_id).missed_expectations += 1

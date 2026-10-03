@@ -565,6 +565,22 @@ def _attachment_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> 
             fs.flag("attachment_html_credential_form", **ev)
         if "HTML_SMUGGLING_PATTERN" in m.flags:
             fs.flag("attachment_html_smuggling", **ev)
+        if "HTML_SMUGGLING_ASSEMBLY" in m.flags:
+            # Payload, decoder and a save trigger together. Each is ordinary alone; together
+            # they have no innocent reading in a mail attachment (ТЗ 1.0.3 §40).
+            fs.flag("attachment_html_smuggling_assembly", **ev)
+        if "HTML_PASSWORD_ARCHIVE" in m.flags:
+            fs.flag("attachment_password_archive_instructions", **ev)
+        if "OFFICE_REMOTE_TEMPLATE" in m.flags:
+            fs.flag("attachment_remote_template", **ev)
+        if "OFFICE_UNC_REFERENCE" in m.flags:
+            fs.flag("attachment_unc_reference", **ev)
+        if "OFFICE_DDE_FIELD" in m.flags:
+            fs.flag("attachment_dde_field", **ev)
+        if "OFFICE_EXTERNAL_LINK" in m.flags:
+            fs.flag("attachment_office_external_link", **ev)
+        if "OFFICE_NOT_FULLY_PARSED" in m.flags:
+            fs.missing_evidence.append(f"Office document '{m.normalized_filename}' was not fully examined")
         if m.depth > 0 and any(f in flags for f in ("EXECUTABLE", "SCRIPT", "SHORTCUT", "DOUBLE_EXTENSION")):
             fs.flag("archive_contains_dangerous_file", **ev, depth=m.depth)
         if flags:
@@ -572,6 +588,62 @@ def _attachment_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> 
     if msg.encrypted:
         fs.flag("message_encrypted")
         fs.missing_evidence.append("Message content is encrypted and cannot be analysed")
+
+
+def _qr_facts(msg: ParsedMessage, fs: FactSet) -> None:
+    """QR codes, and the honest statement that one could not be read (ТЗ 1.0.3 §38).
+
+    A QR code moves the link out of the text and, when it is scanned, out of the corporate
+    network entirely. If the platform cannot decode it, that is missing evidence — reporting
+    nothing found would be the exact failure ТЗ §3 forbids.
+    """
+    qr = msg.qr
+    if not qr:
+        return
+    candidates = list(qr.get("candidate_images") or [])
+    if candidates:
+        fs.flag("qr_candidate_image", images=candidates[:5], count=len(candidates))
+    if qr.get("scan_prompt"):
+        fs.flag("qr_scan_prompt")
+    if qr.get("likely_quishing"):
+        fs.flag("qr_likely_quishing", images=candidates[:5])
+    decoded = list(qr.get("decoded_urls") or [])
+    if decoded:
+        fs.flag("qr_url_present", urls=decoded[:5])
+    elif candidates and not qr.get("decoder_available"):
+        fs.missing_evidence.append("QR-код в письме не распознан: декодер не установлен (пробел GAP-002)")
+
+
+def _smuggling_facts(msg: ParsedMessage, fs: FactSet) -> None:
+    """HTML smuggling in the body itself (ТЗ 1.0.3 §40).
+
+    Attachment-level smuggling is recorded with the attachment; this covers the case where the
+    message body carries the machinery, which no attachment scan would see.
+    """
+    data = msg.smuggling
+    if not data:
+        return
+    if data.get("assembles_a_file"):
+        fs.flag("html_smuggling_assembly", signals=int(data.get("max_signal_count") or 0))
+    elif int(data.get("max_signal_count") or 0) >= 2:
+        fs.flag("html_smuggling_signals", signals=int(data.get("max_signal_count") or 0))
+
+
+def _document_facts(msg: ParsedMessage, fs: FactSet) -> None:
+    """Office documents that fetch something when they open (ТЗ 1.0.3 §39)."""
+    if not msg.documents:
+        return
+    autoload: list[str] = []
+    unc: list[str] = []
+    for report in msg.documents.values():
+        autoload.extend(str(u) for u in (report.get("autoload_urls") or []))
+        unc.extend(str(u) for u in (report.get("unc_references") or []))
+    if autoload:
+        fs.flag("document_autoload_reference", urls=autoload[:5])
+    if unc:
+        # Opening the document authenticates to that host: the credential leaves before
+        # anything is clicked.
+        fs.flag("document_unc_reference", targets=unc[:5])
 
 
 def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
@@ -616,6 +688,9 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
     _identity_facts(msg, ctx, fs)
     _url_facts(msg, ctx, fs)
     _attachment_facts(msg, ctx, fs)
+    _qr_facts(msg, fs)
+    _smuggling_facts(msg, fs)
+    _document_facts(msg, fs)
     for key, value, ev in bec_facts(msg, ctx, fs.facts):
         fs.set(key, value, **ev)
 
@@ -653,6 +728,9 @@ _LIMIT_FACTS: dict[str, str] = {
     "MAX_MIME_DEPTH": "limit_mime_depth_exceeded",
     "MAX_URLS": "limit_url_count_exceeded",
     "PARSER_TIMEOUT": "limit_parser_timeout",
+    # Not a parser limit in the usual sense, but the same consequence: part of the message was
+    # not read, so the scan is not complete and the verdict must not read as clean (§38, §3).
+    "QR_NOT_DECODED": "limit_qr_not_decoded",
 }
 #: Archive limits are reported per attachment rather than on the message.
 _ARCHIVE_LIMIT_FLAGS: dict[str, str] = {
@@ -669,6 +747,7 @@ _LIMIT_EVIDENCE: dict[str, str] = {
     "MAX_MIME_DEPTH": "вложенность MIME-структуры превышает допустимую",
     "MAX_URLS": "в письме больше ссылок, чем платформа разбирает",
     "PARSER_TIMEOUT": "разбор письма не завершился за отведённое время",
+    "QR_NOT_DECODED": "в письме есть изображение, похожее на QR-код; содержимое кода не прочитано",
 }
 
 

@@ -56,6 +56,43 @@ class AuditAction:
     GATEWAY_CREDENTIAL_ROTATED = "gateway.credential_rotated"  # nosec
     GATEWAY_CONFLICT_RESOLVED = "gateway.conflict_resolved"
     TRUSTED_HOP_CHANGED = "gateway.trusted_hop_changed"
+    # Detection quality, rule lifecycle and analyst decisions (ТЗ 1.0.3 §56).
+    # The analyst's classification is audited because every quality metric is derived from it:
+    # if the record of who decided what can be lost, the metrics cannot be defended.
+    INCIDENT_CLASSIFIED = "incident.classified"
+    FALSE_POSITIVE_MARKED = "detection.false_positive_marked"
+    FALSE_NEGATIVE_MARKED = "detection.false_negative_marked"
+    RULE_STATUS_CHANGED = "rule.status_changed"
+    RULE_SIMULATED = "rule.simulated"
+    FEEDBACK_RECORDED = "detection.feedback"
+    RULE_QUALITY_SNAPSHOT = "rule.quality_snapshot"
+    # A candidate pack moves through review before it can ship; each step is audited so the
+    # question "who approved this rule" has an answer that does not depend on memory.
+    CANDIDATE_CREATED = "candidate.created"
+    CANDIDATE_BENCHMARKED = "candidate.benchmarked"
+    CANDIDATE_SUBMITTED = "candidate.submitted"
+    CANDIDATE_REVIEWED = "candidate.reviewed"
+    RELEASE_PUBLISHED = "release.published"
+    REEVALUATION_CANCELLED = "detection.reevaluation_cancelled"
+    # A rollout decides which people a rule protects, so starting and ending one are
+    # audited as separate events from the rule's own status changes.
+    CANARY_STARTED = "canary.started"
+    CANARY_PROMOTED = "canary.promoted"
+    CANARY_ABORTED = "canary.aborted"
+    EXCEPTION_APPROVED = "exception.approved"
+    EXCEPTION_REVIEW_DUE = "exception.review_due"
+    GAP_REGISTERED = "gap.registered"
+    GAP_CLOSED = "gap.closed"
+    ANALYSIS_REPLAYED = "analysis.replayed"
+    REEVALUATION_STARTED = "detection.reevaluation_started"
+    DATASET_CHANGED = "detection.dataset_changed"
+    INCIDENT_ASSIGNED = "incident.assigned"
+    # Campaign curation is audited because a merge or a split changes what later readers
+    # believe happened: a wave folded into another is one nobody investigates separately.
+    CAMPAIGN_MERGED = "campaign.merged"
+    CAMPAIGN_SPLIT = "campaign.split"
+    CAMPAIGN_MESSAGE_ATTACHED = "campaign.message_attached"
+    CAMPAIGN_MESSAGE_REJECTED = "campaign.message_rejected"
     # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
     INTAKE_DEAD_LETTER = "intake.dead_letter"
     MESSAGE_UNSCANNABLE = "intake.unscannable"

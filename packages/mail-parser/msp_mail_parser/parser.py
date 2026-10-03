@@ -16,10 +16,12 @@ from email import message_from_bytes, policy
 from email.header import Header, decode_header
 from email.message import Message
 from email.utils import getaddresses, parsedate_to_datetime
+from typing import Any
 
 from msp_contracts import Address, AttachmentMeta, ExtractedUrl
 
 from .archive import inspect_archive
+from .documents import extract_document_references
 from .domains import split_domain
 from .filetype import (
     ARCHIVE_TYPES,
@@ -31,7 +33,9 @@ from .filetype import (
     normalize_filename,
 )
 from .html_safe import html_to_text, normalize_whitespace, sanitize_html
+from .images import inspect_images
 from .limits import Deadline, LimitExceeded, ParserLimits
+from .smuggling import analyze_html_smuggling
 from .urls import count_urls_in_text, dedupe_urls, extract_urls_from_html, extract_urls_from_text
 
 _ENCRYPTED_TYPES = {"multipart/encrypted", "application/pgp-encrypted"}
@@ -90,6 +94,12 @@ class ParsedMessage:
     html_stats: dict[str, int] = field(default_factory=dict)
     attachments: list[ParsedAttachment] = field(default_factory=list)
     nested_messages: int = 0
+    #: Images that could carry a QR code, and whether a decoder was available (ТЗ 1.0.3 §38).
+    qr: dict[str, Any] = field(default_factory=dict)
+    #: HTML smuggling machinery found in the body or in an HTML attachment (ТЗ 1.0.3 §40).
+    smuggling: dict[str, Any] = field(default_factory=dict)
+    #: External references of Office attachments, keyed by attachment sha256 (ТЗ 1.0.3 §39).
+    documents: dict[str, Any] = field(default_factory=dict)
     encrypted: bool = False
     signed: bool = False
     mime_depth: int = 0
@@ -152,6 +162,22 @@ def parse_mail_date(value: str) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
+def _unfold(text: str) -> str:
+    """Join a header that was folded across lines (RFC 5322 2.2.3).
+
+    A decoded header must be one line. Leaving the CRLF in means a subject can carry text that a
+    one-line view never shows, and that rules matching on the subject read differently from the
+    person reading the mail — which is the whole appeal of folding to someone writing a phishing
+    message.
+    """
+    if "\n" not in text and "\r" not in text:
+        return text
+    collapsed = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Folding whitespace belongs to the fold, not to the value: joining the parts with a single
+    # space is what a reader sees.
+    return " ".join(part.strip() for part in collapsed.split("\n") if part.strip())
+
+
 def decode_header_value(value: object) -> str:
     if value is None:
         return ""
@@ -165,7 +191,7 @@ def decode_header_value(value: object) -> str:
             parts.append(_decode_raw_bytes(payload, charset))
         else:
             parts.append(payload)
-    text = "".join(parts)
+    text = _unfold("".join(parts))
     # Repair mojibake produced upstream when raw UTF-8 was read as a single-byte charset.
     if "�" in text:
         try:
@@ -241,6 +267,12 @@ class _Walker:
         self.text_parts: list[str] = []
         self.html_parts: list[str] = []
         self.extra_urls: list[ExtractedUrl] = []
+        #: (name, bytes) for every image part, inline ones included: a QR code is usually an
+        #: inline image rather than an attachment, so collecting only attachments would miss
+        #: the common case entirely.
+        self.images: list[tuple[str, bytes]] = []
+        self.document_reports: dict[str, Any] = {}
+        self.attachment_smuggling: list[dict[str, Any]] = []
 
     def walk(self, part: Message, depth: int) -> None:
         self.deadline.check()
@@ -380,9 +412,39 @@ class _Walker:
                 meta.flags.append("HTML_PASSWORD_FORM")
             if stats.get("scripts"):
                 meta.flags.append("HTML_SCRIPT")
-            low = html.lower()
-            if "atob(" in low or "fromcharcode" in low or "msSaveOrOpenBlob".lower() in low:
-                meta.flags.append("HTML_SMUGGLING_PATTERN")
+            # An HTML attachment is where smuggling actually arrives, so it is examined in
+            # full rather than with a substring check (ТЗ 1.0.3 §40).
+            smuggling = analyze_html_smuggling(html)
+            meta.flags.extend(smuggling.flags())
+            if smuggling.signal_count:
+                record = smuggling.as_dict()
+                record["attachment"] = meta.normalized_filename
+                self.attachment_smuggling.append(record)
+
+        if detected.category in {"office", "office_macro"} or detected.type.startswith("ooxml"):
+            # Office documents carry their links in relationship parts, which no body-only
+            # analysis can see (ТЗ 1.0.3 §39).
+            document = extract_document_references(data, self.limits)
+            if document.error != "NOT_OOXML":
+                meta.flags.extend(document.flags())
+                for url in document.urls:
+                    self.extra_urls.append(url.model_copy(update={"source": "office"}))
+                self.document_reports[meta.sha256] = {
+                    "attachment": meta.normalized_filename,
+                    "urls": [u.normalized for u in document.urls],
+                    "autoload_urls": document.autoload_urls,
+                    "unc_references": document.unc_references,
+                    "has_macro": document.has_macro,
+                    "has_remote_template": document.has_remote_template,
+                    "has_ole_object": document.has_ole_object,
+                    "has_dde_field": document.has_dde_field,
+                    "external_reference_count": document.external_reference_count,
+                    "complete": document.complete,
+                    "truncated": document.truncated,
+                }
+
+        if detected.category == "image":
+            self.images.append((meta.normalized_filename or filename, data))
 
 
 def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessage:
@@ -465,6 +527,36 @@ def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessa
         urls.extend(walker.extra_urls)
     except LimitExceeded as exc:
         result.limits_hit.append(exc.code)
+
+    # --- QR codes (ТЗ 1.0.3 §38) ---------------------------------------------------------
+    # Done after the body is assembled, because a QR-shaped image only becomes a signal
+    # together with wording that asks the reader to scan it.
+    if walker.images:
+        qr = inspect_images(walker.images, body_text=result.normalized_text)
+        if qr.candidate_images or qr.scan_prompt:
+            result.qr = qr.as_dict()
+            urls.extend(qr.urls)
+            if qr.candidate_images and not qr.decoder_available:
+                # The platform could not read the code. That is missing evidence, not a clean
+                # result: treating it as clean is the failure ТЗ §3 forbids.
+                result.limits_hit.append("QR_NOT_DECODED")
+
+    # --- HTML smuggling in the body itself (ТЗ 1.0.3 §40) ---------------------------------
+    body_smuggling = analyze_html_smuggling(result.html_body) if result.html_body else None
+    reports = list(walker.attachment_smuggling)
+    if body_smuggling is not None and body_smuggling.signal_count:
+        record = body_smuggling.as_dict()
+        record["attachment"] = ""
+        reports.append(record)
+    if reports:
+        result.smuggling = {
+            "reports": reports,
+            "assembles_a_file": any(bool(r.get("assembles_a_file")) for r in reports),
+            "max_signal_count": max(int(r.get("signal_count") or 0) for r in reports),
+        }
+    if walker.document_reports:
+        result.documents = walker.document_reports
+
     result.urls = dedupe_urls(urls, limits.max_urls)
     if max(len(urls), total_urls_present) > limits.max_urls and "MAX_URLS" not in result.limits_hit:
         result.limits_hit.append("MAX_URLS")

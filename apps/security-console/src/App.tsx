@@ -12,6 +12,11 @@ import { AdminPage } from "./pages/AdminPage";
 import { ThreatIntelPage } from "./pages/ThreatIntelPage";
 import { GatewaysPage } from "./pages/GatewaysPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { QueuePage } from "./pages/QueuePage";
+import { DetectionQualityPage } from "./pages/DetectionQualityPage";
+import { SimulatorPage } from "./pages/SimulatorPage";
+import { ReleasesPage } from "./pages/ReleasesPage";
+import { ReevaluationPage } from "./pages/ReevaluationPage";
 
 interface NavItem {
   to: string;
@@ -19,16 +24,51 @@ interface NavItem {
   permission?: string;
 }
 
-const NAV: NavItem[] = [
-  { to: "/", label: "Обзор", permission: "view:investigations" },
-  { to: "/investigations", label: "Расследования", permission: "view:investigations" },
-  { to: "/incidents", label: "Инциденты", permission: "view:incidents" },
-  { to: "/campaigns", label: "Кампании", permission: "view:campaigns" },
-  { to: "/threat-intel", label: "Threat Intelligence", permission: "search:indicators" },
-  { to: "/reports", label: "Отчёты", permission: "view:investigations" },
-  { to: "/remediation", label: "Реагирование", permission: "view:incidents" },
-  { to: "/gateways", label: "Почтовые шлюзы", permission: "view:investigations" },
-  { to: "/admin", label: "Администрирование", permission: "view:audit" },
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+/**
+ * Navigation grouped by what an analyst is doing (ТЗ 1.0.3B §45).
+ *
+ * Investigation and detection operations are different jobs, often different people, and a flat
+ * list of fourteen links made them look like one. The employee-facing surfaces are not here at
+ * all: internal detection operations are not something a reporting employee should see.
+ */
+const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Расследования",
+    items: [
+      { to: "/", label: "Обзор", permission: "view:investigations" },
+      { to: "/queue", label: "Очередь", permission: "view:incidents" },
+      { to: "/incidents", label: "Инциденты", permission: "view:incidents" },
+      { to: "/investigations", label: "Письма", permission: "view:investigations" },
+      { to: "/campaigns", label: "Кампании", permission: "view:campaigns" },
+    ],
+  },
+  {
+    title: "Детектирование",
+    items: [
+      { to: "/detection", label: "Качество", permission: "quality:read" },
+      { to: "/simulator", label: "Симулятор", permission: "detection:simulate" },
+      { to: "/releases", label: "Выпуски", permission: "quality:read" },
+      { to: "/reevaluation", label: "Переоценка", permission: "quality:read" },
+    ],
+  },
+  {
+    title: "Threat Intelligence",
+    items: [{ to: "/threat-intel", label: "Индикаторы", permission: "search:indicators" }],
+  },
+  {
+    title: "Администрирование",
+    items: [
+      { to: "/reports", label: "Отчёты", permission: "view:investigations" },
+      { to: "/remediation", label: "Реагирование", permission: "view:incidents" },
+      { to: "/gateways", label: "Почтовые шлюзы", permission: "view:investigations" },
+      { to: "/admin", label: "Настройки", permission: "view:audit" },
+    ],
+  },
 ];
 
 export function App() {
@@ -68,7 +108,12 @@ export function App() {
   }
 
   const can = (permission?: string) => !permission || user.permissions.includes(permission);
-  const visible = NAV.filter((item) => can(item.permission));
+  // A group with nothing the viewer may open is not rendered at all: an empty heading tells
+  // someone a section exists and that they cannot have it, which helps nobody.
+  const visible = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => can(item.permission)),
+  })).filter((group) => group.items.length > 0);
 
   return (
     <BrowserRouter>
@@ -76,15 +121,22 @@ export function App() {
         <aside className="sidebar">
           <div className="brand">Mail Security</div>
           <nav>
-            {visible.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) => (isActive ? "nav-link nav-link--active" : "nav-link")}
-              >
-                {item.label}
-              </NavLink>
+            {visible.map((group) => (
+              <div key={group.title} className="nav-group">
+                <div className="nav-group__title">{group.title}</div>
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === "/"}
+                    className={({ isActive }) =>
+                      isActive ? "nav-link nav-link--active" : "nav-link"
+                    }
+                  >
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
             ))}
           </nav>
           <div className="sidebar__footer">
@@ -103,11 +155,16 @@ export function App() {
               path="/"
               element={can("view:investigations") ? <DashboardPage /> : <Navigate to="/incidents" replace />}
             />
+            <Route path="/queue" element={<QueuePage user={user} />} />
             <Route path="/investigations" element={<InvestigationsPage />} />
             <Route path="/messages/:messageId" element={<MessagePage />} />
             <Route path="/incidents" element={<IncidentsPage user={user} />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/threat-intel" element={<ThreatIntelPage />} />
+            <Route path="/detection" element={<DetectionQualityPage user={user} />} />
+            <Route path="/simulator" element={<SimulatorPage />} />
+            <Route path="/releases" element={<ReleasesPage user={user} />} />
+            <Route path="/reevaluation" element={<ReevaluationPage user={user} />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
             <Route path="/gateways" element={<GatewaysPage user={user} />} />

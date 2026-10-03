@@ -57,6 +57,13 @@ class AuthResults:
         if not any(r.method == "spf" for r in self.results):
             self.results.extend(spf_results)
 
+    #: Authentication methods whose results become facts. Declared rather than written inline
+    #: so the fact vocabulary can be checked against the rule pack: a rule naming
+    #: ``dmark_fail`` would otherwise load cleanly and never fire.
+    METHODS: tuple[str, ...] = ("spf", "dkim", "dmarc", "compauth")
+    #: Suffixes combined with each method above.
+    SUFFIXES: tuple[str, ...] = ("present", "result", "fail", "soft_fail", "pass")
+
     def as_facts(self) -> dict[str, Any]:
         facts: dict[str, Any] = {}
         for method in ("spf", "dkim", "dmarc", "compauth"):
@@ -150,3 +157,14 @@ def received_chain_facts(received: list[str]) -> list[tuple[str, Any, dict[str, 
     if "unknown" in joined and "helo=" in joined:
         out.append(("received_unresolved_host", True, {}))
     return out
+
+
+def auth_fact_names() -> frozenset[str]:
+    """Every fact name :meth:`AuthResults.as_facts` can produce.
+
+    Generated from the same tuples the method itself uses, so the vocabulary cannot drift from
+    what the code actually sets (ТЗ 1.0.3 §12).
+    """
+    names = {f"{method}_{suffix}" for method in AuthResults.METHODS for suffix in AuthResults.SUFFIXES}
+    names.update({"authentication_fully_failed", "dkim_signing_domain"})
+    return frozenset(names)

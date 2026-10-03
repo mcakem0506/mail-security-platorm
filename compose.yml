@@ -10,6 +10,8 @@ x-python-base: &python-base
   build:
     context: .
     dockerfile: infrastructure/compose/Dockerfile.python
+    args:
+      MSP_COMMIT_SHA: ${MSP_COMMIT_SHA:-}
   restart: unless-stopped
   env_file: [.env]
   environment:

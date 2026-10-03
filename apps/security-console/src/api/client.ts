@@ -37,6 +37,249 @@ export interface Signal {
   suppressed_by: string | null;
 }
 
+/** ТЗ 1.0.3 §17, §18: a queue row. Priority is not the risk level. */
+export interface QueueItem {
+  incident_id: string;
+  number: number;
+  title: string;
+  priority: "P1" | "P2" | "P3" | "P4";
+  priority_score: number;
+  priority_factors: string[];
+  sla: { state: string; target: string | null; remaining_seconds: number | null; timers: Record<string, number> };
+  classification: string | null;
+  confidence: string;
+  status: string;
+  severity: Severity;
+  age_seconds: number;
+  affected_users: string[];
+  vip_involved: boolean;
+  campaign_size: number;
+  gateway_conflict: boolean;
+  employee_report: boolean;
+  assignee: string | null;
+  analyst_classification: string | null;
+}
+
+export type AnalystClassification =
+  | "CONFIRMED_PHISHING"
+  | "CONFIRMED_BEC"
+  | "CONFIRMED_MALWARE"
+  | "CONFIRMED_SPAM"
+  | "CONFIRMED_IMPERSONATION"
+  | "LEGITIMATE"
+  | "FALSE_POSITIVE"
+  | "BENIGN_SIMULATION"
+  | "UNKNOWN";
+
+/**
+ * ТЗ 1.0.3 §35. Every ratio here is nullable, and the console must render null as "—".
+ * Showing 0% false positives because nothing has been classified would read as success.
+ */
+export interface DetectionQuality {
+  period_start: string;
+  period_end: string;
+  total_analyzed: number;
+  classified: number;
+  confirmed_threats: number;
+  confirmed_benign: number;
+  precision: number | null;
+  false_positive_rate: number | null;
+  reported_misses: number;
+  unscannable: number;
+  unknown: number;
+  open_gaps: number;
+  shadow_rules: number;
+  active_canaries: number;
+  overdue_canaries: number;
+  noisy_rules: Record<string, unknown>[];
+  silent_rules: string[];
+  unowned_active_rules: string[];
+  coverage_by_scenario: Record<string, unknown>[];
+}
+
+/**
+ * A rule released to part of the organisation before all of it (ТЗ 1.0.3 §52).
+ *
+ * `outside_*` is the control group: the same rule, on the same mail, recorded but powerless.
+ * Precision is null until an analyst has judged something — an unjudged rollout showing 100%
+ * would be the argument for promoting it.
+ */
+export interface CanaryRollout {
+  rule_id: string;
+  state: "ACTIVE" | "PROMOTED" | "ABORTED";
+  scope: "MAILBOX" | "DEPARTMENT" | "PERCENT";
+  scope_values: string[];
+  percent: number;
+  review_at: string;
+  overdue: boolean;
+  inside_triggers: number;
+  outside_triggers: number;
+  inside_confirmed: number;
+  inside_false_positives: number;
+  outside_confirmed: number;
+  outside_false_positives: number;
+  inside_precision: number | null;
+  outside_precision: number | null;
+  ready_to_promote: boolean;
+}
+
+export interface DetectionRule {
+  rule_id: string;
+  version: number;
+  title: string;
+  category: string;
+  severity: Severity;
+  status: "EXPERIMENTAL" | "SHADOW" | "ACTIVE" | "DEGRADED" | "DISABLED" | "DEPRECATED";
+  owner: string;
+  weight: number;
+  scores: boolean;
+  hard: boolean;
+  scenarios: string[];
+  condition: string | null;
+  trigger_count: number;
+  confirmed_tp: number;
+  confirmed_fp: number;
+  precision: number | null;
+}
+
+/** ТЗ 1.0.3B §8. Precision is null until enough has been judged — never 0, never 1. */
+export interface RuleQuality {
+  rule_id: string;
+  rule_version: number;
+  trigger_count: number;
+  analyst_reviewed: number;
+  true_positive: number;
+  false_positive: number;
+  unknown: number;
+  suppressed: number;
+  precision: number | null;
+  affected_messages: number;
+  affected_incidents: number;
+  health: "HEALTHY" | "NO_DATA" | "NOISY" | "REGRESSED" | "LOW_COVERAGE" | "DEGRADED";
+  health_reasons: string[];
+}
+
+/** ТЗ 1.0.3B §10–§12: a proposed rule pack under review. */
+export interface RuleCandidate {
+  candidate_id: string;
+  name: string;
+  description: string;
+  source: string;
+  state: "DRAFT" | "READY_FOR_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "REJECTED";
+  added_rules: string[];
+  changed_rules: string[];
+  removed_rules: string[];
+  critical_change: boolean;
+  critical_reasons: string[];
+  author: string;
+  reviewer: string;
+  review_comment: string;
+  benchmark: Record<string, unknown>;
+  benchmarked_at: string | null;
+  published_at: string | null;
+  release_id: string | null;
+  created_at: string;
+}
+
+/** ТЗ 1.0.3B §24: everything needed to reproduce what a release detected. */
+export interface DetectionRelease {
+  release_id: string;
+  version: string;
+  ruleset_fingerprint: string;
+  parser_version: string;
+  risk_engine_version: string;
+  dataset_version: string;
+  dataset_checksum: string;
+  commit_sha: string;
+  candidate_id: string | null;
+  approved_by: string;
+  published_by: string;
+  metrics: Record<string, unknown>;
+  metric_deltas: Record<string, number | null>;
+  known_limitations: Record<string, unknown>[];
+  new_rules: string[];
+  changed_rules: string[];
+  removed_rules: string[];
+  changelog: string;
+  published_at: string;
+}
+
+/** ТЗ 1.0.3B §23: a bulk re-evaluation. Dry run unless told otherwise, pausable, cancellable. */
+export interface ReanalysisJob {
+  job_id: string;
+  state: "QUEUED" | "RUNNING" | "PAUSED" | "CANCELLED" | "COMPLETED" | "FAILED";
+  dry_run: boolean;
+  window_from: string;
+  window_to: string;
+  filters: Record<string, unknown>;
+  max_messages: number;
+  total_messages: number;
+  processed: number;
+  /** Null until the batch size is known: "not started" and "nothing to do" differ. */
+  progress: number | null;
+  verdict_changed: number;
+  newly_suspicious: number;
+  newly_cleared: number;
+  sample: Record<string, unknown>[];
+  requested_by: string;
+  cancelled_by: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface DetectionGap {
+  gap_id: string;
+  category: string;
+  description: string;
+  root_cause: string;
+  severity: Severity;
+  status: string;
+  owner: string;
+  target_release: string;
+  examples: string[];
+  mitigation: string;
+  planned_fix: string;
+  reported_misses: number;
+}
+
+export interface ThreatScenarioView {
+  scenario_id: string;
+  title: string;
+  category: string;
+  description: string;
+  severity: Severity;
+  rules: string[];
+  fixtures: string[];
+  playbook: string;
+  enabled: boolean;
+  covered: boolean;
+  active_rules: number;
+  shadow_rules: number;
+}
+
+export interface SimulationResult {
+  message_id: string;
+  classification: RiskLevel;
+  score: number;
+  signals: {
+    rule_id: string;
+    rule_version: number;
+    title: string;
+    category: string;
+    severity: string;
+    weight: number;
+    confidence: number;
+    shadow: boolean;
+    suppressed: boolean;
+    condition: string | null;
+    evidence: Record<string, unknown>;
+  }[];
+  matched_facts: Record<string, unknown>;
+  missing_evidence: string[];
+  ruleset_fingerprint: string;
+}
+
 export interface MessageSummary {
   message_id: string;
   subject: string;
@@ -392,6 +635,213 @@ export const api = {
     request<{ unread: number; items: Record<string, unknown>[] }>(
       `/api/v1/notifications${query({ unread_only: unreadOnly })}`,
     ),
+
+  // --- ТЗ 1.0.3: очередь, классификация, качество детектирования ---------------------------
+  investigationQueue: (params: { mine?: boolean; include_closed?: boolean; limit?: number } = {}) =>
+    request<QueueItem[]>(`/api/v1/investigations/queue${query(params)}`),
+
+  assignIncident: (id: string, body: { assignee_email?: string; candidates?: string[] }) =>
+    request<Record<string, string>>(`/api/v1/incidents/${id}/assign`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  incidentTimeline: (id: string) =>
+    request<{ at: string; event: string; detail: string }[]>(`/api/v1/incidents/${id}/timeline`),
+
+  classifyIncident: (
+    id: string,
+    body: {
+      classification: AnalystClassification;
+      comment?: string;
+      confidence?: "high" | "medium" | "low";
+      offending_rules?: string[];
+      offending_signals?: string[];
+    },
+  ) =>
+    request<Record<string, unknown>>(`/api/v1/incidents/${id}/classification`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  employeeFeedback: (id: string) =>
+    request<{ incident_id: string; classification: string; classified: boolean; text: string }>(
+      `/api/v1/incidents/${id}/employee-feedback`,
+    ),
+
+  reportMissedDetection: (body: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/api/v1/detection/missed", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  detectionFeedback: (kind?: "false_positive" | "false_negative") =>
+    request<Record<string, unknown>[]>(`/api/v1/detection/feedback${query({ kind })}`),
+
+  detectionRules: (params: { status?: string; category?: string } = {}) =>
+    request<DetectionRule[]>(`/api/v1/detection/rules${query(params)}`),
+
+  syncDetectionRegistry: () =>
+    request<{ rules: number; gaps: number; scenarios: number }>("/api/v1/detection/rules/sync", {
+      method: "POST",
+    }),
+
+  changeRuleStatus: (ruleId: string, body: { status: string; reason: string; reviewer?: string }) =>
+    request<Record<string, unknown>>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ruleChanges: () => request<Record<string, unknown>[]>("/api/v1/detection/rules/changes"),
+
+  simulateRules: (body: { message_id: string; rule_id?: string }) =>
+    request<SimulationResult>("/api/v1/detection/simulate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  replayAnalysis: (jobId: string, apply = false) =>
+    request<Record<string, unknown>>(`/api/v1/analysis/${jobId}/replay`, {
+      method: "POST",
+      body: JSON.stringify({ apply }),
+    }),
+
+  reevaluate: (body: { days: number; dry_run: boolean; limit?: number }) =>
+    request<Record<string, unknown>>("/api/v1/detection/reevaluate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  canaries: (includeDecided = false) =>
+    request<CanaryRollout[]>(`/api/v1/detection/canaries${query({ include_decided: includeDecided })}`),
+
+  startCanary: (
+    ruleId: string,
+    body: {
+      scope: "MAILBOX" | "DEPARTMENT" | "PERCENT";
+      scope_values?: string[];
+      percent?: number;
+      days?: number;
+      reason: string;
+    },
+  ) =>
+    request<CanaryRollout>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}/canary`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  decideCanary: (ruleId: string, body: { state: "PROMOTED" | "ABORTED"; note?: string }) =>
+    request<CanaryRollout>(
+      `/api/v1/detection/rules/${encodeURIComponent(ruleId)}/canary/decision`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  ruleQuality: (days = 30) =>
+    request<RuleQuality[]>(`/api/v1/detection/rules/quality${query({ days })}`),
+
+  snapshotRuleQuality: (days = 30) =>
+    request<{ snapshots: number; period_days: number }>(
+      `/api/v1/detection/rules/quality/snapshot${query({ days })}`,
+      { method: "POST" },
+    ),
+
+  rule: (ruleId: string) =>
+    request<Record<string, unknown>>(`/api/v1/detection/rules/${encodeURIComponent(ruleId)}`),
+
+  candidates: () => request<RuleCandidate[]>("/api/v1/detection/candidates"),
+
+  createCandidate: (body: { name: string; source: string; description?: string }) =>
+    request<RuleCandidate>("/api/v1/detection/candidates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  benchmarkCandidate: (id: string) =>
+    request<Record<string, unknown>>(`/api/v1/detection/candidates/${id}/benchmark`, {
+      method: "POST",
+    }),
+
+  submitCandidate: (id: string) =>
+    request<RuleCandidate>(`/api/v1/detection/candidates/${id}/submit`, { method: "POST" }),
+
+  reviewCandidate: (id: string, body: { approve: boolean; comment?: string }) =>
+    request<RuleCandidate>(`/api/v1/detection/candidates/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  releases: () => request<DetectionRelease[]>("/api/v1/detection/releases"),
+
+  publishRelease: (body: { candidate_id?: string; note?: string }) =>
+    request<DetectionRelease>("/api/v1/detection/releases", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  reanalysisJobs: () => request<ReanalysisJob[]>("/api/v1/reanalysis/jobs"),
+
+  createReanalysisJob: (body: {
+    days?: number;
+    dry_run: boolean;
+    max_messages?: number;
+    filters?: Record<string, string>;
+  }) =>
+    request<ReanalysisJob>("/api/v1/reanalysis/jobs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  runReanalysisJob: (id: string, slices = 20) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/run${query({ slices })}`, {
+      method: "POST",
+    }),
+
+  pauseReanalysisJob: (id: string) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/pause`, { method: "POST" }),
+
+  cancelReanalysisJob: (id: string) =>
+    request<ReanalysisJob>(`/api/v1/reanalysis/jobs/${id}/cancel`, { method: "POST" }),
+
+  messageGraph: (messageId: string) =>
+    request<{
+      nodes: { id: string; kind: string; label: string; detail: Record<string, unknown> }[];
+      edges: { source: string; target: string; kind: string; label: string }[];
+      truncated: string[];
+      complete: boolean;
+    }>(`/api/v1/investigations/messages/${encodeURIComponent(messageId)}/graph`),
+
+  relatedMessages: (messageId: string, days = 90) =>
+    request<Record<string, unknown>[]>(
+      `/api/v1/investigations/messages/${encodeURIComponent(messageId)}/related${query({ days })}`,
+    ),
+
+  analysisFeedback: (analysisId: string, body: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/v1/analysis/${analysisId}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  analysisRevisions: (analysisId: string) =>
+    request<Record<string, unknown>[]>(`/api/v1/analysis/${analysisId}/revisions`),
+
+  detectionGaps: (status?: string) =>
+    request<DetectionGap[]>(`/api/v1/detection/gaps${query({ status })}`),
+
+  updateGap: (gapId: string, body: { status: string; note?: string }) =>
+    request<DetectionGap>(`/api/v1/detection/gaps/${encodeURIComponent(gapId)}/status`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  threatScenarios: () => request<ThreatScenarioView[]>("/api/v1/detection/scenarios"),
+
+  detectionQuality: (days = 30) =>
+    request<DetectionQuality>(`/api/v1/detection/quality${query({ days })}`),
+
+  shadowRules: (days = 30) =>
+    request<Record<string, unknown>[]>(`/api/v1/detection/shadow${query({ days })}`),
+
+  detectionVersions: () => request<Record<string, unknown>>("/api/v1/detection/versions"),
 
   markNotificationRead: (id: string) =>
     request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),

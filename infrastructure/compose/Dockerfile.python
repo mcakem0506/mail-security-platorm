@@ -1,10 +1,16 @@
 # Shared image for the API and the workers.
 FROM python:3.12-slim-bookworm AS base
 
+# The commit this image was built from. A runtime image has no git and no repository, so
+# without this the release manifest loses the one field that ties a release to a diff — and a
+# manifest nobody can trace back to source is not a manifest (ТЗ 1.0.3B §24).
+ARG MSP_COMMIT_SHA=""
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MSP_COMMIT_SHA=${MSP_COMMIT_SHA}
 
 # libmagic is not used (type detection is implemented in-process); only build essentials for
 # wheels that have no manylinux build are installed, and they are removed afterwards.

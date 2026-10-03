@@ -26,6 +26,8 @@ from ..db.models import (
     DetectionException,
     DetectionSignal,
     Incident,
+    IncidentClassification,
+    IncidentMessage,
     Indicator,
     MailMessage,
     ProviderLookup,
@@ -507,6 +509,166 @@ def provider_availability(session: Session, organization_id: str, days: int = 7)
     )
 
 
+def provider_quality(session: Session, organization_id: str, days: int = 30) -> Report:
+    """What each external source is actually worth (ТЗ 1.0.3 §36).
+
+    Availability answers "did it answer"; this answers "was the answer any use". The two come
+    apart constantly: a provider can be up all month and return "no data" for every indicator
+    an organisation cares about, and paying for it is then a decision somebody should be able
+    to make from a number.
+
+    Four things are measured per provider:
+
+    * **coverage** — the share of lookups that came back with a usable answer rather than
+      "unknown". A provider with 100% availability and 5% coverage is not protecting anyone.
+    * **cache hit rate** — how much of the traffic never left the network at all. High is good
+      for cost and for privacy (ТЗ §49: every outbound lookup is data leaving the organisation).
+    * **decisiveness** — how often this provider was the source of a signal that scored. A
+      provider that never contributes to a verdict is a subscription, not a control.
+    * **contradicted** — how often a message it flagged was later classified benign by an
+      analyst. This is the one number that can justify lowering a provider's weight.
+
+    Every ratio is ``None`` when its denominator is zero. A provider with no lookups has no
+    coverage; it does not have 0% coverage, and the two must not look the same.
+    """
+    period = ReportPeriod.last_days(days)
+
+    lookups = (
+        session.execute(
+            select(ProviderLookup)
+            .join(AnalysisJob, AnalysisJob.id == ProviderLookup.analysis_job_id)
+            .where(
+                AnalysisJob.organization_id == organization_id,
+                ProviderLookup.fetched_at >= period.start,
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    #: Signals whose source names a provider, used for decisiveness.
+    signal_rows = session.execute(
+        select(DetectionSignal.source, AnalysisResult.id, DetectionSignal.suppressed)
+        .join(AnalysisResult, AnalysisResult.id == DetectionSignal.result_id)
+        .join(AnalysisJob, AnalysisJob.id == AnalysisResult.job_id)
+        .where(
+            AnalysisJob.organization_id == organization_id,
+            AnalysisResult.created_at >= period.start,
+        )
+    ).all()
+
+    benign_results: set[str] = set()
+    for result_id, classification in session.execute(
+        select(AnalysisResult.id, IncidentClassification.classification)
+        .join(IncidentMessage, IncidentMessage.message_id == AnalysisResult.message_id)
+        .join(
+            IncidentClassification,
+            IncidentClassification.incident_id == IncidentMessage.incident_id,
+        )
+        .join(AnalysisJob, AnalysisJob.id == AnalysisResult.job_id)
+        .where(
+            AnalysisJob.organization_id == organization_id,
+            AnalysisResult.created_at >= period.start,
+        )
+    ).all():
+        value = classification.value if hasattr(classification, "value") else str(classification)
+        if value in {"LEGITIMATE", "FALSE_POSITIVE", "BENIGN_SIMULATION"}:
+            benign_results.add(result_id)
+
+    per_provider: dict[str, dict[str, Any]] = {}
+    for lookup in lookups:
+        entry = per_provider.setdefault(
+            lookup.provider_id,
+            {
+                "provider": lookup.provider_id,
+                "lookups": 0,
+                "from_cache": 0,
+                "failures": 0,
+                "with_answer": 0,
+                "latency_sum": 0,
+                "latency_samples": 0,
+                "decisive": 0,
+                "contradicted": 0,
+            },
+        )
+        entry["lookups"] += 1
+        status = lookup.status.value if hasattr(lookup.status, "value") else str(lookup.status)
+        if lookup.from_cache:
+            entry["from_cache"] += 1
+        if status in {"RATE_LIMITED", "PROVIDER_UNAVAILABLE", "ERROR"}:
+            entry["failures"] += 1
+        elif status not in {"UNKNOWN", "NOT_FOUND", "SKIPPED_BY_POLICY"}:
+            entry["with_answer"] += 1
+        if lookup.latency_ms:
+            entry["latency_sum"] += int(lookup.latency_ms)
+            entry["latency_samples"] += 1
+
+    for source, result_id, suppressed in signal_rows:
+        provider = str(source or "")
+        if provider not in per_provider:
+            continue
+        if suppressed:
+            continue
+        per_provider[provider]["decisive"] += 1
+        if result_id in benign_results:
+            per_provider[provider]["contradicted"] += 1
+
+    rows: list[dict[str, Any]] = []
+    for entry in per_provider.values():
+        total = entry["lookups"]
+        decisive = entry["decisive"]
+        rows.append(
+            {
+                "provider": entry["provider"],
+                "lookups": total,
+                "availability": _share(total - entry["failures"], total),
+                "coverage": _share(entry["with_answer"], total),
+                "cache_hit_rate": _share(entry["from_cache"], total),
+                "avg_latency_ms": (
+                    round(entry["latency_sum"] / entry["latency_samples"], 1)
+                    if entry["latency_samples"]
+                    else None
+                ),
+                "decisive_signals": decisive,
+                "contradicted_by_analyst": entry["contradicted"],
+                "contradiction_rate": _share(entry["contradicted"], decisive),
+            }
+        )
+    rows.sort(key=lambda row: (-(row["coverage"] or 0.0), row["provider"]))
+
+    return Report(
+        name="provider_quality",
+        period=period,
+        summary={
+            "providers": len(rows),
+            "lookups": sum(row["lookups"] for row in rows),
+            "note": (
+                "Пустое значение означает, что метрику не на чем посчитать. Это не ноль: "
+                "источник без запросов не имеет нулевого покрытия."
+            ),
+        },
+        rows=rows,
+        columns=[
+            "provider",
+            "lookups",
+            "availability",
+            "coverage",
+            "cache_hit_rate",
+            "avg_latency_ms",
+            "decisive_signals",
+            "contradicted_by_analyst",
+            "contradiction_rate",
+        ],
+    )
+
+
+def _share(part: int, whole: int) -> float | None:
+    """A ratio, or ``None`` when there is nothing to divide by."""
+    if not whole:
+        return None
+    return round(part / whole, 4)
+
+
 def indicators_export(session: Session, organization_id: str, confirmed_only: bool = True) -> Report:
     """Export indicators for sharing with other systems (ТЗ 37)."""
     query = select(Indicator).where(Indicator.organization_id == organization_id)
@@ -585,6 +747,7 @@ REPORTS = {
     "employee_reporting": employee_reporting,
     "false_positives": false_positives_report,
     "provider_availability": provider_availability,
+    "provider_quality": provider_quality,
     "indicators": indicators_export,
     "audit": audit_export,
 }

@@ -84,9 +84,13 @@ which is what decides whether those headers mean anything.
 
 def export(out_dir: Path, *, manifest_only: bool = False) -> dict[str, object]:
     grouped = by_category()
+    # ``categories`` is held in its own name so the manifest stays typed end to end: with it
+    # inlined, every read of manifest["categories"] is an ``object`` and needs a cast at the
+    # call site, which is how this file ended up with two silencing comments and a latent error.
+    categories: dict[str, list[dict[str, object]]] = {}
     manifest: dict[str, object] = {
         "total": len(CORPUS),
-        "categories": {},
+        "categories": categories,
         "generated_by": "scripts/export_corpus.py",
     }
 
@@ -106,7 +110,7 @@ def export(out_dir: Path, *, manifest_only: bool = False) -> dict[str, object]:
             }
             for fixture in fixtures
         ]
-        manifest["categories"][category] = entries  # type: ignore[index]
+        categories[category] = entries
 
         if manifest_only:
             continue
@@ -138,8 +142,10 @@ def main() -> int:
 
     out_dir = Path(args.out)
     manifest = export(out_dir, manifest_only=args.manifest_only)
+    categories = manifest["categories"]
+    assert isinstance(categories, dict)
     print(f"Корпус: {manifest['total']} писем -> {out_dir}")
-    for category, entries in manifest["categories"].items():  # type: ignore[union-attr]
+    for category, entries in categories.items():
         print(f"  {category}: {len(entries)}")
     print(
         "\nВсе письма синтетические и инертные. Реальные письма добавляйте только "

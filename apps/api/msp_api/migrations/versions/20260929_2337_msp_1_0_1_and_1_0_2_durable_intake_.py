@@ -525,15 +525,73 @@ def upgrade() -> None:
     )
     op.create_index(op.f("ix_intake_records_state"), "intake_records", ["state"], unique=False)
     op.create_index("ix_intake_state", "intake_records", ["organization_id", "state"], unique=False)
-    op.add_column("analysis_jobs", sa.Column("scan_completeness", sa.String(length=16), nullable=False))
+    # Existing deployments already hold rows in these tables, so a NOT NULL column needs a
+    # value for them. The server default fills the backlog and is then dropped: the default
+    # belongs in the model, and leaving it in the schema would let an INSERT that forgot the
+    # column succeed silently.
+    op.add_column(
+        "analysis_jobs",
+        sa.Column(
+            "scan_completeness",
+            sa.String(length=16),
+            nullable=False,
+            server_default=sa.text("'FULL'"),
+        ),
+    )
+    op.alter_column("analysis_jobs", "scan_completeness", server_default=None)
     op.create_index(
         op.f("ix_analysis_jobs_scan_completeness"), "analysis_jobs", ["scan_completeness"], unique=False
     )
-    op.add_column("analysis_results", sa.Column("scan_completeness", sa.String(length=16), nullable=False))
-    op.add_column("protected_identities", sa.Column("risk_class", sa.String(length=16), nullable=False))
-    op.add_column("protected_identities", sa.Column("vip", sa.Boolean(), nullable=False))
-    op.add_column("protected_identities", sa.Column("protected", sa.Boolean(), nullable=False))
-    op.add_column("protected_identities", sa.Column("source", sa.String(length=16), nullable=False))
+    op.add_column(
+        "analysis_results",
+        sa.Column(
+            "scan_completeness",
+            sa.String(length=16),
+            nullable=False,
+            server_default=sa.text("'FULL'"),
+        ),
+    )
+    op.alter_column("analysis_results", "scan_completeness", server_default=None)
+    op.add_column(
+        "protected_identities",
+        sa.Column(
+            "risk_class",
+            sa.String(length=16),
+            nullable=False,
+            server_default=sa.text("'STANDARD'"),
+        ),
+    )
+    op.alter_column("protected_identities", "risk_class", server_default=None)
+    op.add_column(
+        "protected_identities",
+        sa.Column(
+            "vip",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("false"),
+        ),
+    )
+    op.alter_column("protected_identities", "vip", server_default=None)
+    op.add_column(
+        "protected_identities",
+        sa.Column(
+            "protected",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("true"),
+        ),
+    )
+    op.alter_column("protected_identities", "protected", server_default=None)
+    op.add_column(
+        "protected_identities",
+        sa.Column(
+            "source",
+            sa.String(length=16),
+            nullable=False,
+            server_default=sa.text("'MANUAL'"),
+        ),
+    )
+    op.alter_column("protected_identities", "source", server_default=None)
     op.create_index(
         op.f("ix_protected_identities_risk_class"), "protected_identities", ["risk_class"], unique=False
     )

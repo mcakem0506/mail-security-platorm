@@ -445,6 +445,12 @@ class RuleSet:
                 elif key in facts:
                     evidence[key] = True
             exc = ctx.matching_exception(sender=sender, domain=domain, rule_id=rule.id)
+            # A rule being rolled out to part of the organisation scores only inside its scope.
+            # Outside it the rule behaves exactly as a shadow rule does — measured, recorded,
+            # powerless — which is both the safe default and the control group the rollout is
+            # judged against (ТЗ 1.0.3 §52).
+            withheld = rule.id in ctx.withheld_rules
+            scores = rule.scores and not withheld
             signal = Signal(
                 id=f"{rule.id}.v{rule.version}",
                 category=rule.category,
@@ -452,16 +458,17 @@ class RuleSet:
                 explanation=rule.explanation or rule.name,
                 severity=rule.severity,
                 confidence=rule.confidence,
-                weight=rule.effective_weight,
+                weight=rule.effective_weight if scores else 0.0,
                 source="rule_engine",
                 evidence=evidence,
                 rule_id=rule.id,
                 rule_version=rule.version,
                 # A SHADOW rule never produces a hard signal: a hard signal sets a floor on
                 # the classification, which is exactly the influence shadow mode withholds.
-                hard=rule.hard and rule.scores,
-                internal=rule.internal or not rule.scores,
-                shadow=not rule.scores,
+                hard=rule.hard and scores,
+                internal=rule.internal or not scores,
+                shadow=not scores,
+                withheld_by="canary" if withheld and rule.scores else None,
                 rule_status=rule.status.value,
                 rule_condition=rule.condition_source,
                 recommendation=rule.recommendation or None,

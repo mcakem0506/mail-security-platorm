@@ -19,6 +19,7 @@ from .dataset import (
     EvaluationCase,
     PiiStatus,
 )
+from .environment import CORP, evaluation_context, findings_factory, gateway_registry
 from .gate import Baseline, GateResult, GateThresholds, GateViolation, check
 from .metrics import (
     CategoryMetrics,
@@ -34,6 +35,7 @@ from .runner import CaseOutcome, EvaluationResult, EvaluationRunner, score
 __all__ = [
     "AMBIGUOUS_CATEGORIES",
     "BENIGN_CATEGORIES",
+    "CORP",
     "ApprovalStatus",
     "Baseline",
     "CaseOutcome",
@@ -54,6 +56,9 @@ __all__ = [
     "RuleMetrics",
     "build_golden_dataset",
     "check",
+    "evaluation_context",
+    "findings_factory",
+    "gateway_registry",
     "is_flagged",
     "ratio",
     "render_markdown",

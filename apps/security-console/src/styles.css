@@ -540,3 +540,18 @@ textarea {
 .tag--ok {
   background: rgba(34, 139, 34, 0.15);
 }
+
+
+/* Grouped navigation (ТЗ 1.0.3B §45). */
+.nav-group {
+  margin-bottom: 1.1rem;
+}
+
+.nav-group__title {
+  padding: 0 1rem 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}

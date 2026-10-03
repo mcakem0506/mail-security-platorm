@@ -78,10 +78,10 @@
 Каждый путь присоединяется к настроенному базовому URL и **перепроверяется** перед отправкой:
 
 ```python
-build_url("https://gw.corp.example/api/v1/", "messages/42")        # ок
-build_url("https://gw.corp.example/api/v1/", "https://evil/x")     # ApiConfigurationError
-build_url("https://gw.corp.example/api/v1/", "../../../admin")     # ApiConfigurationError
-build_url("https://gw.corp.example/api/v1/", "x\r\nX-Injected: 1") # ApiConfigurationError
+build_url("https://gw.corp.example/api/v1/", "messages/42")  # ок
+build_url("https://gw.corp.example/api/v1/", "https://evil/x")  # ApiConfigurationError
+build_url("https://gw.corp.example/api/v1/", "../../../admin")  # ApiConfigurationError
+build_url("https://gw.corp.example/api/v1/", "x\r\nX-Injected: 1")  # ApiConfigurationError
 ```
 
 Это SSRF-шлюз: значение пути может происходить из письма. Дополнительно:

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type CurrentUser } from "../api/client";
+import { api, type AnalystClassification, type CurrentUser } from "../api/client";
 import { INCIDENT_STATUS_LABELS, SEVERITY_LABELS, formatDate } from "../types";
 
 interface Incident {
@@ -29,8 +29,251 @@ interface Note {
   created_at: string;
 }
 
+/**
+ * Analyst classification (ТЗ 1.0.3 §22, §23, §34).
+ *
+ * This is where every quality metric in the product comes from, which is why the form asks for
+ * more than a verdict: naming the rules that produced a false positive is what turns "the
+ * platform was wrong" into something a rule owner can act on. Closing a case as harmless
+ * requires a reason, because that is the decision most likely to be re-read after an incident.
+ */
+/** Timeline event codes, in the analyst's language. */
+const TIMELINE_LABELS: Record<string, string> = {
+  message_received: "Получено письмо",
+  employee_reported: "Сообщил сотрудник",
+  analyzed: "Выполнен анализ",
+  gateway_scanned: "Проверено шлюзом",
+  campaign_created: "Кампания",
+  analyst_assigned: "Назначен исполнитель",
+  classification_changed: "Классифицировано аналитиком",
+  remediation_proposed: "Предложено реагирование",
+  remediation_executed: "Выполнено реагирование",
+  closed: "Инцидент закрыт",
+};
+
+const CLASSIFICATIONS: { value: AnalystClassification; label: string }[] = [
+  { value: "CONFIRMED_PHISHING", label: "Подтверждён фишинг" },
+  { value: "CONFIRMED_BEC", label: "Подтверждён BEC" },
+  { value: "CONFIRMED_MALWARE", label: "Подтверждено ВПО" },
+  { value: "CONFIRMED_IMPERSONATION", label: "Подтверждена имитация" },
+  { value: "CONFIRMED_SPAM", label: "Нежелательная почта" },
+  { value: "LEGITIMATE", label: "Легитимное письмо" },
+  { value: "FALSE_POSITIVE", label: "Ложное срабатывание" },
+  { value: "BENIGN_SIMULATION", label: "Учебная рассылка" },
+  { value: "UNKNOWN", label: "Не удалось определить" },
+];
+
+/** Verdicts meaning "nothing was wrong with this message". */
+const BENIGN: AnalystClassification[] = ["LEGITIMATE", "FALSE_POSITIVE", "BENIGN_SIMULATION"];
+
+const ROOT_CAUSES = [
+  { value: "MISSING_RULE", label: "нет подходящего правила" },
+  { value: "MISSING_FACT", label: "признак не извлечён" },
+  { value: "PARSER_FAILURE", label: "не разобрано письмо или вложение" },
+  { value: "NORMALIZATION_FAILURE", label: "нормализация потеряла значимое" },
+  { value: "TI_MISSING", label: "внешний источник ничего не знал об индикаторе" },
+  { value: "PROVIDER_FAILURE", label: "не ответил внешний источник" },
+  { value: "RULE_LOGIC", label: "правило есть, условие не совпало" },
+  { value: "RISK_AGGREGATION", label: "признаков хватало, но баллов — нет" },
+  { value: "EXCEPTION_SUPPRESSION", label: "сигнал подавлен исключением" },
+  { value: "UNSUPPORTED_FORMAT", label: "формат вложения не разбирается" },
+  { value: "OTHER", label: "другая причина" },
+  { value: "UNKNOWN", label: "причина не установлена" },
+];
+
+function ClassificationPanel({
+  incidentId,
+  onChanged,
+}: {
+  incidentId: string;
+  onChanged: () => void;
+}) {
+  const [classification, setClassification] = useState<AnalystClassification>("CONFIRMED_PHISHING");
+  const [comment, setComment] = useState("");
+  const [rules, setRules] = useState("");
+  const [confidence, setConfidence] = useState<"high" | "medium" | "low">("high");
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const benign = BENIGN.includes(classification);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.classifyIncident(incidentId, {
+        classification,
+        comment: comment.trim(),
+        confidence,
+        offending_rules: rules
+          .split(/[\s,]+/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      });
+      const text = await api.employeeFeedback(incidentId);
+      setFeedback(text.text);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось сохранить классификацию");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card__header">
+        <h3>Классификация аналитика</h3>
+      </div>
+      <p className="muted small">
+        Из решений аналитика считаются все метрики качества. Инцидент, закрытый без
+        классификации, выпадает из статистики молча.
+      </p>
+      <div className="form-row">
+        <label>
+          Решение
+          <select
+            value={classification}
+            onChange={(e) => setClassification(e.target.value as AnalystClassification)}
+          >
+            {CLASSIFICATIONS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Уверенность
+          <select
+            value={confidence}
+            onChange={(e) => setConfidence(e.target.value as "high" | "medium" | "low")}
+          >
+            <option value="high">высокая</option>
+            <option value="medium">средняя</option>
+            <option value="low">низкая</option>
+          </select>
+        </label>
+      </div>
+      {benign && (
+        <label>
+          Правила, давшие ложное срабатывание
+          <input
+            type="text"
+            value={rules}
+            placeholder="например: BEC-014 SND-030"
+            onChange={(e) => setRules(e.target.value)}
+          />
+          <span className="muted small">
+            Необязательно, но именно это превращает «платформа ошиблась» в задачу владельцу
+            правила.
+          </span>
+        </label>
+      )}
+      <label>
+        Комментарий{benign ? " (обязателен)" : ""}
+        <textarea rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </label>
+      {error && <p className="error">{error}</p>}
+      <button
+        type="button"
+        className="button button--primary"
+        disabled={busy}
+        onClick={() => void submit()}
+      >
+        Сохранить решение
+      </button>
+      {feedback && (
+        <div className="notice notice--info">
+          <strong>Формулировка для сотрудника:</strong>
+          <p>{feedback}</p>
+          <p className="muted small">
+            Текст предлагается для проверки, а не отправляется автоматически. Платформа может
+            сообщить, что угроз не обнаружено, но не может утверждать, что их нет.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Reporting a miss (ТЗ 1.0.3 §26): the platform cannot find its own false negatives. */
+function MissedDetectionPanel({ incidentId }: { incidentId: string }) {
+  const [open, setOpen] = useState(false);
+  const [rootCause, setRootCause] = useState("MISSING_RULE");
+  const [expected, setExpected] = useState("");
+  const [comment, setComment] = useState("");
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setError(null);
+    try {
+      await api.reportMissedDetection({
+        incident_id: incidentId,
+        source: "ANALYST",
+        root_cause: rootCause,
+        expected_detection: expected.trim(),
+        comment: comment.trim(),
+      });
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось зарегистрировать пропуск");
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="button button--ghost" onClick={() => setOpen(true)}>
+        Сообщить о пропущенном детекте
+      </button>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="card__header">
+        <h3>Пропущенный детект</h3>
+      </div>
+      <p className="muted small">
+        Платформа не может обнаружить собственные пропуски, поэтому такая запись — единственный
+        след того, что пропуск был. Укажите слой, который не сработал: от этого зависит, кто и
+        где будет исправлять.
+      </p>
+      <label>
+        Причина
+        <select value={rootCause} onChange={(e) => setRootCause(e.target.value)}>
+          {ROOT_CAUSES.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Что должно было сработать
+        <input type="text" value={expected} onChange={(e) => setExpected(e.target.value)} />
+      </label>
+      <label>
+        Комментарий
+        <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)} />
+      </label>
+      {error && <p className="error">{error}</p>}
+      {done ? (
+        <p className="tag tag--ok">Пропуск зарегистрирован</p>
+      ) : (
+        <button type="button" className="button" onClick={() => void submit()}>
+          Зарегистрировать
+        </button>
+      )}
+    </div>
+  );
+}
+
 function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident; canManage: boolean; onChanged: () => void }) {
   const [notes, setNotes] = useState<Note[]>([]);
+  const [timeline, setTimeline] = useState<{ at: string; event: string; detail: string }[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,9 +286,21 @@ function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident
     }
   }, [incident.incident_id]);
 
+  // The timeline is assembled from what actually happened — messages, gateway evidence,
+  // assignments, classifications, remediation — rather than read from a field somebody has to
+  // remember to fill in (ТЗ 1.0.3 §21).
+  const loadTimeline = useCallback(async () => {
+    try {
+      setTimeline(await api.incidentTimeline(incident.incident_id));
+    } catch {
+      setTimeline([]);
+    }
+  }, [incident.incident_id]);
+
   useEffect(() => {
     void loadNotes();
-  }, [loadNotes]);
+    void loadTimeline();
+  }, [loadNotes, loadTimeline]);
 
   async function changeStatus(status: string) {
     setBusy(true);
@@ -113,13 +368,13 @@ function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident
 
       <h3>Хронология</h3>
       <ul className="timeline">
-        {incident.timeline.map((entry, index) => (
+        {timeline.map((entry, index) => (
           <li key={`${entry.at}-${index}`}>
-            <span className="muted">{formatDate(entry.at)}</span> — {entry.event}
-            {entry.detail && <span className="muted"> ({entry.detail})</span>}
-            <span className="muted"> · {entry.actor}</span>
+            <span className="muted">{formatDate(entry.at)}</span> — {TIMELINE_LABELS[entry.event] ?? entry.event}
+            {entry.detail && <span className="muted"> · {entry.detail}</span>}
           </li>
         ))}
+        {timeline.length === 0 && <li className="muted">Записей нет</li>}
       </ul>
 
       <h3>Заметки аналитика</h3>
@@ -134,6 +389,13 @@ function IncidentDetail({ incident, canManage, onChanged }: { incident: Incident
         ))}
         {notes.length === 0 && <li className="muted">Заметок нет</li>}
       </ul>
+      {canManage && (
+        <>
+          <ClassificationPanel incidentId={incident.incident_id} onChanged={onChanged} />
+          <MissedDetectionPanel incidentId={incident.incident_id} />
+        </>
+      )}
+
       {canManage && (
         <div className="note-form">
           <textarea

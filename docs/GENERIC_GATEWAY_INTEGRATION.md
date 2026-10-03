@@ -126,10 +126,10 @@ registry = GatewayRegistry.from_configs(configs)
 from msp_mail_gateway import SKELETONS
 
 skeleton = SKELETONS["proofpoint"]
-provider = skeleton.build("proofpoint-edge")     # рабочий провайдер заголовков
-skeleton.implemented                              # что работает сейчас
-skeleton.planned                                  # что даст API, когда будет реализован
-skeleton.prerequisites                            # что нужно от организации
+provider = skeleton.build("proofpoint-edge")  # рабочий провайдер заголовков
+skeleton.implemented  # что работает сейчас
+skeleton.planned  # что даст API, когда будет реализован
+skeleton.prerequisites  # что нужно от организации
 ```
 
 | Продукт | Работает сейчас | Планируется через API |

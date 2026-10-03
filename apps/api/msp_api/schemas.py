@@ -7,14 +7,26 @@ from typing import Any, Literal
 
 from msp_contracts import (
     AnalysisStatus,
+    AnalystClassification,
+    CanaryScope,
+    CanaryState,
+    CandidateState,
     ExceptionType,
+    FalseNegativeSource,
+    FalsePositiveReason,
+    GapStatus,
     IncidentStatus,
     IOCType,
+    ReanalysisState,
     RemediationState,
     RemediationType,
     RiskLevel,
     Role,
+    RootCause,
+    RuleHealth,
+    RuleStatus,
     Severity,
+    SignalDisposition,
 )
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -588,3 +600,499 @@ class PaginatedResponse(ApiModel):
 class ErrorResponse(ApiModel):
     detail: str
     request_id: str | None = None
+
+
+# ---------------------------------------------------------------------------------------------
+# Detection quality, rule lifecycle and analyst workflow (ТЗ 1.0.3 §54)
+# ---------------------------------------------------------------------------------------------
+class ClassificationRequest(ApiModel):
+    """An analyst's verdict on an incident (ТЗ 1.0.3 §22)."""
+
+    classification: AnalystClassification
+    comment: str = Field(default="", max_length=4000)
+    confidence: Literal["high", "medium", "low"] = "high"
+    #: Which rules produced the wrong answer. Optional, but naming them is what turns a
+    #: "false positive" into something a rule owner can actually act on.
+    offending_rules: list[str] = Field(default_factory=list, max_length=50)
+    offending_signals: list[str] = Field(default_factory=list, max_length=50)
+
+
+class ClassificationOut(ApiModel):
+    classification_id: str
+    incident_id: str
+    classification: AnalystClassification
+    previous_classification: str | None
+    analyst_email: str
+    confidence: str
+    comment: str
+    offending_rules: list[str]
+    created_at: datetime
+
+
+class MissedDetectionRequest(ApiModel):
+    """Report a message the platform should have caught (ТЗ 1.0.3 §26)."""
+
+    message_id: str | None = None
+    incident_id: str | None = None
+    source: FalseNegativeSource
+    root_cause: RootCause
+    expected_detection: str = Field(default="", max_length=255)
+    missing_fact: str = Field(default="", max_length=255)
+    comment: str = Field(default="", max_length=4000)
+    gap_id: str | None = Field(default=None, max_length=32)
+
+
+class DetectionFeedbackOut(ApiModel):
+    feedback_id: str
+    kind: str
+    message_id: str | None
+    incident_id: str | None
+    rule_id: str | None
+    analyst_email: str
+    source: str
+    root_cause: str
+    expected_detection: str
+    missing_fact: str
+    gap_id: str | None
+    created_at: datetime
+
+
+class SlaOut(ApiModel):
+    state: str
+    target: datetime | None
+    remaining_seconds: int | None
+    #: Elapsed stage timers. Only acknowledgement has a target; the rest are measured but not
+    #: bounded, because a thorough investigation is not a breach (ТЗ 1.0.3 §19).
+    timers: dict[str, int]
+
+
+class QueueItemOut(ApiModel):
+    """One row of the analyst queue (ТЗ 1.0.3 §17, §18)."""
+
+    incident_id: str
+    number: int
+    title: str
+    #: Priority is not the risk level: it is driven by consequence and spread, so a MALICIOUS
+    #: message to one person can legitimately rank below a HIGH_RISK campaign aimed at finance.
+    priority: str
+    priority_score: int
+    priority_factors: list[str]
+    sla: SlaOut
+    classification: str | None
+    confidence: str
+    status: str
+    severity: str
+    age_seconds: int
+    affected_users: list[str]
+    vip_involved: bool
+    campaign_size: int
+    gateway_conflict: bool
+    employee_report: bool
+    assignee: str | None
+    analyst_classification: str | None
+
+
+class AssignRequest(ApiModel):
+    assignee_email: EmailStr | None = None
+    #: With no assignee the platform picks the least-loaded analyst from this list.
+    candidates: list[EmailStr] = Field(default_factory=list, max_length=50)
+
+
+class TimelineEntryOut(ApiModel):
+    """One thing that actually happened to an incident (ТЗ 1.0.3 §21)."""
+
+    at: datetime
+    event: str
+    detail: str
+
+
+class RuleOut(ApiModel):
+    rule_id: str
+    version: int
+    title: str
+    category: str
+    severity: Severity
+    status: RuleStatus
+    owner: str
+    weight: float
+    scores: bool
+    hard: bool
+    scenarios: list[str]
+    condition: str | None
+    trigger_count: int = 0
+    confirmed_tp: int = 0
+    confirmed_fp: int = 0
+    precision: float | None = None
+
+
+class RuleStatusChangeRequest(ApiModel):
+    status: RuleStatus
+    reason: str = Field(min_length=10, max_length=2000)
+    reviewer: str = Field(default="", max_length=320)
+
+
+class SimulationRequest(ApiModel):
+    message_id: str
+    rule_id: str | None = Field(default=None, max_length=32)
+
+
+class SimulationSignalOut(ApiModel):
+    rule_id: str
+    rule_version: int
+    title: str
+    category: str
+    severity: str
+    weight: float
+    confidence: float
+    shadow: bool
+    suppressed: bool
+    condition: str | None
+    evidence: dict[str, Any]
+
+
+class SimulationOut(ApiModel):
+    message_id: str
+    classification: RiskLevel
+    score: int
+    signals: list[SimulationSignalOut]
+    matched_facts: dict[str, Any]
+    missing_evidence: list[str]
+    ruleset_fingerprint: str
+
+
+class ReplayRequest(ApiModel):
+    #: Default false: a replay answers "what would we say now", and answering a question must
+    #: not by itself change the stored answer.
+    apply: bool = False
+
+
+class ReplayOut(ApiModel):
+    revision_id: str
+    analysis_job_id: str
+    revision: int
+    dry_run: bool
+    original_classification: str
+    new_classification: str
+    original_score: int
+    new_score: int
+    added_rules: list[str]
+    removed_rules: list[str]
+    created_at: datetime
+
+
+class ReevaluationRequest(ApiModel):
+    days: int = Field(default=7, ge=1, le=90)
+    dry_run: bool = True
+    limit: int = Field(default=2000, ge=1, le=20000)
+
+
+class ReevaluationOut(ApiModel):
+    run_id: str
+    window_days: int
+    dry_run: bool
+    messages_examined: int
+    verdict_changed: int
+    newly_suspicious: int
+    newly_cleared: int
+    affected_campaigns: list[str]
+    affected_users: list[str]
+    sample: list[dict[str, Any]]
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class DetectionGapOut(ApiModel):
+    gap_id: str
+    category: str
+    description: str
+    root_cause: str
+    severity: Severity
+    status: GapStatus
+    owner: str
+    target_release: str
+    examples: list[str]
+    mitigation: str
+    planned_fix: str
+    reported_misses: int = 0
+
+
+class GapUpdateRequest(ApiModel):
+    status: GapStatus
+    note: str = Field(default="", max_length=2000)
+
+
+class DetectionQualityOut(ApiModel):
+    """Detection quality as measured, including what could not be measured (ТЗ 1.0.3 §35)."""
+
+    period_start: datetime
+    period_end: datetime
+    total_analyzed: int
+    classified: int
+    confirmed_threats: int
+    confirmed_benign: int
+    #: Null when there is nothing to compute it from. Never 0.0 — "no data" and "nothing
+    #: detected" are different findings and must not look the same in the console.
+    precision: float | None
+    false_positive_rate: float | None
+    reported_misses: int
+    unscannable: int
+    unknown: int
+    open_gaps: int
+    shadow_rules: int
+    #: Rules currently limited to part of the organisation (ТЗ 1.0.3 §52).
+    active_canaries: int = 0
+    #: Rollouts past their review date. Nothing expires by itself, so this is the only place an
+    #: unfinished rollout becomes visible.
+    overdue_canaries: int = 0
+    noisy_rules: list[dict[str, Any]]
+    silent_rules: list[str]
+    unowned_active_rules: list[str]
+    coverage_by_scenario: list[dict[str, Any]]
+
+
+class ThreatScenarioOut(ApiModel):
+    scenario_id: str
+    title: str
+    category: str
+    description: str
+    severity: Severity
+    rules: list[str]
+    fixtures: list[str]
+    playbook: str
+    enabled: bool
+    covered: bool
+    active_rules: int
+    shadow_rules: int
+
+
+class CampaignMergeRequest(ApiModel):
+    """Fold one campaign into another (ТЗ 1.0.3 §32)."""
+
+    source_campaign_id: str = Field(min_length=1, max_length=64)
+    #: Required, because a merge is hard to undo and the next reader needs to know why the two
+    #: waves were judged to be one.
+    reason: str = Field(min_length=5, max_length=2000)
+
+
+class CampaignSplitRequest(ApiModel):
+    """Pull messages out of a campaign into a new one (ТЗ 1.0.3 §32)."""
+
+    message_ids: list[str] = Field(min_length=1, max_length=500)
+    name: str = Field(min_length=3, max_length=255)
+    reason: str = Field(default="", max_length=2000)
+
+
+class CanaryStartRequest(ApiModel):
+    """Begin a limited rollout of an ACTIVE rule (ТЗ 1.0.3 §52)."""
+
+    scope: CanaryScope
+    #: Mailboxes or departments, depending on the scope. Empty for PERCENT.
+    scope_values: list[str] = Field(default_factory=list, max_length=500)
+    #: 1–99 for PERCENT. Not 100: that is not a canary.
+    percent: int = Field(default=0, ge=0, le=100)
+    #: When the rollout must be decided. A canary nobody ends is a rule that quietly protects
+    #: some people and not others.
+    days: int = Field(default=7, ge=1, le=30)
+    reason: str = Field(min_length=10, max_length=4000)
+
+
+class CanaryDecisionRequest(ApiModel):
+    state: CanaryState
+    note: str = Field(default="", max_length=4000)
+
+
+class CanaryOut(ApiModel):
+    """A rollout and what it has shown so far."""
+
+    rule_id: str
+    state: str
+    scope: str
+    scope_values: list[str]
+    percent: int
+    review_at: str
+    overdue: bool
+    inside_triggers: int
+    outside_triggers: int
+    inside_confirmed: int
+    inside_false_positives: int
+    outside_confirmed: int
+    outside_false_positives: int
+    #: Null until an analyst has judged something. An unjudged rollout has no precision, and
+    #: showing 100% would be the argument for promoting it.
+    inside_precision: float | None
+    outside_precision: float | None
+    ready_to_promote: bool
+
+
+# ---------------------------------------------------------------------------------------------
+# Feedback, rule quality, candidates, releases, re-evaluation (ТЗ 1.0.3B §38)
+# ---------------------------------------------------------------------------------------------
+class SignalJudgementIn(ApiModel):
+    """One analyst judgement about one signal (ТЗ 1.0.3B §4)."""
+
+    rule_id: str = Field(min_length=1, max_length=32)
+    disposition: SignalDisposition
+    signal_id: str | None = Field(default=None, max_length=64)
+    rule_version: int = Field(default=1, ge=1)
+    comment: str = Field(default="", max_length=2000)
+
+
+class AnalysisFeedbackRequest(ApiModel):
+    """Feedback on one analysis. Attached to the analysis, not the message: a verdict belongs
+    to a revision, and a message may have several."""
+
+    classification: AnalystClassification
+    confidence: Literal["high", "medium", "low"] = "high"
+    comment: str = Field(default="", max_length=4000)
+    incident_id: str | None = Field(default=None, max_length=64)
+    signals: list[SignalJudgementIn] = Field(default_factory=list, max_length=100)
+    #: Required for FALSE_POSITIVE. The reason decides who fixes it, which a free-text comment
+    #: cannot express in a way anyone can sort or assign.
+    fp_reason: FalsePositiveReason | None = None
+
+
+class MissedDetectionRequestV2(ApiModel):
+    """Report a miss with everything needed to act on it (ТЗ 1.0.3B §6)."""
+
+    source: FalseNegativeSource
+    root_cause: RootCause
+    expected_category: str = Field(min_length=2, max_length=64)
+    minimum_classification: Literal["SUSPICIOUS", "HIGH_RISK", "MALICIOUS"]
+    severity: Severity
+    owner: str = Field(min_length=3, max_length=320)
+    target_release: str = Field(min_length=2, max_length=32)
+    analysis_id: str | None = Field(default=None, max_length=64)
+    message_id: str | None = Field(default=None, max_length=64)
+    incident_id: str | None = Field(default=None, max_length=64)
+    expected_detection: str = Field(default="", max_length=255)
+    missing_fact: str = Field(default="", max_length=255)
+    comment: str = Field(default="", max_length=4000)
+    gap_id: str | None = Field(default=None, max_length=32)
+
+
+class RuleQualityOut(ApiModel):
+    rule_id: str
+    rule_version: int
+    trigger_count: int
+    analyst_reviewed: int
+    true_positive: int
+    false_positive: int
+    unknown: int
+    suppressed: int
+    #: Null until enough has been judged. An unreviewed rule has unknown precision, not perfect
+    #: precision, and a number here would be read as measured.
+    precision: float | None
+    affected_messages: int
+    affected_incidents: int
+    health: RuleHealth
+    health_reasons: list[str]
+
+
+class CandidateCreateRequest(ApiModel):
+    name: str = Field(min_length=3, max_length=128)
+    source: str = Field(min_length=1, max_length=512)
+    description: str = Field(default="", max_length=4000)
+    source_kind: Literal["path"] = "path"
+
+
+class CandidateReviewRequest(ApiModel):
+    approve: bool
+    comment: str = Field(default="", max_length=4000)
+
+
+class CandidateOut(ApiModel):
+    candidate_id: str
+    name: str
+    description: str
+    source: str
+    state: CandidateState
+    added_rules: list[str]
+    changed_rules: list[str]
+    removed_rules: list[str]
+    #: True when the change touches a hard signal, malware, credential theft, impersonation or
+    #: payment fraud. Such a change may not be approved by its own author.
+    critical_change: bool
+    critical_reasons: list[str]
+    author: str
+    reviewer: str
+    review_comment: str
+    benchmark: dict[str, Any]
+    benchmarked_at: datetime | None
+    published_at: datetime | None
+    release_id: str | None
+    created_at: datetime
+
+
+class CandidateDiffOut(ApiModel):
+    """Before/after for a candidate (ТЗ 1.0.3B §11)."""
+
+    messages_examined: int
+    messages_changed: int
+    verdict_transitions: list[dict[str, Any]]
+    newly_detected: list[str]
+    newly_missed: list[str]
+    new_false_positives: list[str]
+    resolved_false_positives: list[str]
+    affected_campaigns: list[str]
+
+
+class ReleasePublishRequest(ApiModel):
+    candidate_id: str | None = Field(default=None, max_length=64)
+    note: str = Field(default="", max_length=4000)
+
+
+class ReleaseOut(ApiModel):
+    release_id: str
+    version: str
+    ruleset_fingerprint: str
+    parser_version: str
+    risk_engine_version: str
+    dataset_version: str
+    dataset_checksum: str
+    commit_sha: str
+    candidate_id: str | None
+    approved_by: str
+    published_by: str
+    metrics: dict[str, Any]
+    metric_deltas: dict[str, Any]
+    known_limitations: list[dict[str, Any]]
+    new_rules: list[str]
+    changed_rules: list[str]
+    removed_rules: list[str]
+    changelog: str
+    published_at: datetime
+
+
+class ReanalysisCreateRequest(ApiModel):
+    """Start a bulk re-evaluation (ТЗ 1.0.3B §23). Dry run unless explicitly told otherwise."""
+
+    days: int | None = Field(default=7, ge=1, le=365)
+    window_from: datetime | None = None
+    window_to: datetime | None = None
+    dry_run: bool = True
+    max_messages: int = Field(default=5000, ge=1, le=20000)
+    filters: dict[str, str] = Field(default_factory=dict)
+    ruleset_source: str = Field(default="", max_length=512)
+
+
+class ReanalysisOut(ApiModel):
+    job_id: str
+    state: ReanalysisState
+    dry_run: bool
+    window_from: str
+    window_to: str
+    filters: dict[str, Any]
+    max_messages: int
+    total_messages: int
+    processed: int
+    #: Null until the batch size is known: "not started" and "nothing to do" must not look alike.
+    progress: float | None
+    verdict_changed: int
+    newly_suspicious: int
+    newly_cleared: int
+    sample: list[dict[str, Any]]
+    requested_by: str
+    cancelled_by: str
+    created_at: str
+    started_at: str | None
+    finished_at: str | None

@@ -32,8 +32,38 @@ class Permission(StrEnum):
     PROPOSE_REMEDIATION = "propose:remediation"
     EXPORT_DATA = "export:data"
 
+    # detection quality and rule lifecycle (ТЗ 1.0.3 §55)
+    CLASSIFY_INCIDENT = "incident:classify"
+    VIEW_DETECTION_QUALITY = "quality:read"
+    REPORT_MISSED_DETECTION = "detection:report_miss"
+    SIMULATE_DETECTION = "detection:simulate"
+    PROPOSE_RULE = "detection:propose"
+    #: Edit a candidate pack: create it, benchmark it, send it for review.
+    EDIT_RULES = "detection:edit"
+    #: Review someone else's candidate. Separate from editing so that the person who wrote
+    #: a change and the person who approves it can be required to differ (§12).
+    REVIEW_RULES = "detection:review"
+    #: Publish a release. Deliberately not given to an analyst by default (§39): publishing
+    #: decides what the whole organisation is protected by.
+    PUBLISH_RULES = "detection:publish"
+    #: Run a bulk re-evaluation of history.
+    REEVALUATE = "detection:reevaluate"
+    #: Changing a rule's lifecycle status changes what every future verdict says, so it is an
+    #: administrative act even though the rule file itself lives in Git.
+    MANAGE_DETECTION_RULES = "detection:manage"
+    MANAGE_DETECTION_GAPS = "gap:manage"
+    #: Starting or deciding a rollout changes who a rule decides for, which is the same
+    #: kind of power as changing its status.
+    MANAGE_CANARY = "detection:canary"
+    #: Re-evaluating history can rewrite stored verdicts, which is why it is separate from
+    #: simulating: a simulation changes nothing, a replay with apply does.
+    EXECUTE_REPLAY = "detection:replay"
+
     # administration scope
     APPROVE_REMEDIATION = "approve:remediation"
+    #: An exception switches detection off for something. Approving one is deliberately not the
+    #: same permission as creating one, so no single analyst can silence a rule alone.
+    APPROVE_EXCEPTION = "exception:approve"
     EXECUTE_REMEDIATION = "execute:remediation"
     MANAGE_POLICIES = "manage:policies"
     MANAGE_PROVIDERS = "manage:providers"
@@ -51,6 +81,7 @@ _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
 )
 _VIEWER: frozenset[Permission] = _EMPLOYEE | {
+    Permission.VIEW_DETECTION_QUALITY,
     Permission.VIEW_INVESTIGATIONS,
     Permission.VIEW_MESSAGE_CONTENT,
     Permission.SEARCH_INDICATORS,
@@ -58,6 +89,11 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.VIEW_INCIDENTS,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
+    Permission.CLASSIFY_INCIDENT,
+    Permission.REPORT_MISSED_DETECTION,
+    Permission.SIMULATE_DETECTION,
+    Permission.PROPOSE_RULE,
+    Permission.EDIT_RULES,
     Permission.MANAGE_INCIDENTS,
     Permission.CLASSIFY_MESSAGE,
     Permission.CREATE_EXCEPTION,
@@ -66,6 +102,14 @@ _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.EXPORT_DATA,
 }
 _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
+    Permission.APPROVE_EXCEPTION,
+    Permission.MANAGE_DETECTION_RULES,
+    Permission.MANAGE_DETECTION_GAPS,
+    Permission.MANAGE_CANARY,
+    Permission.REVIEW_RULES,
+    Permission.PUBLISH_RULES,
+    Permission.REEVALUATE,
+    Permission.EXECUTE_REPLAY,
     Permission.APPROVE_REMEDIATION,
     Permission.EXECUTE_REMEDIATION,
     Permission.MANAGE_POLICIES,
@@ -130,6 +174,23 @@ def can_access_job(
     if job_owner_id and job_owner_id == actor_user_id:
         return True
     return bool(actor_mailbox) and actor_mailbox.lower() == (job_mailbox or "").lower()
+
+
+def can_approve_exception(
+    *, role: Role, approver_id: str, approver_email: str, created_by: str
+) -> tuple[bool, str]:
+    """Four-eyes rule for detection exceptions (ТЗ 1.0.3 §24).
+
+    An exception is the one control that makes the platform deliberately blind to something, so
+    the person who asked for it may not be the person who grants it — otherwise "two approvals"
+    is a formality one analyst can complete alone.
+    """
+    if not has_permission(role, Permission.APPROVE_EXCEPTION):
+        return False, "роль не вправе утверждать исключения детектирования"
+    created = (created_by or "").strip().lower()
+    if created and created in {approver_id.strip().lower(), approver_email.strip().lower()}:
+        return False, "автор исключения не может утвердить его сам"
+    return True, ""
 
 
 def required_approvals(affected_mailboxes: int, threshold: int = 10) -> int:

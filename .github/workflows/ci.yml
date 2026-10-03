@@ -51,9 +51,43 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      # The optional extras are installed on purpose. Without `exchange` the EWS tests fail
+      # outright, and without `qr` the QR decoding tests skip — silently, which is worse: the
+      # isolation checks the stage relies on would simply never run in CI.
+      - run: pip install -e ".[dev,exchange,qr]"
+      - name: The optional components really are present
+        run: |
+          python - <<'PY'
+          import sys
+
+          from msp_mail_parser.images import decoder_available
+
+          missing = []
+          try:
+              import exchangelib  # noqa: F401
+          except ImportError:
+              missing.append("exchangelib (extra 'exchange')")
+          if not decoder_available():
+              missing.append("QR decoder (extra 'qr')")
+          if missing:
+              sys.exit("optional components absent, their tests would skip: " + ", ".join(missing))
+          print("exchangelib and the QR decoder are both available")
+          PY
+      # -rs reports why anything was skipped. A skipped test is not a passing test: every extra
+      # is installed above, so a skip for a missing component means a guard is wrong, and the
+      # next step turns that into a failure instead of a line nobody reads.
       - name: Unit, integration and security tests
-        run: pytest -q --cov=msp_api --cov=msp_detection --cov=msp_mail_parser --cov=msp_risk --cov=msp_ti --cov-report=term-missing
+        run: |
+          set -o pipefail
+          pytest -rs --cov=msp_api --cov=msp_detection --cov=msp_mail_parser --cov=msp_risk --cov=msp_ti --cov-report=term-missing | tee pytest.log
+      - name: Nothing was skipped for a missing optional component
+        run: |
+          if grep -q "необязательный компонент" pytest.log; then
+            echo "tests skipped although the component is installed:"
+            grep "необязательный компонент" pytest.log
+            exit 1
+          fi
+          echo "no test skipped for a missing optional component"
       - name: Rule set integrity
         run: |
           python - <<'PY'
@@ -93,7 +127,40 @@ jobs:
             done < .pip-audit-ignore
             echo "::notice::approved exceptions:$ignores"
           fi
-          pip-audit --strict --progress-spinner=off $ignores
+          # Not `--strict`: it fails on any skipped distribution, and this repository itself is
+          # always skipped — it is installed editable and not published on PyPI, so pip-audit
+          # cannot look it up. The job failed on that alone, without a single vulnerability in
+          # sight. The check below is stronger than --strict rather than weaker: it names the
+          # one distribution allowed to be skipped, so a dependency that silently stops being
+          # audited still fails the build.
+          pip-audit --skip-editable --progress-spinner=off -f json $ignores > pip-audit.json
+          python - <<'PY'
+          import json
+          import sys
+
+          report = json.load(open("pip-audit.json", encoding="utf-8"))
+          dependencies = report.get("dependencies", [])
+          if not dependencies:
+              sys.exit("pip-audit reported no dependencies at all: the audit did not run")
+
+          vulnerable = [d for d in dependencies if d.get("vulns")]
+          for dependency in vulnerable:
+              ids = ", ".join(v.get("id", "?") for v in dependency["vulns"])
+              print(f"{dependency['name']} {dependency.get('version')}: {ids}")
+
+          allowed_skip = {"mail-security-platform"}
+          unexpected = [
+              f"{d['name']}: {d['skip_reason']}"
+              for d in dependencies
+              if d.get("skip_reason") and d["name"] not in allowed_skip
+          ]
+          for line in unexpected:
+              print("not audited:", line)
+
+          print(f"audited {len(dependencies) - len(unexpected) - 1} distributions")
+          if vulnerable or unexpected:
+              sys.exit(1)
+          PY
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
@@ -190,7 +257,7 @@ jobs:
       # High and Critical block the build. An accepted risk needs a dated entry in
       # .trivyignore with a reason, which is reviewable in a diff.
       - name: Container vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: msp-python:ci
           format: table
@@ -200,7 +267,7 @@ jobs:
           trivyignores: .trivyignore
 
       - name: Filesystem scan (dependencies and configuration)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -243,6 +310,176 @@ jobs:
           path: acceptance-snapshot.md
           retention-days: 90
 
+  detection-gate:
+    name: Detection quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # Every rule condition must name a fact the engine can produce. A rule with a typo in a
+      # condition loads cleanly, validates cleanly and never fires — it looks like coverage on
+      # every dashboard and provides none (ТЗ 1.0.3 §12, §60).
+      - name: Rule vocabulary and scenario catalog
+        run: pytest -q tests/unit/test_rule_vocabulary.py tests/unit/test_threat_scenarios.py
+
+      # The gate compares against datasets/baseline.json and fails on a regression, on a
+      # precision or recall floor being broken, and on an ACTIVE rule without an owner.
+      # Known gaps from datasets/detection_gaps.yaml come back as warnings, not blockers:
+      # a limitation that has been reviewed and written down is not a surprise.
+      - name: Detection regression gate
+        run: python scripts/evaluate_detection.py --gate --markdown gate-report.md
+
+      - name: Report
+        if: always()
+        run: cat gate-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: detection-gate-${{ github.sha }}
+          path: gate-report.md
+          retention-days: 90
+
+  parser-robustness:
+    name: Parser robustness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # Fuzzing, the performance budget and regex safety run as their own job: they are slower
+      # than the rest and a timeout here must be readable as "robustness", not as a flaky test
+      # somewhere in the suite (ТЗ 1.0.3 §43–§47).
+      - name: Budget, regex safety, fuzzing, adversarial input
+        run: pytest -q tests/security/test_parser_robustness.py
+
+  rule-safety:
+    name: Rule schema and safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # Rules are data, and the data has to be checkable: every condition must name a fact the
+      # engine can produce, every ACTIVE rule must have an owner, and nothing in a rule file may
+      # be executable. A rule with a typo loads cleanly and never fires — coverage on a
+      # dashboard that protects nothing.
+      - name: Rule vocabulary, schema and ownership
+        run: pytest -q tests/unit/test_rule_vocabulary.py tests/unit/test_threat_scenarios.py
+
+      - name: No executable YAML tags in the rule pack
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+
+          # yaml.safe_load already refuses these; the grep is the second lock, because the day
+          # someone swaps safe_load for load is the day the first lock stops existing.
+          forbidden = ("!!python/", "!!binary", "!!map:", "tag:yaml.org,2002:python")
+          bad = []
+          for path in pathlib.Path("rules").rglob("*.yaml"):
+              text = path.read_text(encoding="utf-8")
+              for marker in forbidden:
+                  if marker in text:
+                      bad.append(f"{path}: {marker}")
+          if bad:
+              print("executable YAML tags found:", *bad, sep="\n  ")
+              sys.exit(1)
+          print("rule pack carries no executable tags")
+          PY
+
+      - name: Regex safety
+        run: pytest -q tests/security/test_parser_robustness.py -k Regex
+
+  dataset-validation:
+    name: Golden dataset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # The dataset validates itself: ids unique, expectations present, no case claiming a gap
+      # that is not registered. A corpus that silently lost its assertions would make every
+      # later metric meaningless while still reporting a number.
+      - name: Validate the corpus
+        run: |
+          python - <<'PY'
+          import sys
+
+          from msp_detection_eval.corpus import build_golden_dataset
+
+          dataset, messages = build_golden_dataset()
+          problems = dataset.validate()
+          if problems:
+              print("dataset invalid:", *problems, sep="\n  ")
+              sys.exit(1)
+          print(f"{len(dataset.cases)} cases, {len(messages)} messages, checksum ok")
+          PY
+
+  fuzz-smoke:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # A short fuzz run on every change; the long one is scheduled separately. The point of the
+      # smoke run is that a parser change that crashes on malformed input fails here rather than
+      # on the first malformed message in production.
+      - name: MIME, headers, URLs, archives, rule evaluator
+        run: pytest -q tests/security/test_parser_robustness.py -k Fuzzing
+
+  detection-performance:
+    name: Detection performance budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Local analysis budget
+        run: pytest -q tests/security/test_parser_robustness.py -k Performance
+      # The corpus run reports P50/P95/P99. A regression here means every analyst waits longer,
+      # which is the kind of change that never gets noticed without a number attached.
+      - name: Measure latency on the golden corpus
+        run: |
+          python scripts/detection_baseline.py --json baseline.json >/dev/null
+          python - <<'PY'
+          import json
+          import sys
+
+          data = json.load(open("baseline.json", encoding="utf-8"))
+          latency = data["evaluation"]["latency_ms"]
+          print(f"P50 {latency['p50']} ms, P95 {latency['p95']} ms, P99 {latency['p99']} ms")
+          budget_ms = 5000
+          if latency["p95"] is None:
+              print("latency unknown — refusing to report a budget as met")
+              sys.exit(1)
+          if latency["p95"] > budget_ms:
+              print(f"P95 {latency['p95']} ms exceeds the {budget_ms} ms budget")
+              sys.exit(1)
+          PY
+
   migrations:
     name: Migrations from scratch
     runs-on: ubuntu-latest
@@ -271,6 +508,46 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+
+      # An empty database hides the failure that matters: a NOT NULL column added without a
+      # server default applies fine to no rows and fails on a deployment that has data. This
+      # step seeds the previous revision and then upgrades over the seeded rows.
+      - name: Upgrade over existing data
+        working-directory: apps/api
+        run: |
+          alembic downgrade base
+          alembic upgrade 9201086b7406
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["MSP_DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(
+                  text(
+                      "INSERT INTO organizations (id, name, corporate_domains,"
+                      " trusted_infrastructure_domains, settings)"
+                      " VALUES ('ci-org', 'CI', '[]'::jsonb, '[]'::jsonb, '{}'::jsonb)"
+                  )
+              )
+              # Only the columns that exist at 9201086b7406. `scope`, `created_by` and
+              # `requires_approval` arrive in 93465d97c398, so naming them here seeds against
+              # the final schema rather than the old one — which is the mistake this step
+              # exists to catch, and it failed with UndefinedColumn before the upgrade was
+              # ever reached. `exception_type` is a non-native enum, so the value must satisfy
+              # the CHECK constraint written by the initial migration: lower case.
+              connection.execute(
+                  text(
+                      "INSERT INTO detection_exceptions (id, organization_id, exception_type,"
+                      " value, owner_email, reason, hit_count)"
+                      " VALUES ('ci-exc', 'ci-org', 'trusted_domain', 'partner.test',"
+                      " 'admin@corp.example', 'ci', 0)"
+                  )
+              )
+          print("seeded one organization and one exception")
+          PY
+          alembic upgrade head
+          alembic check
       - name: Schema matches the models
         working-directory: apps/api
         run: |
@@ -294,6 +571,33 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npm run build
+
+      # The detection pages are where an analyst spends the stage's new functionality. A build
+      # that drops one of them should fail here, not be discovered by someone opening the menu.
+      - name: Detection pages are present in the bundle
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const dir = path.join('dist', 'assets');
+            const bundle = fs.readdirSync(dir)
+              .filter((name) => name.endsWith('.js'))
+              .map((name) => fs.readFileSync(path.join(dir, name), 'utf8'))
+              .join('');
+            const required = [
+              'Качество детектирования',
+              'Очередь расследований',
+              'Канареечные выпуски',
+              'Известные пробелы',
+              'Карта покрытия',
+            ];
+            const missing = required.filter((text) => !bundle.includes(text));
+            if (missing.length) {
+              console.error('missing detection pages:', missing.join(', '));
+              process.exit(1);
+            }
+            console.log('detection pages present');
+          "
       # Blocking: a High or Critical advisory in a dependency that ships to the browser is a
       # release blocker, not a warning.
       - name: Audit dependencies
@@ -308,10 +612,21 @@ jobs:
         run: |
           cp .env.example .env
           sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-postgres-password/' .env
-          sed -i 's/^MSP_COOKIE_SECURE=true/MSP_COOKIE_SECURE=false/' .env
+          # MSP_COOKIE_SECURE stays true. The job starts the stack with
+          # MSP_ENVIRONMENT=production from .env.example, and the configuration refuses
+          # production with insecure cookies — so turning it off here asked for a setup the
+          # platform rejects by design, and this step had never got past it. The job generates
+          # a TLS certificate and nginx serves 443, so secure cookies are the correct setting;
+          # the checks below talk to the API over the container's own loopback and do not log in.
           umask 077
           openssl rand -base64 48 | tr -d '\n' > infrastructure/compose/secrets/msp_secret_key
           openssl rand -base64 32 | tr -d '\n' > infrastructure/compose/secrets/minio_password
+          # A compose secret is bind-mounted with the host's ownership, and the images run as
+          # uid 10001 (see infrastructure/compose/Dockerfile.python). A 0600 file owned by the
+          # runner is unreadable inside the container, and the stack died on PermissionError
+          # before the first migration. Ownership is changed rather than the mode widened: a
+          # world-readable secret would be the wrong thing to show in a deployment reference.
+          sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key infrastructure/compose/secrets/minio_password
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -keyout infrastructure/nginx/tls/server.key \
             -out infrastructure/nginx/tls/server.crt \
