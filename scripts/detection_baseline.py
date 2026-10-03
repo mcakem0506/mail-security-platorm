@@ -321,8 +321,9 @@ def _fmt(value: Any, digits: int = 3) -> str:
     return str(value)
 
 
-def render_markdown(snapshot: dict[str, Any], *, title: str = "Baseline MSP 1.0.3B",
-                    moment: str = "**до** изменений этапа") -> str:
+def render_markdown(
+    snapshot: dict[str, Any], *, title: str = "Baseline MSP 1.0.3B", moment: str = "**до** изменений этапа"
+) -> str:
     git = snapshot["git"]
     rules = snapshot["rules"]
     dataset = snapshot["dataset"]

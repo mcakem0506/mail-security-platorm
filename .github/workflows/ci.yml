@@ -51,9 +51,43 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      # The optional extras are installed on purpose. Without `exchange` the EWS tests fail
+      # outright, and without `qr` the QR decoding tests skip — silently, which is worse: the
+      # isolation checks the stage relies on would simply never run in CI.
+      - run: pip install -e ".[dev,exchange,qr]"
+      - name: The optional components really are present
+        run: |
+          python - <<'PY'
+          import sys
+
+          from msp_mail_parser.images import decoder_available
+
+          missing = []
+          try:
+              import exchangelib  # noqa: F401
+          except ImportError:
+              missing.append("exchangelib (extra 'exchange')")
+          if not decoder_available():
+              missing.append("QR decoder (extra 'qr')")
+          if missing:
+              sys.exit("optional components absent, their tests would skip: " + ", ".join(missing))
+          print("exchangelib and the QR decoder are both available")
+          PY
+      # -rs reports why anything was skipped. A skipped test is not a passing test: every extra
+      # is installed above, so a skip for a missing component means a guard is wrong, and the
+      # next step turns that into a failure instead of a line nobody reads.
       - name: Unit, integration and security tests
-        run: pytest -q --cov=msp_api --cov=msp_detection --cov=msp_mail_parser --cov=msp_risk --cov=msp_ti --cov-report=term-missing
+        run: |
+          set -o pipefail
+          pytest -rs --cov=msp_api --cov=msp_detection --cov=msp_mail_parser --cov=msp_risk --cov=msp_ti --cov-report=term-missing | tee pytest.log
+      - name: Nothing was skipped for a missing optional component
+        run: |
+          if grep -q "необязательный компонент" pytest.log; then
+            echo "tests skipped although the component is installed:"
+            grep "необязательный компонент" pytest.log
+            exit 1
+          fi
+          echo "no test skipped for a missing optional component"
       - name: Rule set integrity
         run: |
           python - <<'PY'
@@ -93,7 +127,40 @@ jobs:
             done < .pip-audit-ignore
             echo "::notice::approved exceptions:$ignores"
           fi
-          pip-audit --strict --progress-spinner=off $ignores
+          # Not `--strict`: it fails on any skipped distribution, and this repository itself is
+          # always skipped — it is installed editable and not published on PyPI, so pip-audit
+          # cannot look it up. The job failed on that alone, without a single vulnerability in
+          # sight. The check below is stronger than --strict rather than weaker: it names the
+          # one distribution allowed to be skipped, so a dependency that silently stops being
+          # audited still fails the build.
+          pip-audit --skip-editable --progress-spinner=off -f json $ignores > pip-audit.json
+          python - <<'PY'
+          import json
+          import sys
+
+          report = json.load(open("pip-audit.json", encoding="utf-8"))
+          dependencies = report.get("dependencies", [])
+          if not dependencies:
+              sys.exit("pip-audit reported no dependencies at all: the audit did not run")
+
+          vulnerable = [d for d in dependencies if d.get("vulns")]
+          for dependency in vulnerable:
+              ids = ", ".join(v.get("id", "?") for v in dependency["vulns"])
+              print(f"{dependency['name']} {dependency.get('version')}: {ids}")
+
+          allowed_skip = {"mail-security-platform"}
+          unexpected = [
+              f"{d['name']}: {d['skip_reason']}"
+              for d in dependencies
+              if d.get("skip_reason") and d["name"] not in allowed_skip
+          ]
+          for line in unexpected:
+              print("not audited:", line)
+
+          print(f"audited {len(dependencies) - len(unexpected) - 1} distributions")
+          if vulnerable or unexpected:
+              sys.exit(1)
+          PY
 
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
@@ -190,7 +257,7 @@ jobs:
       # High and Critical block the build. An accepted risk needs a dated entry in
       # .trivyignore with a reason, which is reviewable in a diff.
       - name: Container vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: msp-python:ci
           format: table
@@ -200,7 +267,7 @@ jobs:
           trivyignores: .trivyignore
 
       - name: Filesystem scan (dependencies and configuration)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -463,13 +530,18 @@ jobs:
                       " VALUES ('ci-org', 'CI', '[]'::jsonb, '[]'::jsonb, '{}'::jsonb)"
                   )
               )
+              # Only the columns that exist at 9201086b7406. `scope`, `created_by` and
+              # `requires_approval` arrive in 93465d97c398, so naming them here seeds against
+              # the final schema rather than the old one — which is the mistake this step
+              # exists to catch, and it failed with UndefinedColumn before the upgrade was
+              # ever reached. `exception_type` is a non-native enum, so the value must satisfy
+              # the CHECK constraint written by the initial migration: lower case.
               connection.execute(
                   text(
                       "INSERT INTO detection_exceptions (id, organization_id, exception_type,"
-                      " value, owner_email, reason, hit_count, scope, created_by,"
-                      " requires_approval)"
-                      " VALUES ('ci-exc', 'ci-org', 'SENDER_DOMAIN', 'partner.test',"
-                      " 'admin@corp.example', 'ci', 0, 'RULE', '', false)"
+                      " value, owner_email, reason, hit_count)"
+                      " VALUES ('ci-exc', 'ci-org', 'trusted_domain', 'partner.test',"
+                      " 'admin@corp.example', 'ci', 0)"
                   )
               )
           print("seeded one organization and one exception")
@@ -544,6 +616,12 @@ jobs:
           umask 077
           openssl rand -base64 48 | tr -d '\n' > infrastructure/compose/secrets/msp_secret_key
           openssl rand -base64 32 | tr -d '\n' > infrastructure/compose/secrets/minio_password
+          # A compose secret is bind-mounted with the host's ownership, and the images run as
+          # uid 10001 (see infrastructure/compose/Dockerfile.python). A 0600 file owned by the
+          # runner is unreadable inside the container, and the stack died on PermissionError
+          # before the first migration. Ownership is changed rather than the mode widened: a
+          # world-readable secret would be the wrong thing to show in a deployment reference.
+          sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key infrastructure/compose/secrets/minio_password
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -keyout infrastructure/nginx/tls/server.key \
             -out infrastructure/nginx/tls/server.crt \

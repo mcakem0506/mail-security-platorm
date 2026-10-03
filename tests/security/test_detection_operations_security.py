@@ -126,9 +126,7 @@ class TestFeedbackIsNotAuthority:
         )
         db.add(message)
         db.flush()
-        job = AnalysisJob(
-            organization_id=organization.id, message_id=message.id, source=IntakeSource.API
-        )
+        job = AnalysisJob(organization_id=organization.id, message_id=message.id, source=IntakeSource.API)
         db.add(job)
         db.flush()
         db.add(
@@ -152,11 +150,7 @@ class TestFeedbackIsNotAuthority:
             analyst_email="analyst@corp.example",
             comment="Легитимный подрядчик",
             fp_reason=FalsePositiveReason.KNOWN_VENDOR,
-            signals=[
-                feedback.SignalJudgement(
-                    rule_id="BEC-014", disposition=SignalDisposition.INCORRECT
-                )
-            ],
+            signals=[feedback.SignalJudgement(rule_id="BEC-014", disposition=SignalDisposition.INCORRECT)],
         )
         db.commit()
         after = db.execute(select(DetectionException)).scalars().all()
@@ -227,10 +221,7 @@ class TestReplayAndReanalysisAreBounded:
         import ast
         import pathlib as _pathlib
 
-        source = (
-            _pathlib.Path("apps/api/msp_api/services/reanalysis.py")
-            .read_text(encoding="utf-8")
-        )
+        source = _pathlib.Path("apps/api/msp_api/services/reanalysis.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
 
         imported: set[str] = set()
