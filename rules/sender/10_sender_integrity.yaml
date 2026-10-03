@@ -184,6 +184,154 @@ rules:
       Домен отправителя является интернационализированным (IDN/Punycode). Само по себе это
       допустимо, но требует внимания при проверке подлинности.
 
+  - id: SND-024
+    version: 1
+    status: ACTIVE
+    owner: detection-sender@corp.example
+    name: Короткая метка домена отправителя отличается одной правкой, есть второй признак
+    category: lookalike_domain
+    severity: high
+    confidence: 0.7
+    weight: 45
+    conditions:
+      all:
+        - from_domain_short_lookalike_corporate
+        - any:
+            # Отправитель ранее не встречался — и у платформы есть история, на фоне которой
+            # это утверждение что-то значит. На новом развёртывании новы все, и тогда признак
+            # говорит о платформе, а не об отправителе.
+            - all:
+                - sender_first_time
+                - sender_novelty_is_informative
+            # Провал или мягкий провал аутентификации
+            - dmarc_fail
+            - dmarc_soft_fail
+            - spf_fail
+            - spf_soft_fail
+            # Заявлен проход DKIM, а подписи нет. Простое отсутствие подписи сюда не
+            # входит: оно нормально для большой части легитимной почты, и на корпусе
+            # оказалось верным вообще для всех писем — то есть не значило ничего.
+            - dkim_pass_without_signature
+            - dkim_fail
+            # Несовпадение Reply-To
+            - reply_to_domain_mismatch
+            - reply_to_local_mismatch
+            # Выдача себя за защищаемую идентичность
+            - protected_identity_impersonation_external
+            # Внешний отправитель с корпоративным именем в поле From
+            - display_name_claims_corporate_address
+            - display_name_claims_organization
+            # Запрос платежа, смены реквизитов, мошенничество со счётом.
+            # intent_payment_request здесь не используется: его выдаёт только семантический
+            # провайдер, выключенный по умолчанию, поэтому условие на нём никогда не
+            # выполнялось бы и выглядело бы покрытием.
+            - intent_invoice_fraud
+            - intent_urgent_payment
+            - intent_bank_details_change
+            - intent_payroll_change
+            - intent_gift_cards
+            - intent_executive_urgency
+            # Письмо про деньги от внешнего отправителя, прикрытого названием отдела.
+            # Парой, а не по отдельности: «письмо про деньги» — это каждый счёт от
+            # поставщика, а «название отдела» — половина легитимных рассылок.
+            - all:
+                - financial_context
+                - display_name_is_generic_role
+            # Запрос учётных данных
+            - intent_credential_request
+            # Давление срочностью или секретностью
+            - tone_urgency
+            - tone_secrecy
+            # Подозрительная ссылка
+            - url_suspicious_tld
+            - ti_url_suspicious
+            - url_lookalike_corporate
+            # Отрицательный вердикт шлюза
+            - gateway_detected_phishing
+            - gateway_detected_malware
+            - gateway_marked_suspicious
+    evidence:
+      [from_domain_short_lookalike_corporate, from_address, spf_result, dkim_result, dmarc_result]
+    explanation: >-
+      Домен отправителя отличается от короткого домена организации одной правкой — вставкой,
+      удалением, заменой символа или перестановкой двух соседних. Само по себе это слабый
+      признак: на четырёхбуквенной метке одна правка даёт обычные слова. Здесь он подкреплён
+      вторым независимым признаком, поэтому учитывается.
+    recommendation: >-
+      Сверьте домен отправителя с официальным по буквам. Не отвечайте на письмо и не
+      выполняйте просьбы из него до подтверждения по независимому каналу.
+    change_reason: >-
+      Закрывает GAP-001. Признак условный по построению: без второго признака работает
+      SND-025 с нулевым весом.
+
+      Переведено из SHADOW в ACTIVE по результатам теневого прогона на золотом корпусе
+      (552 кейса, из них 241 доброкачественный): 47 срабатываний на атаках, ноль на
+      доброкачественной почте. Теневой прогон при этом трижды показал, что правило нельзя
+      включать в исходном виде — сначала оно срабатывало на 74 доброкачественных письмах
+      из 241, потому что в список вторичных признаков попали сигналы, верные для всей
+      синтетической почты сразу (новизна отправителя при пустой истории; отсутствие подписи
+      DKIM), а затем ещё один признак оказался недостижимым (intent_payment_request выдаёт
+      только выключенный семантический провайдер).
+
+  - id: SND-025
+    version: 1
+    status: ACTIVE
+    owner: detection-sender@corp.example
+    name: Короткая метка домена отправителя отличается одной правкой, второго признака нет
+    category: lookalike_domain
+    severity: info
+    confidence: 0.3
+    weight: 0
+    conditions:
+      all:
+        - from_domain_short_lookalike_corporate
+      not:
+        - all:
+            - sender_first_time
+            - sender_novelty_is_informative
+        - dmarc_fail
+        - dmarc_soft_fail
+        - spf_fail
+        - spf_soft_fail
+        - dkim_pass_without_signature
+        - dkim_fail
+        - reply_to_domain_mismatch
+        - reply_to_local_mismatch
+        - protected_identity_impersonation_external
+        - display_name_claims_corporate_address
+        - display_name_claims_organization
+        - intent_invoice_fraud
+        - intent_urgent_payment
+        - intent_bank_details_change
+        - intent_payroll_change
+        - intent_gift_cards
+        - intent_executive_urgency
+        - all:
+            - financial_context
+            - display_name_is_generic_role
+        - intent_credential_request
+        - tone_urgency
+        - tone_secrecy
+        - url_suspicious_tld
+        - ti_url_suspicious
+        - url_lookalike_corporate
+        - gateway_detected_phishing
+        - gateway_detected_malware
+        - gateway_marked_suspicious
+    evidence: [from_domain_short_lookalike_corporate, from_address]
+    explanation: >-
+      Домен отправителя отличается от короткого домена организации одной правкой, но других
+      признаков подделки нет. Вес нулевой: на короткой метке одна правка — это ещё и «core»,
+      «carp», «corps». Сигнал приведён для полноты картины и для измерения.
+    recommendation: >-
+      Отдельных действий не требуется. При сомнениях сверьте домен с официальным.
+    internal: true
+    change_reason: >-
+      Нижняя половина GAP-001: показывает то, что видит детектор, не влияя на вердикт.
+      Включено вместе с SND-024; вес нулевой, поэтому на вердикты перевод не влияет, а в
+      статистике качества правил видно, как часто детектор видит короткое совпадение без
+      подкрепления — на корпусе это 92 доброкачественных письма из 241.
+
   - id: SND-030
     version: 1
     status: ACTIVE

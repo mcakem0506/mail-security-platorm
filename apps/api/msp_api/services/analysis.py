@@ -342,12 +342,22 @@ def _sender_history(
         .join(MailMessage, MailMessage.id == AnalysisResult.message_id)
         .where(*filters, AnalysisResult.classification == RiskLevel.MALICIOUS)
     ).scalar_one()
+    # How much mail the organisation has analysed at all. Without it "this sender is new"
+    # cannot be told apart from "we have only just been installed", and a rule that treats
+    # novelty as evidence would fire on every correspondent for the first weeks of a pilot.
+    organization_filters = [MailMessage.organization_id == organization_id]
+    if exclude_message_id:
+        organization_filters.append(MailMessage.id != exclude_message_id)
+    organization_count = session.execute(
+        select(func.count(MailMessage.id)).where(*organization_filters)
+    ).scalar_one()
     return SenderHistory(
         known_sender=count > 0,
         first_seen=first_seen,
         message_count=count,
         previously_reported=reported,
         previously_malicious=int(malicious or 0),
+        organization_message_count=int(organization_count or 0),
     )
 
 
