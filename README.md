@@ -279,6 +279,7 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md) | Порядок реагирования |
 | [ACCEPTANCE.md](docs/ACCEPTANCE.md) | Матрица приёмки по §40–§44 |
 | [ANALYST_GUIDE.md](docs/ANALYST_GUIDE.md) | Руководство аналитика ИБ |
+| [ADMIN_GUIDE.md](docs/ADMIN_GUIDE.md) | Руководство администратора безопасности: что он решает и согласовывает |
 | [EMPLOYEE_GUIDE.md](docs/EMPLOYEE_GUIDE.md) | Руководство сотрудника |
 
 ### Этап MSP 1.0.1
