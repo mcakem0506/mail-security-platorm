@@ -483,6 +483,24 @@ class CandidateState(StrEnum):
     REJECTED = "REJECTED"
 
 
+class DomainVariantStatus(StrEnum):
+    """Состояние варианта защищаемого домена (ТЗ 1.0.4 §4).
+
+    ``GENERATED`` — вариант вычислен офлайн и ни разу не встречался. Таких большинство: для
+    четырёхбуквенной метки их больше трёхсот, и это нормально — реестр существует, чтобы
+    встреченный вариант можно было опознать мгновенно, а не чтобы перечислять угрозы.
+
+    ``KNOWN_LEGITIMATE`` обращается с вариантом как с исключением, потому что им и является:
+    он гасит сигнал. Поэтому у него есть владелец, причина и запись в аудите.
+    """
+
+    GENERATED = "GENERATED"
+    OBSERVED = "OBSERVED"
+    APPROVED_SUSPICIOUS = "APPROVED_SUSPICIOUS"
+    KNOWN_LEGITIMATE = "KNOWN_LEGITIMATE"
+    IGNORED = "IGNORED"
+
+
 class CampaignMatchReason(StrEnum):
     """Why a message was put in a campaign (ТЗ 1.0.3B §20).
 

@@ -66,7 +66,7 @@ from ..db.models import (
     RiskVerdictHistory,
 )
 from ..observability import rule_triggers
-from . import canary
+from . import canary, domain_variants
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
 from .gateways import collect_findings as collect_gateway_findings
@@ -574,6 +574,17 @@ def persist_result(
     result.engine_version = detection.engine_version
     result.ruleset_fingerprint = detection.ruleset_fingerprint[:4000]
     result.risk_engine_version = RISK_ENGINE_VERSION
+
+    # Если домен отправителя оказался известным вариантом защищаемого домена, отметить это в
+    # реестре (ТЗ 1.0.4 §4). Запрос один и по индексу; для подавляющего большинства писем он
+    # не находит ничего, и это нормальный ответ, а не ошибка. Решение человека о варианте
+    # наблюдение не перезаписывает.
+    if message.sender_domain:
+        domain_variants.record_observation(
+            session,
+            organization_id=job.organization_id,
+            candidate_domain=message.sender_domain,
+        )
 
     record_rule_triggers(session, organization_id=job.organization_id, signals=detection.signals)
     for detected in detection.signals:

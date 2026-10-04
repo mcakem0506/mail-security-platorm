@@ -17,6 +17,7 @@ from msp_contracts import (
     CanaryScope,
     CanaryState,
     CandidateState,
+    DomainVariantStatus,
     ExceptionType,
     GapStatus,
     IncidentStatus,
@@ -1564,6 +1565,49 @@ class CampaignMatch(Base, IdMixin):
     rejected: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     decided_by: Mapped[str] = mapped_column(String(320), default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class ProtectedDomainVariant(Base, IdMixin):
+    """Один вариант написания защищаемого домена (ТЗ 1.0.4 §4).
+
+    Варианты вычисляются **офлайн и чисто**: никакого DNS, WHOIS или обхода сети. Реестр не
+    отвечает на вопрос «зарегистрирован ли такой домен» — он отвечает на вопрос «если письмо
+    придёт с такого домена, что мы о нём уже решили». Первый вопрос требует обращений наружу по
+    каждому из сотен вариантов и выдал бы наружу список доменов, которые организация защищает.
+
+    Статус — это память о решении человека. Без реестра аналитик принимал бы одно и то же
+    решение про «corps.example» столько раз, сколько приходит писем.
+    """
+
+    __tablename__ = "protected_domain_variants"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "protected_domain", "candidate_domain", name="uq_domain_variant"),
+        Index("ix_domain_variant_candidate", "organization_id", "candidate_domain"),
+        Index("ix_domain_variant_status", "organization_id", "status"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    #: Защищаемый домен, от которого произведён вариант.
+    protected_domain: Mapped[str] = mapped_column(String(253))
+    #: Сам вариант.
+    candidate_domain: Mapped[str] = mapped_column(String(253))
+    #: Какое преобразование его дало: insertion, deletion, substitution, transposition.
+    transform_type: Mapped[str] = mapped_column(String(32))
+    #: Число правок. Для вариантов этого реестра всегда 1.
+    distance: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[DomainVariantStatus] = mapped_column(
+        _enum(DomainVariantStatus, "domain_variant_status_enum"),
+        default=DomainVariantStatus.GENERATED,
+    )
+    generated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    #: Когда вариант впервые встретился в почте. ``None`` означает «ни разу», а не «неизвестно».
+    first_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    last_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    observed_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: Кто и почему изменил статус. Для KNOWN_LEGITIMATE это обязательно: статус гасит сигнал.
+    decided_by: Mapped[str] = mapped_column(String(320), default="")
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    reason: Mapped[str] = mapped_column(String(1000), default="")
 
 
 class ReanalysisJob(Base, IdMixin):
