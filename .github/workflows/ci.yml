@@ -162,10 +162,13 @@ jobs:
               sys.exit(1)
           PY
 
+      # Конфигурация указана явно: разрешения перечислены в .gitleaks.toml построчно, и от
+      # того, подхватится ли файл по умолчанию, зависеть не должно.
       - name: Secret scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
 
       - name: No secrets committed
         run: |

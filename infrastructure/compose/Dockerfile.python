@@ -14,7 +14,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # libmagic is not used (type detection is implemented in-process); only build essentials for
 # wheels that have no manylinux build are installed, and they are removed afterwards.
+#
+# `apt-get upgrade` takes the distribution's security updates at build time. The base tag is
+# refreshed less often than the packages inside it, so without this the image ships known-fixed
+# vulnerabilities until Docker Hub rebuilds — which is how CVE-2026-103111 in libpcre2 reached
+# the container scan with a fix already available. Reproducibility comes from the release
+# manifest recording the commit, not from freezing packages at a known-vulnerable version.
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
