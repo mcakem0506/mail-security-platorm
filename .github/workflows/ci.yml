@@ -572,6 +572,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Types, a successful build and the strings below all pass when the application throws
+      # on its first render — which is exactly how a major dependency bump breaks a page. The
+      # check mounts the built app in jsdom and fails on an empty root or a console error.
+      - name: The console actually mounts
+        run: npm run smoke
+
       # The detection pages are where an analyst spends the stage's new functionality. A build
       # that drops one of them should fail here, not be discovered by someone opening the menu.
       - name: Detection pages are present in the bundle
