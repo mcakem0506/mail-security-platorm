@@ -329,6 +329,12 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [DETECTION_RELEASE_PROCESS.md](docs/DETECTION_RELEASE_PROCESS.md) | Порядок выпуска изменений |
 | [SEMANTIC_ANALYSIS_POLICY.md](docs/SEMANTIC_ANALYSIS_POLICY.md) | Политика семантического анализа |
 
+### Этап MSP 1.0.4
+
+| Документ | Назначение |
+|---|---|
+| [SHORT_DOMAIN_LOOKALIKE.md](docs/SHORT_DOMAIN_LOOKALIKE.md) | Короткие похожие домены: условный сигнал и реестр вариантов |
+
 ### Этап MSP 1.0.3B
 
 | Документ | Назначение |
