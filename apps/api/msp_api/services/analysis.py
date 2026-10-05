@@ -65,7 +65,7 @@ from ..db.models import (
     ProviderLookup,
     RiskVerdictHistory,
 )
-from ..observability import rule_triggers
+from ..observability import record_qr_decode, rule_triggers
 from . import canary, domain_variants
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
@@ -685,6 +685,12 @@ def run_local_analysis(
     persist_indicators(
         session, organization_id=job.organization_id, message_id=message.id, detection=detection
     )
+    # Стоимость и исход чтения QR-кодов (ТЗ 1.0.4 §6). Для письма без изображений ничего
+    # не записывается: нули здесь утверждали бы, что изображения были и в них ничего не
+    # нашлось.
+    if parsed.qr:
+        record_qr_decode(parsed.qr.get("stats") or {})
+
     persist_result(session, job=job, message=message, detection=detection, verdict=verdict)
 
     correlation = correlate(

@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import Any
 
@@ -316,3 +317,82 @@ RULE_HEALTH_LEVEL: dict[str, int] = {
     "REGRESSED": 4,
     "NOISY": 5,
 }
+
+
+# ---------------------------------------------------------------------------------------------
+# Профиль чтения QR-кодов (ТЗ 1.0.4 §6)
+# ---------------------------------------------------------------------------------------------
+#: Изображения, отданные декодеру. Знаменатель для всего остального здесь.
+qr_images_total = Counter("msp_qr_images_total", "Images handed to the QR decoder", registry=REGISTRY)
+qr_codes_found_total = Counter(
+    "msp_qr_codes_found_total", "QR codes decoded out of those images", registry=REGISTRY
+)
+qr_decode_success_total = Counter(
+    "msp_qr_decode_success_total", "Images the decoder processed without error", registry=REGISTRY
+)
+#: Таймаут и отказ разделены намеренно: первое означает «не успели», второе «не смогли», и
+#: лечатся они по-разному — ресурсами и исправлением соответственно.
+qr_decode_timeout_total = Counter(
+    "msp_qr_decode_timeout_total", "Decoder batches killed by the timeout", registry=REGISTRY
+)
+qr_decode_failure_total = Counter(
+    "msp_qr_decode_failure_total", "Images the decoder could not process", registry=REGISTRY
+)
+qr_worker_duration_seconds = Histogram(
+    "msp_qr_worker_duration_seconds",
+    "Wall time of one decoder batch, launch included",
+    buckets=(0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+    registry=REGISTRY,
+)
+#: Отдельно от общей длительности: запуск интерпретатора стоит около половины секунды, и без
+#: этой метрики он читается как медленное декодирование.
+qr_worker_spawn_duration_seconds = Histogram(
+    "msp_qr_worker_spawn_duration_seconds",
+    "Of that time, how much went on starting the process",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0),
+    registry=REGISTRY,
+)
+#: Состояние компонента числом, в порядке, удобном для оповещения: больше — хуже.
+QR_HEALTH_LEVEL: dict[str, int] = {
+    "AVAILABLE": 0,
+    "DISABLED": 1,
+    "DEGRADED": 2,
+    "FAILED": 3,
+}
+qr_component_health = Gauge(
+    "msp_qr_component_health",
+    "QR decoding component: 0 available, 1 disabled, 2 degraded, 3 failed",
+    registry=REGISTRY,
+)
+
+
+def _stat(stats: object, name: str) -> Any:
+    """Прочитать поле статистики, не зная её формы.
+
+    Разборщик отдаёт ``DecodeStats``, а сохранённое письмо — тот же набор словарём. Наблюдаемость
+    не импортирует ни то, ни другое: она не должна тянуть за собой разбор писем, а разбор —
+    наблюдаемость.
+    """
+    if isinstance(stats, Mapping):
+        return stats.get(name)
+    return getattr(stats, name, None)
+
+
+def record_qr_decode(stats: object) -> None:
+    """Перенести статистику одного письма в метрики (``DecodeStats`` или его словарь)."""
+    submitted = int(_stat(stats, "images_submitted") or 0)
+    if not submitted:
+        # Декодер не вызывался. Записать нули означало бы утверждать, что письма с
+        # изображениями были и в них ничего не нашлось.
+        return
+    qr_images_total.inc(submitted)
+    qr_codes_found_total.inc(int(_stat(stats, "codes_found") or 0))
+    qr_decode_success_total.inc(int(_stat(stats, "successes") or 0))
+    qr_decode_timeout_total.inc(int(_stat(stats, "timeouts") or 0))
+    qr_decode_failure_total.inc(int(_stat(stats, "failures") or 0))
+    duration = float(_stat(stats, "duration_seconds") or 0.0)
+    if duration:
+        qr_worker_duration_seconds.observe(duration)
+    spawn = _stat(stats, "spawn_seconds")
+    if spawn is not None:
+        qr_worker_spawn_duration_seconds.observe(float(spawn))

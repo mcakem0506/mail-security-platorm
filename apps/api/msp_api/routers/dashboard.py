@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response
 from msp_contracts import IncidentStatus, RiskLevel
+from msp_mail_parser.images import component_health as qr_component_health_report
 from sqlalchemy import desc, func, select, text
 
 from ..db.base import utcnow
@@ -22,7 +23,7 @@ from ..db.models import (
     Notification,
 )
 from ..deps import Actor, AppSettings, DbSession, get_scanner, get_ti_hub, require_permission
-from ..observability import render_metrics
+from ..observability import QR_HEALTH_LEVEL, qr_component_health, render_metrics
 from ..schemas import DashboardResponse
 from ..security.rbac import Permission
 from ..services.storage import build_storage
@@ -231,6 +232,19 @@ def dependencies(session: DbSession, settings: AppSettings) -> dict[str, Any]:
         "detail": scanner.detail,
         "required": False,
     }
+    # Профиль чтения QR-кодов. В обязательные проверки он не входит: его отсутствие — это
+    # сознательный выбор при сборке образа, а не неисправность, и готовность платформы от него
+    # не зависит. Но видимым он быть обязан — иначе администратор узнаёт о выключенном декодере
+    # из письма, в котором код остался непрочитанным.
+    qr = qr_component_health_report()
+    optional["qr_analysis"] = {
+        "status": qr.status.value,
+        "detail": qr.detail,
+        "probe_seconds": qr.probe_seconds,
+        "limits": qr.limits,
+        "required": False,
+    }
+    qr_component_health.set(QR_HEALTH_LEVEL.get(qr.status.value, 3))
     if settings.ad_enabled:
         from msp_ad import ActiveDirectoryConfig, ActiveDirectoryProvider
 

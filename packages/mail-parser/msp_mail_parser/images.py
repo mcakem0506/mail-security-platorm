@@ -28,9 +28,10 @@ import re
 import struct
 import subprocess  # nosec B404 - runs the decoder in its own process, fixed argv
 import sys
+import time
 from dataclasses import dataclass, field
 
-from msp_contracts import ExtractedUrl
+from msp_contracts import ExtractedUrl, QrHealth
 
 from .urls import normalize_url
 
@@ -173,6 +174,8 @@ class QrReport:
     #: clean result (ТЗ 1.0.3 §3, gap GAP-002).
     decoder_available: bool = False
     decode_errors: list[str] = field(default_factory=list)
+    #: Стоимость и исход декодирования. Пустая статистика означает, что декодер не вызывался.
+    stats: DecodeStats = field(default_factory=lambda: DecodeStats())
 
     @property
     def likely_quishing(self) -> bool:
@@ -191,6 +194,41 @@ class QrReport:
             "decoder_available": self.decoder_available,
             "decode_errors": self.decode_errors,
             "likely_quishing": self.likely_quishing,
+            "stats": self.stats.as_dict(),
+        }
+
+
+@dataclass
+class DecodeStats:
+    """Чем обошлось декодирование одного письма (ТЗ 1.0.4 §6).
+
+    Считается здесь, а наблюдаемость заполняет вызывающая сторона: разборщик писем не знает про
+    метрики и не должен — он работает и в рабочем процессе, и в оценке на корпусе, и в утилитах.
+    """
+
+    images_submitted: int = 0
+    #: Изображения, не отданные декодеру: слишком большие или не вошедшие в лимит пакета.
+    images_skipped: int = 0
+    codes_found: int = 0
+    #: Изображения, разобранные без ошибки, включая те, в которых кода не оказалось.
+    successes: int = 0
+    timeouts: int = 0
+    failures: int = 0
+    duration_seconds: float = 0.0
+    #: Сколько из них ушло на запуск процесса. ``None``, если процесс не сообщил время старта:
+    #: ноль означал бы «запуск бесплатный», а это неправда.
+    spawn_seconds: float | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "images_submitted": self.images_submitted,
+            "images_skipped": self.images_skipped,
+            "codes_found": self.codes_found,
+            "successes": self.successes,
+            "timeouts": self.timeouts,
+            "failures": self.failures,
+            "duration_seconds": round(self.duration_seconds, 4),
+            "spawn_seconds": (round(self.spawn_seconds, 4) if self.spawn_seconds is not None else None),
         }
 
 
@@ -217,30 +255,45 @@ def decoder_available() -> bool:
 def decode_images(
     images: list[tuple[str, bytes]], *, timeout: float = DECODE_TIMEOUT_SECONDS
 ) -> tuple[dict[str, list[str]], list[str]]:
-    """Decode QR codes, in a separate process (ТЗ 1.0.3B §31).
+    """Декодировать QR-коды. Обёртка над :func:`decode_images_with_stats` для прежних вызовов."""
+    decoded, errors, _stats = decode_images_with_stats(images, timeout=timeout)
+    return decoded, errors
 
-    Returns ``(payloads_by_image, errors)``. The decoder runs as its own process on purpose:
-    decoding the pixels of an attacker's image is the one step that hands attacker-controlled
-    bytes to a large C++ library, and in its own process a crash is an error message rather
-    than a dead worker. The timeout is enforced by the parent, which is the only place a bound
-    on that work means anything.
 
-    The subprocess performs no network and no file access: everything it needs arrives on stdin.
+def decode_images_with_stats(
+    images: list[tuple[str, bytes]], *, timeout: float = DECODE_TIMEOUT_SECONDS
+) -> tuple[dict[str, list[str]], list[str], DecodeStats]:
+    """Декодировать QR-коды в отдельном процессе (ТЗ 1.0.3B §31, ТЗ 1.0.4 §6).
+
+    Возвращает ``(payloads_by_image, errors, stats)``. Процесс отдельный намеренно: разбор
+    пикселей присланного изображения — единственный шаг, отдающий байты злоумышленника большой
+    C++-библиотеке. В своём процессе падение становится сообщением об ошибке, а не мёртвым
+    рабочим процессом, и таймаут задаётся снаружи того, что он ограничивает.
+
+    Процесс не обращается к сети и не пишет файлов: всё нужное приходит на stdin, а запись
+    запрещена пределом ``RLIMIT_FSIZE = 0``, который он ставит себе сам.
     """
-    if not images or not decoder_available():
-        return {}, []
+    stats = DecodeStats()
+    if not images:
+        return {}, [], stats
+    if not decoder_available():
+        # Отсутствие декодера — не ошибка декодирования, и в счётчик отказов оно не идёт.
+        return {}, [], stats
+
+    selected = [
+        (name, data) for name, data in images[:MAX_DECODED_IMAGES] if data and len(data) <= MAX_DECODE_BYTES
+    ]
+    stats.images_submitted = len(selected)
+    stats.images_skipped = len(images) - len(selected)
+    if not selected:
+        return {}, [], stats
 
     job = {
         "max_images": MAX_DECODED_IMAGES,
-        "images": [
-            {"name": name, "data": base64.b64encode(data).decode("ascii")}
-            for name, data in images[:MAX_DECODED_IMAGES]
-            if data and len(data) <= MAX_DECODE_BYTES
-        ],
+        "images": [{"name": name, "data": base64.b64encode(data).decode("ascii")} for name, data in selected],
     }
-    if not job["images"]:
-        return {}, []
 
+    launched_at = time.time()
     try:
         completed = subprocess.run(  # nosec B603 - fixed argv, no shell
             [sys.executable, "-m", "msp_mail_parser.qr_worker"],
@@ -251,18 +304,33 @@ def decode_images(
             check=False,
         )
     except subprocess.TimeoutExpired:
-        # A decode that will not finish is a decode that did not happen. Saying so is the whole
-        # point: the alternative is a message that looks checked because nothing complained.
-        return {}, ["DECODE_TIMEOUT"]
-    except OSError as exc:  # pragma: no cover - interpreter or packaging problem
-        return {}, [f"DECODER_UNAVAILABLE:{type(exc).__name__}"]
+        # Декодирование, которое не заканчивается, — это декодирование, которого не было.
+        # Сказать об этом и есть весь смысл: иначе письмо выглядит проверенным, потому что
+        # никто не пожаловался.
+        stats.duration_seconds = time.time() - launched_at
+        stats.timeouts = 1
+        return {}, ["DECODE_TIMEOUT"], stats
+    except OSError as exc:  # pragma: no cover - проблема интерпретатора или сборки
+        stats.duration_seconds = time.time() - launched_at
+        stats.failures = 1
+        return {}, [f"DECODER_UNAVAILABLE:{type(exc).__name__}"], stats
+
+    stats.duration_seconds = time.time() - launched_at
 
     if completed.returncode != 0:
-        return {}, [f"DECODER_FAILED:{completed.returncode}"]
+        stats.failures = 1
+        return {}, [f"DECODER_FAILED:{completed.returncode}"], stats
     try:
         payload = json.loads(completed.stdout or "{}")
     except ValueError:
-        return {}, ["DECODER_BAD_OUTPUT"]
+        stats.failures = 1
+        return {}, ["DECODER_BAD_OUTPUT"], stats
+
+    started_at = payload.get("started_at")
+    if isinstance(started_at, int | float) and started_at >= launched_at:
+        # Стоимость запуска интерпретатора отдельно от стоимости разбора пикселей: без этого
+        # полсекунды на письмо читаются как медленный декодер, хотя это запуск процесса.
+        stats.spawn_seconds = float(started_at) - launched_at
 
     decoded: dict[str, list[str]] = {}
     errors: list[str] = []
@@ -270,11 +338,113 @@ def decode_images(
         name = str(item.get("name", ""))
         if item.get("error"):
             errors.append(f"{name[:60]}:{item['error']}")
+            stats.failures += 1
             continue
+        stats.successes += 1
         payloads = [str(value) for value in (item.get("payloads") or [])]
         if payloads:
             decoded[name] = payloads
-    return decoded, errors
+            stats.codes_found += len(payloads)
+    return decoded, errors, stats
+
+
+#: Сколько ждать пробу здоровья. Проба не декодирует недоверенных байтов и укладывается в запуск
+#: интерпретатора, поэтому предел меньше рабочего.
+PROBE_TIMEOUT_SECONDS = 20.0
+#: Проба, уложившаяся дольше этого, означает работоспособный, но негодный для потока компонент.
+PROBE_SLOW_SECONDS = 5.0
+
+
+@dataclass
+class QrComponentHealth:
+    """Состояние профиля ``qr-analysis`` (ТЗ 1.0.4 §6)."""
+
+    status: QrHealth
+    detail: str
+    probe_seconds: float | None = None
+    limits: dict[str, object] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status.value,
+            "detail": self.detail,
+            "probe_seconds": (round(self.probe_seconds, 4) if self.probe_seconds is not None else None),
+            "limits": self.limits,
+        }
+
+
+def component_health(*, timeout: float = PROBE_TIMEOUT_SECONDS) -> QrComponentHealth:
+    """Проверить компонент, запустив процесс-декодер и ничего ему не декодируя.
+
+    Проба отвечает на вопрос «работает ли то, что должно работать», и отвечает им **до** того,
+    как придёт письмо с кодом. Четыре состояния различаются намеренно:
+
+    ``DISABLED`` — компонента нет, и так задумано. ``FAILED`` — есть и не работает. Для
+    администратора это разные задачи; для письма следствие одинаковое, и оно всё равно будет
+    помечено как проверенное не полностью.
+
+    ``DEGRADED`` — компонент работает, но одно из требований профиля не выполнено: либо проба
+    идёт слишком долго, либо платформа не умеет ставить процессу ресурсные пределы. Второе — не
+    придирка: без пределов остаются таймаут родителя и лимиты по пикселям, а запрет на запись
+    файлов и ограничение памяти не действуют.
+    """
+    if not decoder_available():
+        return QrComponentHealth(
+            QrHealth.DISABLED,
+            "необязательный компонент «qr» не установлен: содержимое кодов не читается, "
+            "наличие кода определяется по-прежнему",
+        )
+
+    launched_at = time.time()
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [sys.executable, "-m", "msp_mail_parser.qr_worker"],
+            input=json.dumps({"probe": True}),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return QrComponentHealth(
+            QrHealth.FAILED,
+            f"проба не ответила за {timeout:g} с",
+            probe_seconds=time.time() - launched_at,
+        )
+    except OSError as exc:
+        return QrComponentHealth(QrHealth.FAILED, f"процесс не запускается: {type(exc).__name__}")
+
+    elapsed = time.time() - launched_at
+    try:
+        payload = json.loads(completed.stdout or "{}")
+    except ValueError:
+        return QrComponentHealth(QrHealth.FAILED, "проба вернула неразбираемый ответ", probe_seconds=elapsed)
+
+    limits = payload.get("limits") or {}
+    if completed.returncode != 0 or payload.get("probe") != "ok":
+        detail = str(payload.get("detail") or payload.get("probe") or completed.returncode)
+        return QrComponentHealth(
+            QrHealth.FAILED, f"проба не прошла: {detail[:200]}", probe_seconds=elapsed, limits=limits
+        )
+
+    if not limits.get("applied"):
+        return QrComponentHealth(
+            QrHealth.DEGRADED,
+            "декодер работает, но ресурсные пределы процессу не поставлены: "
+            f"{limits.get('reason', 'причина не указана')}",
+            probe_seconds=elapsed,
+            limits=limits,
+        )
+    if elapsed > PROBE_SLOW_SECONDS:
+        return QrComponentHealth(
+            QrHealth.DEGRADED,
+            f"проба заняла {elapsed:.1f} с: запуск процесса на каждое письмо обойдётся дорого",
+            probe_seconds=elapsed,
+            limits=limits,
+        )
+    return QrComponentHealth(
+        QrHealth.AVAILABLE, "декодер работает, пределы поставлены", probe_seconds=elapsed, limits=limits
+    )
 
 
 def inspect_images(
@@ -308,7 +478,7 @@ def inspect_images(
     if not candidates or not report.decoder_available:
         return report
 
-    decoded, errors = decode_images(candidates)
+    decoded, errors, report.stats = decode_images_with_stats(candidates)
     report.decode_errors.extend(errors)
     for name, payloads in decoded.items():
         for payload in payloads:

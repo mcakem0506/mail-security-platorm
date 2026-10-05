@@ -39,9 +39,7 @@ class TestGenerationIsOfflineAndPure:
 
     def test_the_known_gap_examples_are_in_the_registry(self, db, organization) -> None:  # type: ignore[no-untyped-def]
         """Те самые домены, из-за которых существовал GAP-001."""
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         present = set(
             db.execute(
@@ -79,9 +77,7 @@ class TestGenerationIsOfflineAndPure:
 
 class TestRegenerationKeepsHumanDecisions:
     def test_a_second_run_creates_nothing_new(self, db, organization) -> None:  # type: ignore[no-untyped-def]
-        first = domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        first = domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         second = domain_variants.generate(
             db, organization_id=organization.id, protected_domain="corp.example"
@@ -92,14 +88,10 @@ class TestRegenerationKeepsHumanDecisions:
 
     def test_a_decision_survives_regeneration(self, db, organization) -> None:  # type: ignore[no-untyped-def]
         """Иначе пересборка реестра тихо возвращала бы погашенный сигнал."""
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         variant = db.execute(
-            select(ProtectedDomainVariant).where(
-                ProtectedDomainVariant.candidate_domain == "corps.example"
-            )
+            select(ProtectedDomainVariant).where(ProtectedDomainVariant.candidate_domain == "corps.example")
         ).scalar_one()
         domain_variants.decide(
             db,
@@ -110,15 +102,11 @@ class TestRegenerationKeepsHumanDecisions:
         )
         db.commit()
 
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         db.expire_all()
         again = db.execute(
-            select(ProtectedDomainVariant).where(
-                ProtectedDomainVariant.candidate_domain == "corps.example"
-            )
+            select(ProtectedDomainVariant).where(ProtectedDomainVariant.candidate_domain == "corps.example")
         ).scalar_one()
         assert again.status is DomainVariantStatus.KNOWN_LEGITIMATE
         assert again.decided_by == "admin@corp.example"
@@ -126,9 +114,7 @@ class TestRegenerationKeepsHumanDecisions:
 
 class TestObservation:
     def test_an_observed_variant_changes_state_and_counts(self, db, organization) -> None:  # type: ignore[no-untyped-def]
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         first = domain_variants.record_observation(
             db, organization_id=organization.id, candidate_domain="coorp.example"
@@ -152,14 +138,10 @@ class TestObservation:
         )
 
     def test_observation_does_not_overwrite_a_decision(self, db, organization) -> None:  # type: ignore[no-untyped-def]
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         variant = db.execute(
-            select(ProtectedDomainVariant).where(
-                ProtectedDomainVariant.candidate_domain == "core.example"
-            )
+            select(ProtectedDomainVariant).where(ProtectedDomainVariant.candidate_domain == "core.example")
         ).scalar_one()
         domain_variants.decide(
             db,
@@ -179,14 +161,10 @@ class TestObservation:
 
 class TestSuppressingStatusIsNotCheap:
     def _variant(self, db, organization) -> ProtectedDomainVariant:  # type: ignore[no-untyped-def]
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         return db.execute(
-            select(ProtectedDomainVariant).where(
-                ProtectedDomainVariant.candidate_domain == "corpp.example"
-            )
+            select(ProtectedDomainVariant).where(ProtectedDomainVariant.candidate_domain == "corpp.example")
         ).scalar_one()
 
     def test_known_legitimate_requires_a_reason(self, db, organization) -> None:  # type: ignore[no-untyped-def]
@@ -228,9 +206,7 @@ class TestSummary:
         assert result["decided_share"] is None, "доля от пустого реестра ничего не означает"
 
     def test_summary_counts_by_status(self, db, organization) -> None:  # type: ignore[no-untyped-def]
-        domain_variants.generate(
-            db, organization_id=organization.id, protected_domain="corp.example"
-        )
+        domain_variants.generate(db, organization_id=organization.id, protected_domain="corp.example")
         db.commit()
         domain_variants.record_observation(
             db, organization_id=organization.id, candidate_domain="coorp.example"
