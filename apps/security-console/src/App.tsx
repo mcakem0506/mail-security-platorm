@@ -16,6 +16,7 @@ import { QueuePage } from "./pages/QueuePage";
 import { DetectionQualityPage } from "./pages/DetectionQualityPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
+import { RealFlowPage } from "./pages/RealFlowPage";
 import { ReevaluationPage } from "./pages/ReevaluationPage";
 
 interface NavItem {
@@ -54,6 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/simulator", label: "Симулятор", permission: "detection:simulate" },
       { to: "/releases", label: "Выпуски", permission: "quality:read" },
       { to: "/reevaluation", label: "Переоценка", permission: "quality:read" },
+      { to: "/real-flow", label: "Реальный поток", permission: "realflow:read" },
     ],
   },
   {
@@ -165,6 +167,7 @@ export function App() {
             <Route path="/simulator" element={<SimulatorPage />} />
             <Route path="/releases" element={<ReleasesPage user={user} />} />
             <Route path="/reevaluation" element={<ReevaluationPage user={user} />} />
+            <Route path="/real-flow" element={<RealFlowPage user={user} />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
             <Route path="/gateways" element={<GatewaysPage user={user} />} />
