@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import ValidationMessage
 from ..observability import (
+    realflow_raw_retention_overdue,
     realflow_reviewed_total,
     record_realflow_ingest,
     record_realflow_summary,
@@ -435,7 +436,7 @@ def expired_raw_records(session: Session, organization_id: str) -> list[Validati
     Обезличенные метрики живут дольше: они нужны для сравнения выпусков, а тела писем — нет.
     """
     now = utcnow()
-    return list(
+    overdue = list(
         session.execute(
             select(ValidationMessage).where(
                 ValidationMessage.organization_id == organization_id,
@@ -447,6 +448,10 @@ def expired_raw_records(session: Session, organization_id: str) -> list[Validati
         .scalars()
         .all()
     )
+    # Метрика ставится при каждом подсчёте, в том числе когда просроченных нет: иначе ноль
+    # нечем было бы отличить от того, что проверку перестали запускать.
+    realflow_raw_retention_overdue.set(len(overdue))
+    return overdue
 
 
 def promotion_candidates(session: Session, organization_id: str) -> list[ValidationMessage]:

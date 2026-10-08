@@ -676,3 +676,163 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  short-domain-regression:
+    name: Short domain lookalikes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # GAP-001 закрыт сигналом, который сам по себе ничего не весит и срабатывает только при
+      # независимом подтверждении. Два вида ошибки здесь стоят по-разному и поэтому проверяются
+      # отдельно: пропуск — это дыра, а ложное срабатывание на легитимной почте — это причина,
+      # по которой правило отключат целиком, и тогда дыра вернётся.
+      - name: Выравнивание метки и имени отправителя
+        run: pytest -q tests/unit/test_label_alignment.py
+
+      # Правило SND-024 не должно срабатывать ни на одном легитимном письме корпуса. Прогон по
+      # всему корпусу, а не по нескольким случаям: сигнал, срабатывающий на всей почте,
+      # информации не несёт, и увидеть это можно только на всей почте.
+      - name: Короткие похожие домены на всём корпусе
+        run: |
+          pytest -q tests/integration/test_detection_validation.py \
+            tests/unit/test_detection.py
+
+      # Условие правила обязано называть признак, который движок умеет выдавать. Правило с
+      # опечаткой загружается чисто и не срабатывает никогда.
+      - name: Словарь правил
+        run: pytest -q tests/unit/test_rule_vocabulary.py
+
+  real-flow-anonymization-tests:
+    name: Real flow and anonymisation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      # Обезличивание проверяется с двух сторон, и вторая важнее первой. Что данные исчезли —
+      # проверить легко; что после замен письмо осталось пригодным для анализа — трудно, и
+      # именно это ломается молча. Обезличенный корпус, по которому детектирование не
+      # воспроизводится, измеряет последствия замен, а не качество правил.
+      - name: Обезличивание
+        run: pytest -q tests/security/test_anonymization.py
+
+      - name: Набор валидации, продвижение в корпус и теневой режим
+        run: |
+          pytest -q tests/integration/test_real_flow.py \
+            tests/integration/test_corpus_promotion.py \
+            tests/security/test_real_flow_shadow.py \
+            tests/e2e/test_real_flow_e2e.py
+
+      # Теневой режим обязан гасить сами флаги, а не их отображение. Проверка по исходникам
+      # входит в тот же файл: мест, где реагирование разрешается, несколько, и каждое читает
+      # настройку напрямую.
+      - name: Алерты ссылаются на существующие метрики
+        run: pytest -q tests/unit/test_alerts.py
+
+  qr-profile-tests:
+    name: QR production profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      # Профиль с установленным декодером: иначе проверки изоляции прошли бы потому, что
+      # декодировать нечем. Отсутствие компонента и его безопасная работа выглядят одинаково,
+      # если не проверить, что компонент на месте.
+      - run: pip install -e ".[dev,qr]"
+
+      - name: Декодер действительно установлен
+        run: |
+          python - <<'PY'
+          import sys
+
+          try:
+              import cv2  # noqa: F401
+              from pyzbar import pyzbar  # noqa: F401
+          except ImportError as error:
+              sys.exit(f"профиль qr требует установленного декодера: {error}")
+          print("декодер на месте")
+          PY
+
+      - name: Изоляция декодера и чтение настоящих кодов
+        run: |
+          # pipefail обязателен: без него код возврата берётся от tee, и провалившийся тест
+          # изоляции декодера прошёл бы как зелёный шаг.
+          set -o pipefail
+          pytest -q -rs tests/security/test_qr_isolation.py tests/unit/test_qr_decoding.py             | tee qr.log
+
+      # Пропущенный тест в этом профиле означает, что проверка изоляции не выполнялась, а
+      # зелёный прогон говорил бы обратное.
+      - name: Ничего не пропущено
+        run: |
+          if grep -Eq "[0-9]+ skipped" qr.log; then
+            echo "в профиле qr тесты пропускаться не должны:"
+            grep -E "SKIPPED|skipped" qr.log
+            exit 1
+          fi
+
+  gateway-readiness-smoke:
+    name: Gateway readiness gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+
+      - name: Политика готовности
+        run: pytest -q tests/integration/test_gateway_readiness.py
+
+      # Гейт запускается без сводки реального потока и обязан ответить NOT_READY с кодом 1.
+      # Это и есть проверяемое свойство: непроверенное условие не считается выполненным, и
+      # «нет данных» не превращается в «нет замечаний».
+      - name: Без данных реального потока гейт отказывает
+        run: |
+          set +e
+          python scripts/gateway_readiness.py --json readiness.json --out readiness.md
+          code=$?
+          set -e
+          if [ "$code" != "1" ]; then
+            echo "гейт без данных обязан вернуть 1, вернул $code"
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import sys
+
+          body = json.loads(open("readiness.json", encoding="utf-8").read())
+          if body["decision"] != "NOT_READY":
+              sys.exit(f"ожидалось NOT_READY, получено {body['decision']}")
+          for key in ("real_flow_sample", "regression_suite"):
+              if key not in body["blocking"]:
+                  sys.exit(f"условие {key} должно блокировать готовность")
+          print("гейт отказал по", ", ".join(body["blocking"]))
+          PY
+
+      - name: Report
+        if: always()
+        run: cat readiness.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gateway-readiness-${{ github.sha }}
+          path: |
+            readiness.md
+            readiness.json
+          retention-days: 90
