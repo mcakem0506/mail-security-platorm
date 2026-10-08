@@ -25,6 +25,8 @@ from msp_contracts import (
     IntakeState,
     IOCType,
     JobState,
+    PiiStatus,
+    PromotionState,
     ReanalysisState,
     RemediationState,
     RemediationType,
@@ -35,6 +37,7 @@ from msp_contracts import (
     SignalDisposition,
     TIState,
     TIStatus,
+    ValidationSource,
 )
 from sqlalchemy import (
     Boolean,
@@ -1565,6 +1568,97 @@ class CampaignMatch(Base, IdMixin):
     rejected: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     decided_by: Mapped[str] = mapped_column(String(320), default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class ValidationMessage(Base, IdMixin):
+    """Письмо реального потока, взятое в набор валидации (ТЗ 1.0.4 §8).
+
+    Запись существует отдельно от ``mail_messages`` намеренно. Обычное письмо хранится, чтобы по
+    нему работал аналитик, и удаляется по сроку хранения почты. Запись валидации хранится, чтобы
+    по ней измеряли качество детектирования, и живёт по своему сроку — более долгому для
+    обезличенных метрик и более короткому для исходных данных (ТЗ §22). Смешать их значило бы
+    либо потерять измерения вместе с почтой, либо держать почту ради измерений.
+
+    Два вердикта хранятся рядом и значат разное:
+
+    * ``production_verdict`` — что платформа решила тогда, на том пакете правил;
+    * ``validation_verdict`` — что она решает сейчас, при повторном прогоне.
+
+    Расхождение между ними — не ошибка, а предмет разбора: именно по нему видно, что изменение
+    правил дало на настоящей почте.
+    """
+
+    __tablename__ = "validation_messages"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "message_fingerprint", name="uq_validation_message"),
+        Index("ix_validation_org_received", "organization_id", "received_at"),
+        Index("ix_validation_org_review", "organization_id", "analyst_classification"),
+        Index("ix_validation_org_pii", "organization_id", "pii_status"),
+        Index("ix_validation_org_promotion", "organization_id", "promotion_state"),
+        # Выборка писем с истёкшим сроком хранения исходных данных (ТЗ §22).
+        Index("ix_validation_org_raw_retention", "organization_id", "raw_retained_until"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
+    #: Письмо платформы, если оно ещё не удалено по сроку хранения. Запись валидации переживает
+    #: его, поэтому связь необязательная и обнуляется, а не каскадно удаляет запись.
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="SET NULL"), default=None, index=True
+    )
+    source: Mapped[ValidationSource] = mapped_column(_enum(ValidationSource, "validation_source_enum"))
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: Отпечаток по структуре, устойчивый к обезличиванию: по нему одно письмо не попадает в
+    #: набор дважды из двух источников.
+    message_fingerprint: Mapped[str] = mapped_column(String(64))
+    anonymized: Mapped[bool] = mapped_column(Boolean, default=False)
+    pii_status: Mapped[PiiStatus] = mapped_column(_enum(PiiStatus, "pii_status_enum"), default=PiiStatus.RAW)
+    #: Отчёт об обезличивании: сколько замен какого вида сделано. Нужен, чтобы «обезличено» было
+    #: проверяемым утверждением.
+    anonymization_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
+
+    #: Чего ожидали от платформы, если это известно заранее (учения, red team). ``None`` —
+    #: обычный случай: на реальном потоке ожидаемого ответа нет, и притворяться, что есть,
+    #: значило бы считать recall по выдуманной разметке.
+    expected_classification: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    #: Что сказал аналитик. ``None`` означает «не разобрано», а не «верно».
+    analyst_classification: Mapped[AnalystClassification | None] = mapped_column(
+        _enum(AnalystClassification, "analyst_classification_enum"), default=None
+    )
+    reviewed_by: Mapped[str] = mapped_column(String(320), default="")
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    review_comment: Mapped[str] = mapped_column(String(2000), default="")
+
+    production_verdict: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    validation_verdict: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    #: Всё, от чего зависит вердикт, на момент прогона — иначе расхождение не объяснимо.
+    ruleset_version: Mapped[str] = mapped_column(String(64), default="")
+    parser_version: Mapped[str] = mapped_column(String(64), default="")
+    risk_engine_version: Mapped[str] = mapped_column(String(64), default="")
+
+    #: Правила, сработавшие при прогоне валидации: по ним считается шум на реальной почте.
+    triggered_rules: Mapped[list[Any]] = mapped_column(default=list)
+    #: Почему письмо попало в выборку (ТЗ §14): высокий риск, обращение сотрудника, QR, случайная
+    #: доля легитимной почты. Нужно, чтобы метрику нельзя было прочитать как долю от всего потока.
+    sampling_reasons: Mapped[list[Any]] = mapped_column(default=list)
+    #: Проверка оказалась неполной: шифрование, пароль на архиве, нераспознанный QR-код.
+    unscannable_reasons: Mapped[list[Any]] = mapped_column(default=list)
+
+    promotion_state: Mapped[PromotionState] = mapped_column(
+        _enum(PromotionState, "promotion_state_enum"),
+        default=PromotionState.NOT_REQUESTED,
+    )
+    promotion_requested_by: Mapped[str] = mapped_column(String(320), default="")
+    promotion_approved_by: Mapped[str] = mapped_column(String(320), default="")
+    promotion_case_id: Mapped[str] = mapped_column(String(32), default="")
+    #: Срок, после которого исходные данные удаляются раньше обезличенных метрик (ТЗ §22).
+    raw_retained_until: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class ProtectedDomainVariant(Base, IdMixin):

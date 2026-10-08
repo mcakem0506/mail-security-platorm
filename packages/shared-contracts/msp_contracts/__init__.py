@@ -28,7 +28,9 @@ from .enums import (
     IntakeState,
     IOCType,
     JobState,
+    PiiStatus,
     Priority,
+    PromotionState,
     ProtectedCategory,
     QrHealth,
     ReanalysisState,
@@ -45,6 +47,7 @@ from .enums import (
     SlaState,
     TIState,
     TIStatus,
+    ValidationSource,
     VTMode,
 )
 from .gateway import (
@@ -132,7 +135,9 @@ __all__ = [
     "JobState",
     "MessageTrace",
     "MessageTraceEvent",
+    "PiiStatus",
     "Priority",
+    "PromotionState",
     "ProtectedCategory",
     "ProviderConflict",
     "ProviderHealth",
@@ -161,5 +166,6 @@ __all__ = [
     "TrustState",
     "TrustedMailHop",
     "VTMode",
+    "ValidationSource",
     "utcnow",
 ]
