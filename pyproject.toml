@@ -81,6 +81,12 @@ msp_api = ["migrations/*.py", "migrations/versions/*.py", "alembic.ini"]
 testpaths = ["tests"]
 addopts = "-q -p no:cacheprovider"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    # Тесты, которые запускают отдельный процесс или проходят по всему корпусу. Отмечены, чтобы
+    # их можно было исключить при быстрой проверке, но по умолчанию они выполняются: гейт
+    # готовности, который не проверяется, — это документ, а не гейт.
+    "slow: запускает подпроцесс или полный прогон",
+]
 
 [tool.ruff]
 line-length = 110

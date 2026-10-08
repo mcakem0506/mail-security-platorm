@@ -32,7 +32,7 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import corpus_promotion, real_flow
+from ..services import corpus_promotion, gateway_readiness, real_flow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["real-flow"])
@@ -354,3 +354,44 @@ def validate_gap(
         "real_flow_validated_by": gap.real_flow_validated_by,
         "real_flow_evidence": gap.real_flow_evidence,
     }
+
+
+# ---------------------------------------------------------------------------------------------
+# Готовность к inline-шлюзу (ТЗ §18-§21, §23)
+# ---------------------------------------------------------------------------------------------
+@router.get("/detection/readiness")
+def gateway_readiness_state(actor: ReadinessReader, session: DbSession) -> dict[str, Any]:
+    """Можно ли ставить платформу в разрыв почтового потока.
+
+    Решение одно из трёх, а не число: до сих пор платформа смотрела на копию письма, и ошибка
+    стоила ложного срабатывания в консоли аналитика. В разрыве потока ошибка стоит
+    недоставленного письма, и ответ «вроде бы готовы» перестаёт быть ответом.
+
+    Пороги общие со скриптом scripts/gateway_readiness.py: расхождение между «конвейер
+    сказал готово» и «консоль показывает не готово» хуже любого из двух ответов.
+    """
+    summary = real_flow.summary(session, actor.organization_id)
+    summary["rule_pressure"] = real_flow.rule_pressure(session, actor.organization_id)
+
+    gaps = [
+        {
+            "gap_id": row.gap_id,
+            "severity": row.severity.value,
+            "status": row.status.value,
+            "real_flow_validated_at": (
+                row.real_flow_validated_at.isoformat() if row.real_flow_validated_at else None
+            ),
+        }
+        for row in session.execute(
+            select(DetectionGapRecord).where(DetectionGapRecord.organization_id == actor.organization_id)
+        )
+        .scalars()
+        .all()
+    ]
+
+    readiness = gateway_readiness.Readiness()
+    readiness.extend(gateway_readiness.real_flow_checks(summary))
+    # Пустой реестр — это не «пробелов нет», а «реестр не заполнен»: пробелы заводятся вручную,
+    # и организация без ни одного пробела просто ещё не начинала их заводить.
+    readiness.extend(gateway_readiness.gap_checks(gaps or None))
+    return readiness.as_dict()

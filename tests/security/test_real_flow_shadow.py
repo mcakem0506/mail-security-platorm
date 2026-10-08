@@ -222,3 +222,35 @@ def test_the_combination_is_allowed_and_resolved_not_rejected(forbidden: str) ->
     """
     settings = _settings(real_flow_shadow=True, remediation_enabled=True)
     assert settings.remediation_enabled is False
+
+
+class TestRetentionOrderIsEnforced:
+    """ТЗ §22: исходные данные удаляются раньше обезличенных метрик."""
+
+    def test_the_default_order_is_correct(self) -> None:
+        settings = _settings()
+        assert settings.raw_message_retention_days <= settings.anonymized_validation_retention_days
+
+    def test_raw_data_outliving_the_metrics_is_refused(self) -> None:
+        """Иначе платформа хранила бы переписку ради чисел, которые уже посчитаны."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="удаляются раньше"):
+            _settings(
+                raw_message_retention_days=400,
+                anonymized_validation_retention_days=30,
+            )
+
+    def test_an_equal_pair_is_allowed(self) -> None:
+        """Проверка самой проверки: запрет касается только нарушения порядка."""
+        settings = _settings(raw_message_retention_days=90, anonymized_validation_retention_days=90)
+        assert settings.raw_message_retention_days == 90
+
+    def test_the_three_periods_are_published(self) -> None:
+        """Администратору нужно видеть сроки, не читая конфигурацию сервера."""
+        retention = _settings().public_config()["retention"]
+        assert set(retention) == {
+            "raw_message_days",
+            "anonymized_validation_days",
+            "analyst_feedback_days",
+        }

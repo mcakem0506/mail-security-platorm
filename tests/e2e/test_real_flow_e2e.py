@@ -418,3 +418,30 @@ class TestScenario5AGapIsValidatedOnRealMailOrNotAtAll:
 
         actions = {row["action"] for row in admin.get("/api/v1/admin/audit?limit=100").json()["items"]}
         assert "gap.validated" in actions
+
+
+class TestScenario6ReadinessAnswersWithOneOfThree:
+    def test_an_empty_pilot_is_not_ready(self, client, people, engine, organization) -> None:  # type: ignore[no-untyped-def]
+        """Выборки нет — значит «не готово», а не «нет замечаний».
+
+        Это и есть главное свойство гейта: готовность, выданная по отсутствию доказательств
+        обратного, — не готовность (ТЗ §18).
+        """
+        viewer = _as(client, people, "viewer")
+        response = viewer.get("/api/v1/detection/readiness")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["decision"] == "NOT_READY"
+        assert "real_flow_sample" in body["blocking"]
+        assert "critical_gaps_registered" in body["blocking"], "пустой реестр — не «пробелов нет»"
+
+    def test_the_answer_states_what_it_does_not_cover(self, client, people, engine, organization) -> None:  # type: ignore[no-untyped-def]
+        """Решение читают из API, и ограничение этого решения должно стоять там же."""
+        viewer = _as(client, people, "viewer")
+        body = viewer.get("/api/v1/detection/readiness").json()
+        assert "inline-шлюз" in body["scope_note"]
+        assert body["thresholds"]["min_analyzed"] == 500
+
+    def test_an_employee_cannot_read_the_readiness_gate(self, client, people, engine, organization) -> None:  # type: ignore[no-untyped-def]
+        employee = _as(client, people, "employee")
+        assert employee.get("/api/v1/detection/readiness").status_code == 403

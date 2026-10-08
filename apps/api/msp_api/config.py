@@ -268,6 +268,15 @@ class Settings(BaseSettings):
     retention_attachment_days: int = 30
     retention_audit_days: int = 400
     retention_malicious_sample_days: int = 365
+    # -- сроки хранения набора валидации (ТЗ 1.0.4 §22)
+    #: Исходное письмо реального потока. Самый короткий срок из трёх: это переписка организации,
+    #: и она нужна ровно до разбора и обезличивания.
+    raw_message_retention_days: int = 14
+    #: Обезличенные записи валидации. Переживают исходник: ради них всё и делалось, и без них
+    #: сравнивать выпуски будет нечем.
+    anonymized_validation_retention_days: int = 365
+    #: Разборы аналитиков. Вывод человека — самое долгоживущее и самое дешёвое в хранении.
+    analyst_feedback_retention_days: int = 730
 
     # -- notifications
     smtp_host: str = ""
@@ -317,6 +326,16 @@ class Settings(BaseSettings):
                 )
             object.__setattr__(self, "remediation_enabled", False)
             object.__setattr__(self, "employee_notifications_enabled", False)
+
+        # Порядок сроков — не рекомендация. Исходные данные, живущие дольше обезличенных
+        # метрик, означали бы, что платформа хранит переписку ради чисел, которые уже
+        # посчитаны (ТЗ 1.0.4 §22).
+        if self.raw_message_retention_days > self.anonymized_validation_retention_days:
+            raise ValueError(
+                "MSP_RAW_MESSAGE_RETENTION_DAYS должен быть не больше "
+                "MSP_ANONYMIZED_VALIDATION_RETENTION_DAYS: исходные данные удаляются раньше "
+                "обезличенных метрик (ТЗ 1.0.4 §22)"
+            )
 
         if not self.secret_key:
             if self.environment == "production":
@@ -454,6 +473,11 @@ class Settings(BaseSettings):
             "remediation_enabled": self.remediation_enabled and not self.remediation_dry_run_only,
             "real_flow_shadow": self.real_flow_shadow,
             "employee_notifications_enabled": self.employee_notifications_enabled,
+            "retention": {
+                "raw_message_days": self.raw_message_retention_days,
+                "anonymized_validation_days": self.anonymized_validation_retention_days,
+                "analyst_feedback_days": self.analyst_feedback_retention_days,
+            },
             "url_fetch_enabled": self.url_fetch_enabled,
             "gateway_syslog_enabled": self.gateway_syslog_enabled,
             "semantic_enabled": self.semantic_enabled,
