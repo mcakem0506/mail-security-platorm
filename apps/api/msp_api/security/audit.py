@@ -96,6 +96,15 @@ class AuditAction:
     # Durable intake and unscannable messages (ТЗ 1.0.1 §4.1, §4.2).
     INTAKE_DEAD_LETTER = "intake.dead_letter"
     MESSAGE_UNSCANNABLE = "intake.unscannable"
+    # Реальный поток (ТЗ 1.0.4 §24). Разбор, заявка, согласование и продвижение — четыре
+    # разных события, а не одно «изменение записи»: по ним восстанавливается, кто что решил.
+    REALFLOW_REVIEWED = "realflow.reviewed"
+    REALFLOW_PROMOTION_REQUESTED = "realflow.promotion_requested"
+    REALFLOW_PROMOTION_APPROVED = "realflow.promotion_approved"
+    REALFLOW_PROMOTION_REJECTED = "realflow.promotion_rejected"
+    REALFLOW_PROMOTED = "realflow.promoted"
+    #: Подтверждение, что пробел закрыт на реальной почте, — отдельное утверждение.
+    GAP_VALIDATED = "gap.validated"
 
 
 _SENSITIVE_KEY_RE = re.compile(

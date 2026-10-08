@@ -65,7 +65,7 @@ from ..db.models import (
     ProviderLookup,
     RiskVerdictHistory,
 )
-from ..observability import record_qr_decode, rule_triggers
+from ..observability import record_qr_decode, rule_triggers, short_domain_lookalike_total
 from . import canary, domain_variants
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
@@ -585,6 +585,13 @@ def persist_result(
             organization_id=job.organization_id,
             candidate_domain=message.sender_domain,
         )
+
+    # Короткие похожие домены считаются по виду преобразования (ТЗ 1.0.4 §3, §25). Признак
+    # сам по себе ничего не весит, но его частота — это то, по чему видно, закрылся ли GAP-001.
+    if detection.facts.get("from_domain_short_lookalike_corporate"):
+        # Сам признак — True; вид преобразования лежит в доказательствах к нему.
+        evidence = detection.facts.evidence.get("from_domain_short_lookalike_corporate", {})
+        short_domain_lookalike_total.labels(transform=str(evidence.get("technique") or "unknown")).inc()
 
     record_rule_triggers(session, organization_id=job.organization_id, signals=detection.signals)
     for detected in detection.signals:

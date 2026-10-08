@@ -36,6 +36,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import ValidationMessage
+from ..observability import (
+    realflow_reviewed_total,
+    record_realflow_ingest,
+    record_realflow_summary,
+    record_rule_pressure,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +162,7 @@ def ingest(session: Session, request: IngestRequest) -> tuple[ValidationMessage,
         existing.sampling_reasons = merged
         if existing.message_id is None and request.message_id:
             existing.message_id = request.message_id
+        record_realflow_ingest(request.source.value, request.sampling_reasons, created=False)
         return existing, False
 
     retention_days = request.raw_retention_days
@@ -179,6 +186,7 @@ def ingest(session: Session, request: IngestRequest) -> tuple[ValidationMessage,
         raw_retained_until=(utcnow() + timedelta(days=retention_days) if retention_days else None),
     )
     session.add(record)
+    record_realflow_ingest(request.source.value, request.sampling_reasons, created=True)
     logger.info(
         "real_flow.ingested",
         extra={"source": request.source.value, "reasons": request.sampling_reasons},
@@ -205,6 +213,7 @@ def review(
     record.reviewed_by = analyst.strip()
     record.reviewed_at = utcnow()
     record.review_comment = comment.strip()[:2000]
+    realflow_reviewed_total.labels(classification=classification.value).inc()
     return record
 
 
@@ -260,7 +269,7 @@ def summary(session: Session, organization_id: str, *, days: int | None = None) 
         key = row.production_verdict.value if row.production_verdict else "NOT_ANALYSED"
         verdict_distribution[key] = verdict_distribution.get(key, 0) + 1
 
-    return {
+    result = {
         "messages_total": total,
         "reviewed_total": len(reviewed),
         "true_positive": true_positive,
@@ -289,6 +298,11 @@ def summary(session: Session, organization_id: str, *, days: int | None = None) 
             ),
         },
     }
+    # Доли в метрики не идут: ``precision`` может быть ``None``, а Prometheus не умеет «нет
+    # данных» — отсутствующее значение читается как ноль. Наружу идут числители, по которым
+    # видно, есть ли знаменатель вообще.
+    record_realflow_summary(result)
+    return result
 
 
 def rule_pressure(session: Session, organization_id: str, *, days: int | None = None) -> list[dict[str, Any]]:
@@ -337,6 +351,7 @@ def rule_pressure(session: Session, organization_id: str, *, days: int | None = 
             }
         )
     out.sort(key=lambda item: item["triggers_per_1000_messages"], reverse=True)
+    record_rule_pressure(out)
     return out
 
 
@@ -405,6 +420,11 @@ def as_dict(record: ValidationMessage) -> dict[str, Any]:
         "sampling_reasons": list(record.sampling_reasons or []),
         "unscannable_reasons": list(record.unscannable_reasons or []),
         "promotion_state": record.promotion_state.value,
+        "promotion_requested_by": record.promotion_requested_by,
+        "promotion_approved_by": record.promotion_approved_by,
+        "promotion_case_id": record.promotion_case_id,
+        "promoted_dataset_version": record.promoted_dataset_version,
+        "reproducibility_report": dict(record.reproducibility_report or {}),
         "raw_retained_until": (record.raw_retained_until.isoformat() if record.raw_retained_until else None),
     }
 

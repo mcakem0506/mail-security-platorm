@@ -1182,6 +1182,15 @@ class DetectionGapRecord(Base, IdMixin, TimestampMixin):
     mitigation: Mapped[str] = mapped_column(Text, default="")
     planned_fix: Mapped[str] = mapped_column(Text, default="")
     closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    #: Подтверждение на реальной почте (ТЗ 1.0.4 §23). Отдельно от ``status``, потому что
+    #: статус ``VALIDATION`` означает согласие золотого корпуса, а корпус содержит ровно те
+    #: случаи, которые мы придумали. ``None`` здесь — «на живой почте не проверено», и это
+    #: честнее, чем молчание.
+    real_flow_validated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    real_flow_validated_by: Mapped[str] = mapped_column(String(320), default="")
+    #: Свидетельство: сколько писем реального потока и какие именно это подтверждают. Без него
+    #: «проверено» было бы словом.
+    real_flow_evidence: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1615,6 +1624,11 @@ class ValidationMessage(Base, IdMixin):
     #: Отчёт об обезличивании: сколько замен какого вида сделано. Нужен, чтобы «обезличено» было
     #: проверяемым утверждением.
     anonymization_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    #: Ключи двух экземпляров письма в объектном хранилище. Разделены потому, что живут разное
+    #: время: исходный удаляется по ``raw_retained_until``, обезличенный остаётся для метрик и
+    #: для проверки воспроизводимости при продвижении в корпус (ТЗ §10, §22).
+    raw_object_key: Mapped[str] = mapped_column(String(512), default="")
+    anonymized_object_key: Mapped[str] = mapped_column(String(512), default="")
 
     #: Чего ожидали от платформы, если это известно заранее (учения, red team). ``None`` —
     #: обычный случай: на реальном потоке ожидаемого ответа нет, и притворяться, что есть,
@@ -1656,6 +1670,12 @@ class ValidationMessage(Base, IdMixin):
     promotion_requested_by: Mapped[str] = mapped_column(String(320), default="")
     promotion_approved_by: Mapped[str] = mapped_column(String(320), default="")
     promotion_case_id: Mapped[str] = mapped_column(String(32), default="")
+    #: Версия датасета, в которую письмо вошло. Заполняется только когда версия действительно
+    #: повышена — автоматического продвижения нет, и пустое значение здесь означает ровно
+    #: «в корпусе этого письма ещё нет» (ТЗ §10).
+    promoted_dataset_version: Mapped[str] = mapped_column(String(32), default="")
+    #: Результат проверки воспроизводимости по обезличенной копии: вердикт и совпал ли он.
+    reproducibility_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
     #: Срок, после которого исходные данные удаляются раньше обезличенных метрик (ТЗ §22).
     raw_retained_until: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

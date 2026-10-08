@@ -76,6 +76,18 @@ class Permission(StrEnum):
     MANAGE_PLATFORM = "manage:platform"
     VIEW_SYSTEM_HEALTH = "view:system_health"
 
+    # real-flow validation scope (ТЗ 1.0.4 §24)
+    VIEW_REAL_FLOW = "realflow:read"
+    #: Сказать, что было на самом деле: обычная работа аналитика.
+    REVIEW_REAL_FLOW = "realflow:review"
+    #: Предложить письмо в набор, по которому платформу будут мерить годами. Отдельно от
+    #: разбора: у них разная цена ошибки, а согласующий не может быть автором заявки.
+    PROMOTE_REAL_FLOW = "realflow:promote"
+    VIEW_READINESS = "readiness:read"
+    #: Подтвердить, что пробел действительно закрыт на реальной почте. Не то же, что закрыть его
+    #: в реестре (``gap:manage``).
+    VALIDATE_GAP = "gap:validate"
+
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
@@ -87,6 +99,8 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.SEARCH_INDICATORS,
     Permission.VIEW_CAMPAIGNS,
     Permission.VIEW_INCIDENTS,
+    Permission.VIEW_REAL_FLOW,
+    Permission.VIEW_READINESS,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.CLASSIFY_INCIDENT,
@@ -100,6 +114,7 @@ _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.PROPOSE_REMEDIATION,
     Permission.DOWNLOAD_ATTACHMENT,
     Permission.EXPORT_DATA,
+    Permission.REVIEW_REAL_FLOW,
 }
 _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.APPROVE_EXCEPTION,
@@ -118,6 +133,8 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.MANAGE_INTEGRATIONS,
     Permission.MANAGE_USERS,
     Permission.VIEW_AUDIT,
+    Permission.PROMOTE_REAL_FLOW,
+    Permission.VALIDATE_GAP,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.
