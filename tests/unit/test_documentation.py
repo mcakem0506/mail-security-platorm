@@ -94,3 +94,113 @@ def test_guides_do_not_promise_absent_capabilities(name: str) -> None:
     )
     found = [phrase for phrase in forbidden if phrase in text]
     assert not found, f"{name} отрицает возможность, которая реализована: {found}"
+
+
+# ---------------------------------------------------------------------------------------------
+# Этап MSP 1.0.4
+# ---------------------------------------------------------------------------------------------
+#: Настройки записаны в документах как `MSP_...`. Имя в документе и имя в коде расходятся молча:
+#: администратор выставляет переменную, которую никто не читает, и считает, что настроил.
+_SETTING = re.compile(r"`(MSP_[A-Z0-9_]+)`|^MSP_([A-Z0-9_]+)=", re.MULTILINE)
+
+#: Имена, которые читает не конфигурация платформы: аргументы сборки образа и ключи
+#: ``config.js`` надстройки Outlook. Последние лежат в файле, который редактируется вручную при
+#: развёртывании надстройки, и к переменным среды сервиса отношения не имеют.
+_NON_SETTINGS = frozenset(
+    {
+        "MSP_COMMIT_SHA",
+        "MSP_EXTRAS",
+        "MSP_EXPORT_ENCRYPTION_KEY",
+        "MSP_API_BASE",
+        "MSP_SECURITY_MAILBOX",
+    }
+)
+
+
+def _documented_settings(name: str) -> set[str]:
+    text = (DOCS / name).read_text(encoding="utf-8")
+    found: set[str] = set()
+    for first, second in _SETTING.findall(text):
+        value = first or (f"MSP_{second}" if second else "")
+        if value:
+            found.add(value)
+    return found - _NON_SETTINGS
+
+
+@pytest.mark.parametrize("name", ["ADMIN_GUIDE.md", "DEPLOYMENT.md"])
+def test_guides_name_only_settings_that_exist(name: str) -> None:
+    """Настройка, которой нет в коде, — это инструкция, выполнение которой ничего не меняет."""
+    from msp_api.config import Settings
+
+    known = {f"MSP_{field.upper()}" for field in Settings.model_fields}
+    unknown = {value for value in _documented_settings(name) if value not in known}
+    assert unknown == set(), f"{name}: настроек не существует: {unknown}"
+
+
+def test_the_check_of_settings_is_not_vacuous() -> None:
+    """Иначе проверка выше проходила бы на пустом множестве."""
+    documented = _documented_settings("DEPLOYMENT.md")
+    assert len(documented) > 10
+    assert "MSP_REAL_FLOW_SHADOW" in documented
+
+
+def test_deployment_names_the_current_migration_head() -> None:
+    """Голова, названная в документе, должна совпадать с той, что в репозитории.
+
+    Иначе администратор, сверяющий состояние базы после обновления, сверяет его с числом из
+    прошлого этапа — и расхождение выглядит как поломка там, где поломки нет.
+    """
+    versions = REPO_ROOT / "apps" / "api" / "msp_api" / "migrations" / "versions"
+    revisions: dict[str, str | None] = {}
+    for path in versions.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        revision = re.search(r'^revision: str = "([^"]+)"', text, re.MULTILINE)
+        down = re.search(r'^down_revision: str \| None = (?:"([^"]+)"|None)', text, re.MULTILINE)
+        if revision:
+            revisions[revision.group(1)] = down.group(1) if down else None
+    assert len(revisions) >= 7, "миграции должны находиться, иначе проверка пустая"
+
+    parents = {value for value in revisions.values() if value}
+    heads = set(revisions) - parents
+    assert len(heads) == 1, f"у набора миграций должна быть одна голова, найдено: {heads}"
+
+    text = (DOCS / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    head = heads.pop()
+    assert head in text, f"голова {head} не названа в DEPLOYMENT.md"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "REAL_FLOW_VALIDATION.md",
+        "REAL_FLOW_PRIVACY.md",
+        "QR_PRODUCTION_PROFILE.md",
+        "GATEWAY_READINESS.md",
+        "ADR_ISOLATED_ATTACHMENT_ANALYSIS.md",
+        "ARCHIVE_ANALYSIS_SPIKE.md",
+        "PDF_QR_ANALYSIS_SPIKE.md",
+    ],
+)
+def test_the_stage_documents_exist(name: str) -> None:
+    assert (DOCS / name).is_file()
+
+
+def test_the_readiness_document_states_the_same_thresholds_as_the_code() -> None:
+    """Порог в документе и порог в коде расходятся молча, а читают именно документ."""
+    from msp_api.services.gateway_readiness import MIN_ANALYZED, MIN_REVIEWED
+
+    text = (DOCS / "GATEWAY_READINESS.md").read_text(encoding="utf-8")
+    assert f"≥ {MIN_ANALYZED}" in text
+    assert f"≥ {MIN_REVIEWED}" in text
+
+
+def test_the_employee_guide_explains_the_observation_mode() -> None:
+    """Сотрудник, перестав получать уведомления, должен понимать, что это режим, а не поломка.
+
+    Без этого объяснения тишина читается как «платформа не работает», и о письмах перестают
+    сообщать — то есть пилот теряет ровно тот источник, ради которого он идёт.
+    """
+    text = (DOCS / "EMPLOYEE_GUIDE.md").read_text(encoding="utf-8")
+    assert "режим" in text.lower()
+    assert "уведомлений" in text
+    assert "сообщить о подозрительном письме по-прежнему нужно" in text.lower()
