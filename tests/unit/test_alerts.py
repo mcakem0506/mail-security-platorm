@@ -99,11 +99,7 @@ def _metric_names(expression: str) -> set[str]:
     # Сначала группировки, потом селекторы по меткам: и там и там стоят значения, не имена.
     stripped = _GROUPING_RE.sub(" ", expression)
     stripped = re.sub(r"\{[^}]*\}", " ", stripped)
-    return {
-        word
-        for word in _METRIC_RE.findall(stripped)
-        if word not in _PROMQL_WORDS and not word.isdigit()
-    }
+    return {word for word in _METRIC_RE.findall(stripped) if word not in _PROMQL_WORDS and not word.isdigit()}
 
 
 def _rules() -> list[dict]:
