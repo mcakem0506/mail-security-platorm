@@ -29,13 +29,14 @@ from msp_contracts import (
     PiiStatus,
     PromotionState,
     RiskLevel,
+    RuleNoiseVerdict,
     ValidationSource,
     utcnow,
 )
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..db.models import ValidationMessage
+from ..db.models import RealFlowRuleReview, ValidationMessage
 from ..observability import (
     realflow_raw_retention_overdue,
     realflow_reviewed_total,
@@ -202,11 +203,16 @@ def review(
     classification: AnalystClassification,
     analyst: str,
     comment: str = "",
+    gap_id: str = "",
 ) -> ValidationMessage:
     """Записать разбор аналитика.
 
     Разбор не продвигает письмо в золотой корпус и не меняет правила: он только фиксирует, что
     было на самом деле. Всё остальное — отдельные решения отдельных людей (ТЗ §10).
+
+    ``gap_id`` указывается, когда разбор означает пропуск: аналитик говорит, в какой известный
+    пробел письмо попадает. Пропуск без пробела гейт готовности блокирует (ТЗ §21), и это не
+    формальность — пропуск без зарегистрированного пробела и есть незарегистрированный пробел.
     """
     if not analyst.strip():
         raise RealFlowError("разбор без автора не записывается")
@@ -214,6 +220,8 @@ def review(
     record.reviewed_by = analyst.strip()
     record.reviewed_at = utcnow()
     record.review_comment = comment.strip()[:2000]
+    if gap_id.strip():
+        record.gap_id = gap_id.strip()[:32]
     realflow_reviewed_total.labels(classification=classification.value).inc()
     return record
 
@@ -264,6 +272,16 @@ def summary(session: Session, organization_id: str, *, days: int | None = None) 
     unknown = sum(1 for row in reviewed if row.analyst_classification is AnalystClassification.UNKNOWN)
     unscannable = sum(1 for row in rows if row.unscannable_reasons)
 
+    # Пропуски без указанного пробела (ТЗ §21). Список, а не число: чтобы их задокументировать,
+    # надо знать, какие именно.
+    undocumented_false_negatives = sorted(
+        row.id
+        for row in reviewed
+        if row.analyst_classification in _PLATFORM_WAS_RIGHT
+        and row.production_verdict in _MISSED
+        and not (row.gap_id or "").strip()
+    )
+
     judged = true_positive + false_positive
     verdict_distribution: dict[str, int] = {}
     for row in rows:
@@ -279,6 +297,8 @@ def summary(session: Session, organization_id: str, *, days: int | None = None) 
         "unknown": unknown,
         "unscannable": unscannable,
         "verdict_distribution": verdict_distribution,
+        "undocumented_false_negatives": undocumented_false_negatives,
+        "reviewed_noisy_rules": sorted(reviewed_noisy_rules(session, organization_id)),
         # Доли без знаменателя — null. Ноль читался бы как «нет ложных срабатываний».
         "precision": (true_positive / judged) if judged else None,
         # Оценка, а не измерение: знаменатель — только разобранные письма.
@@ -356,6 +376,114 @@ def rule_pressure(session: Session, organization_id: str, *, days: int | None = 
     return out
 
 
+def review_rule_noise(
+    session: Session,
+    *,
+    organization_id: str,
+    rule_id: str,
+    verdict: RuleNoiseVerdict,
+    analyst: str,
+    note: str = "",
+    pressure: dict[str, Any] | None = None,
+) -> RealFlowRuleReview:
+    """Записать вывод человека о правиле, шумящем на реальном потоке (ТЗ §12, §20).
+
+    Здесь и только здесь правило получает ``PRODUCTION_NOISY``. Платформа это состояние не
+    выставляет: правило, впервые столкнувшееся с новой кампанией, по числам выглядит точно так
+    же, как правило с дефектом, и автоматика выключила бы первое в самый неподходящий момент.
+
+    Присвоение состояния правило **не отключает**. Отключение — отдельное изменение, проходящее
+    ревью (1.0.3B §8); вывод о шуме только фиксирует, что человек посмотрел и что увидел.
+
+    Числа на момент вывода сохраняются рядом: без них через полгода нельзя понять, относился ли
+    вывод к тому же поведению правила, которое наблюдается сейчас.
+    """
+    if not analyst.strip():
+        raise RealFlowError("вывод без автора не записывается")
+    if not rule_id.strip():
+        raise RealFlowError("вывод без правила не записывается")
+    if verdict is RuleNoiseVerdict.PRODUCTION_NOISY and not note.strip():
+        # Состояние, которое останется у правила надолго, требует объяснения: иначе через
+        # полгода «шумит» будет единственным, что известно, и перепроверить будет нечего.
+        raise RealFlowError("вывод PRODUCTION_NOISY требует пояснения")
+
+    existing = session.execute(
+        select(RealFlowRuleReview).where(
+            RealFlowRuleReview.organization_id == organization_id,
+            RealFlowRuleReview.rule_id == rule_id.strip(),
+        )
+    ).scalar_one_or_none()
+
+    numbers = pressure or {}
+    if existing is not None:
+        existing.verdict = verdict
+        existing.reviewed_by = analyst.strip()
+        existing.reviewed_at = utcnow()
+        existing.note = note.strip()[:2000]
+        existing.triggers_per_1000 = numbers.get("triggers_per_1000_messages")
+        existing.fp_per_1000 = numbers.get("fp_per_1000_messages")
+        existing.distinct_messages = int(numbers.get("distinct_messages") or 0)
+        return existing
+
+    record = RealFlowRuleReview(
+        organization_id=organization_id,
+        rule_id=rule_id.strip()[:32],
+        verdict=verdict,
+        reviewed_by=analyst.strip(),
+        note=note.strip()[:2000],
+        triggers_per_1000=numbers.get("triggers_per_1000_messages"),
+        fp_per_1000=numbers.get("fp_per_1000_messages"),
+        distinct_messages=int(numbers.get("distinct_messages") or 0),
+    )
+    session.add(record)
+    logger.info(
+        "real_flow.rule_noise_reviewed",
+        extra={"rule_id": record.rule_id, "verdict": verdict.value},
+    )
+    return record
+
+
+def reviewed_noisy_rules(session: Session, organization_id: str) -> set[str]:
+    """Правила, по которым вывод уже сделан — с любым исходом.
+
+    Гейт спрашивает «разобрано ли», а не «признано ли шумным»: условие §20 — про то, что человек
+    посмотрел, а не про то, что он решил.
+    """
+    rows = (
+        session.execute(
+            select(RealFlowRuleReview.rule_id).where(RealFlowRuleReview.organization_id == organization_id)
+        )
+        .scalars()
+        .all()
+    )
+    return {str(row) for row in rows}
+
+
+def rule_noise_reviews(session: Session, organization_id: str) -> list[dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(RealFlowRuleReview)
+            .where(RealFlowRuleReview.organization_id == organization_id)
+            .order_by(RealFlowRuleReview.rule_id)
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "rule_id": row.rule_id,
+            "verdict": row.verdict.value,
+            "reviewed_by": row.reviewed_by,
+            "reviewed_at": row.reviewed_at.isoformat(),
+            "note": row.note,
+            "triggers_per_1000": row.triggers_per_1000,
+            "fp_per_1000": row.fp_per_1000,
+            "distinct_messages": row.distinct_messages,
+        }
+        for row in rows
+    ]
+
+
 def uncertain_queue(session: Session, organization_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
     """Очередь неопределённых писем (ТЗ §14).
 
@@ -420,6 +548,7 @@ def as_dict(record: ValidationMessage) -> dict[str, Any]:
         "triggered_rules": list(record.triggered_rules or []),
         "sampling_reasons": list(record.sampling_reasons or []),
         "unscannable_reasons": list(record.unscannable_reasons or []),
+        "gap_id": record.gap_id,
         "promotion_state": record.promotion_state.value,
         "promotion_requested_by": record.promotion_requested_by,
         "promotion_approved_by": record.promotion_approved_by,

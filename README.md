@@ -121,6 +121,8 @@
 | Изолированный разбор вложений: решение и две разведки | ADR и разведки, код — MSP 1.1 | §15–§17 |
 | Гейт готовности к inline-шлюзу: три решения, не число | реализовано | §18–§21 |
 | Три срока хранения с обязательным порядком между ними | реализовано | §22 |
+| Фиксация детектирования перед шлюзом | реализовано | §18 |
+| Вывод человека о шумном правиле: `PRODUCTION_NOISY` без автоматики | реализовано | §12, §20 |
 | API и права реального потока, подтверждение пробела | реализовано | §23–§24 |
 
 ---
@@ -359,6 +361,7 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [ADR_ISOLATED_ATTACHMENT_ANALYSIS.md](docs/ADR_ISOLATED_ATTACHMENT_ANALYSIS.md) | Изолированный разбор вложений: общее решение |
 | [ARCHIVE_ANALYSIS_SPIKE.md](docs/ARCHIVE_ANALYSIS_SPIKE.md) | Разведка: архивы 7z и RAR |
 | [PDF_QR_ANALYSIS_SPIKE.md](docs/PDF_QR_ANALYSIS_SPIKE.md) | Разведка: QR-коды внутри PDF |
+| [MSP_DETECTION_BASELINE_1_0_4.md](docs/MSP_DETECTION_BASELINE_1_0_4.md) | Фиксация детектирования перед шлюзом |
 | [MSP_1_0_4_ACCEPTANCE.md](docs/MSP_1_0_4_ACCEPTANCE.md) | Приёмка этапа |
 
 ### Этап MSP 1.0.3B

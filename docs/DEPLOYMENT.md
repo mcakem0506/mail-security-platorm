@@ -423,9 +423,10 @@ sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key
 `rule_quality_snapshots`, `rule_candidates`, `campaign_matches`, `reanalysis_jobs`; расширены
 `detection_feedback`, `detection_gaps` и `detection_releases`.
 
-Голова на момент MSP 1.0.4 — `c9d0724fbcbb`. Новые таблицы: `protected_domain_variants`
-(`d9663819e595`), `validation_messages`; у `detection_gaps` добавлены три колонки для
-подтверждения пробела на реальной почте.
+Голова на момент MSP 1.0.4 — `73468c34602f`. Новые таблицы: `protected_domain_variants`
+(`d9663819e595`), `validation_messages` (`c9d0724fbcbb`), `real_flow_rule_reviews`;
+у `detection_gaps` добавлены три колонки для подтверждения пробела на реальной почте и причина
+статуса `VALIDATION`, у `validation_messages` — ссылка на пробел для подтверждённого пропуска.
 
 Таблица `validation_messages` живёт отдельно от `mail_messages` намеренно: обычное письмо
 удаляется по сроку хранения почты, запись валидации — по своему, и объединение означало бы либо

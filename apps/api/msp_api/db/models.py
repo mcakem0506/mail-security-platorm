@@ -33,6 +33,7 @@ from msp_contracts import (
     RiskLevel,
     Role,
     RuleHealth,
+    RuleNoiseVerdict,
     Severity,
     SignalDisposition,
     TIState,
@@ -1179,6 +1180,10 @@ class DetectionGapRecord(Base, IdMixin, TimestampMixin):
     #: What protects in the meantime. A gap without one is an unmitigated hole, and the
     #: registry should make that visible rather than comfortable.
     compensating_controls: Mapped[str] = mapped_column(Text, default="")
+    #: Почему пробел оставлен на подтверждении, а не закрыт (ТЗ 1.0.4 §20). Гейт готовности
+    #: требует этого объяснения: «ещё проверяем» без причины — не причина, а отсутствие решения.
+    #: Пустая строка при статусе VALIDATION блокирует готовность к MSP 1.1.
+    validation_reason: Mapped[str] = mapped_column(Text, default="")
     mitigation: Mapped[str] = mapped_column(Text, default="")
     planned_fix: Mapped[str] = mapped_column(Text, default="")
     closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
@@ -1662,6 +1667,10 @@ class ValidationMessage(Base, IdMixin):
     sampling_reasons: Mapped[list[Any]] = mapped_column(default=list)
     #: Проверка оказалась неполной: шифрование, пароль на архиве, нераспознанный QR-код.
     unscannable_reasons: Mapped[list[Any]] = mapped_column(default=list)
+    #: Пробел, в который попадает подтверждённый пропуск (ТЗ §21). Пустая строка у пропуска
+    #: означает «не задокументирован», и гейт готовности это блокирует: пропуск без
+    #: зарегистрированного пробела и есть незарегистрированный пробел.
+    gap_id: Mapped[str] = mapped_column(String(32), default="")
 
     promotion_state: Mapped[PromotionState] = mapped_column(
         _enum(PromotionState, "promotion_state_enum"),
@@ -1679,6 +1688,35 @@ class ValidationMessage(Base, IdMixin):
     #: Срок, после которого исходные данные удаляются раньше обезличенных метрик (ТЗ §22).
     raw_retained_until: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class RealFlowRuleReview(Base, IdMixin):
+    """Вывод человека о правиле, шумящем на реальном потоке (ТЗ 1.0.4 §12, §20).
+
+    Хранится отдельно от ``RuleQualitySnapshot`` намеренно. Снимок — измерение за период, и его
+    пересчитывают; вывод — суждение человека, которое пересчёт не отменяет. Запись суждения в
+    таблицу измерений означала бы, что следующий пересчёт его затрёт.
+
+    Рядом с выводом сохраняются числа, на которые человек смотрел. Без них через полгода нельзя
+    будет понять, относился ли вывод к тому же поведению правила, что наблюдается сейчас.
+    """
+
+    __tablename__ = "real_flow_rule_reviews"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rule_id", name="uq_real_flow_rule_review"),
+        Index("ix_real_flow_rule_review_org", "organization_id", "verdict"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
+    rule_id: Mapped[str] = mapped_column(String(32))
+    verdict: Mapped[RuleNoiseVerdict] = mapped_column(_enum(RuleNoiseVerdict, "rule_noise_verdict_enum"))
+    reviewed_by: Mapped[str] = mapped_column(String(320))
+    reviewed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    note: Mapped[str] = mapped_column(String(2000), default="")
+    #: Числа на момент вывода: на что именно смотрел человек.
+    triggers_per_1000: Mapped[float | None] = mapped_column(Float, default=None)
+    fp_per_1000: Mapped[float | None] = mapped_column(Float, default=None)
+    distinct_messages: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class ProtectedDomainVariant(Base, IdMixin):

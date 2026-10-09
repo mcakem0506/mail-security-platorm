@@ -415,3 +415,162 @@ class TestPromotionIsNeverAutomatic:
             "JOURNAL_COPY": 2,
             "SECURITY_MAILBOX": 1,
         }
+
+
+class TestNoisyRuleIsJudgedByAPerson:
+    """ТЗ §12 и §20: правило может получить ``PRODUCTION_NOISY``, но не от платформы.
+
+    До этого этапа у платформы была только вторая половина требования — автоматики нет. Первой
+    не было вовсе: состояние, которое человек может присвоить, негде было хранить, и условие §20
+    «production noisy rules reviewed» проверить было нечем.
+    """
+
+    def test_a_verdict_is_recorded_with_the_numbers_it_was_made_on(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Без чисел через полгода нельзя понять, относился ли вывод к нынешнему поведению."""
+        from msp_contracts import RuleNoiseVerdict
+
+        review = real_flow.review_rule_noise(
+            db,
+            organization_id=organization.id,
+            rule_id="SND-024",
+            verdict=RuleNoiseVerdict.PRODUCTION_NOISY,
+            analyst="analyst@corp.example",
+            note="срабатывает на рассылке подрядчика с 2019 года",
+            pressure={
+                "triggers_per_1000_messages": 42.0,
+                "fp_per_1000_messages": 3.5,
+                "distinct_messages": 17,
+            },
+        )
+        db.commit()
+        assert review.verdict is RuleNoiseVerdict.PRODUCTION_NOISY
+        assert review.triggers_per_1000 == 42.0
+        assert review.distinct_messages == 17
+
+    def test_production_noisy_requires_an_explanation(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Состояние останется у правила надолго; «шумит» без причины нечем перепроверить."""
+        from msp_contracts import RuleNoiseVerdict
+
+        with pytest.raises(real_flow.RealFlowError, match="пояснения"):
+            real_flow.review_rule_noise(
+                db,
+                organization_id=organization.id,
+                rule_id="SND-024",
+                verdict=RuleNoiseVerdict.PRODUCTION_NOISY,
+                analyst="analyst@corp.example",
+            )
+
+    def test_an_acceptable_verdict_needs_no_explanation(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Проверка самой проверки: требование относится к состоянию, которое остаётся."""
+        from msp_contracts import RuleNoiseVerdict
+
+        review = real_flow.review_rule_noise(
+            db,
+            organization_id=organization.id,
+            rule_id="URL-010",
+            verdict=RuleNoiseVerdict.ACCEPTABLE,
+            analyst="analyst@corp.example",
+        )
+        db.commit()
+        assert review.verdict is RuleNoiseVerdict.ACCEPTABLE
+
+    def test_a_second_verdict_replaces_the_first(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Вывод о правиле один: два вывода подряд — это изменение мнения, а не два мнения."""
+        from msp_api.db.models import RealFlowRuleReview
+        from msp_contracts import RuleNoiseVerdict
+        from sqlalchemy import func
+
+        for verdict, note in (
+            (RuleNoiseVerdict.PRODUCTION_NOISY, "шумит"),
+            (RuleNoiseVerdict.NEEDS_RULE_CHANGE, "нужна правка условия"),
+        ):
+            real_flow.review_rule_noise(
+                db,
+                organization_id=organization.id,
+                rule_id="SND-024",
+                verdict=verdict,
+                analyst="analyst@corp.example",
+                note=note,
+            )
+            db.commit()
+
+        total = db.execute(select(func.count(RealFlowRuleReview.id))).scalar_one()
+        assert total == 1
+        assert real_flow.rule_noise_reviews(db, organization.id)[0]["verdict"] == "NEEDS_RULE_CHANGE"
+
+    def test_reviewed_means_looked_at_not_judged_noisy(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Гейт спрашивает «разобрано ли», а не «признано ли шумным» (ТЗ §20)."""
+        from msp_contracts import RuleNoiseVerdict
+
+        real_flow.review_rule_noise(
+            db,
+            organization_id=organization.id,
+            rule_id="URL-010",
+            verdict=RuleNoiseVerdict.ACCEPTABLE,
+            analyst="analyst@corp.example",
+        )
+        db.commit()
+        assert real_flow.reviewed_noisy_rules(db, organization.id) == {"URL-010"}
+
+    def test_the_verdict_does_not_disable_the_rule(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Отключение — отдельное изменение, проходящее ревью (1.0.3B §8).
+
+        Проверяется по исходнику: отсутствие отключения — это отсутствие кода, и поведенческий
+        тест на него был бы тестом на то, чего не случилось.
+        """
+        tree = ast.parse(SERVICE.read_text(encoding="utf-8"))
+        names = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
+        }
+        assert "status" not in names
+        assert "enabled" not in names
+        assert "health" not in names
+
+
+class TestAMissMustNameItsGap:
+    """ТЗ §21: все известные пропуски задокументированы."""
+
+    def test_a_miss_without_a_gap_is_listed_as_undocumented(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Пропуск без зарегистрированного пробела и есть незарегистрированный пробел."""
+        record, _ = _ingest(db, organization, production_verdict=RiskLevel.LOW_RISK)
+        real_flow.review(
+            db,
+            record=record,
+            classification=AnalystClassification.CONFIRMED_PHISHING,
+            analyst="analyst@corp.example",
+        )
+        db.commit()
+
+        result = real_flow.summary(db, organization.id)
+        assert result["false_negative"] == 1
+        assert result["undocumented_false_negatives"] == [record.id]
+
+    def test_naming_the_gap_documents_the_miss(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        record, _ = _ingest(db, organization, production_verdict=RiskLevel.LOW_RISK)
+        real_flow.review(
+            db,
+            record=record,
+            classification=AnalystClassification.CONFIRMED_PHISHING,
+            analyst="analyst@corp.example",
+            gap_id="GAP-003",
+        )
+        db.commit()
+
+        result = real_flow.summary(db, organization.id)
+        assert result["false_negative"] == 1, "пропуск остаётся пропуском"
+        assert result["undocumented_false_negatives"] == []
+        assert real_flow.as_dict(record)["gap_id"] == "GAP-003"
+
+    def test_a_correct_verdict_is_not_a_miss_and_needs_no_gap(self, db, organization) -> None:  # type: ignore[no-untyped-def]
+        """Проверка самой проверки: список не должен наполняться чем попало."""
+        record, _ = _ingest(db, organization, production_verdict=RiskLevel.MALICIOUS)
+        real_flow.review(
+            db,
+            record=record,
+            classification=AnalystClassification.CONFIRMED_PHISHING,
+            analyst="analyst@corp.example",
+        )
+        db.commit()
+        assert real_flow.summary(db, organization.id)["undocumented_false_negatives"] == []

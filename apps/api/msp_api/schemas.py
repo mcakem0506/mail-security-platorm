@@ -24,6 +24,7 @@ from msp_contracts import (
     Role,
     RootCause,
     RuleHealth,
+    RuleNoiseVerdict,
     RuleStatus,
     Severity,
     SignalDisposition,
@@ -1130,6 +1131,7 @@ class RealFlowMessageOut(ApiModel):
     triggered_rules: list[str]
     sampling_reasons: list[str]
     unscannable_reasons: list[str]
+    gap_id: str
     promotion_state: str
     promotion_requested_by: str
     promotion_approved_by: str
@@ -1142,6 +1144,32 @@ class RealFlowMessageOut(ApiModel):
 class RealFlowReviewRequest(ApiModel):
     classification: AnalystClassification
     comment: str = Field(default="", max_length=2000)
+    #: Пробел, в который попадает подтверждённый пропуск (ТЗ §21). Пропуск без пробела
+    #: блокирует гейт готовности: пропуск без зарегистрированного пробела и есть
+    #: незарегистрированный пробел.
+    gap_id: str = Field(default="", max_length=32)
+
+
+class RuleNoiseReviewRequest(ApiModel):
+    """Вывод человека о правиле, шумящем на реальном потоке (ТЗ §12, §20).
+
+    Правило при этом **не отключается**: отключение — отдельное изменение, проходящее ревью.
+    """
+
+    verdict: RuleNoiseVerdict
+    note: str = Field(default="", max_length=2000)
+
+
+class RuleNoiseReviewOut(ApiModel):
+    rule_id: str
+    verdict: str
+    reviewed_by: str
+    reviewed_at: str
+    note: str
+    #: Числа на момент вывода. ``None`` — не ноль: правило могло ещё не срабатывать.
+    triggers_per_1000: float | None
+    fp_per_1000: float | None
+    distinct_messages: int
 
 
 class PromotionRequestIn(ApiModel):

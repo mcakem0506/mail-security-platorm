@@ -32,6 +32,7 @@ MSP 1.1: **можно ли ставить платформу в разрыв п�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess  # nosec B404 - runs fixed local tooling, never user input
@@ -39,6 +40,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 # Политика готовности общая с эндпоинтом ``GET /detection/readiness``: пороги, типы условий и
 # проверки по сводке и по реестру пробелов. Своей копии порогов у скрипта нет намеренно.
@@ -143,16 +146,114 @@ def corpus_checks(baseline: dict[str, Any] | None) -> list[Check]:
 
 
 def read_gap_registry() -> list[dict[str, Any]] | None:
-    """Прочитать реестр пробелов из документа.
+    """Реестр пробелов из машинного источника ``datasets/detection_gaps.yaml``.
 
-    Источник — ``docs/DETECTION_GAPS.md``: именно он публикуется и читается людьми, и
-    расхождение между ним и базой означало бы, что опубликован не тот реестр, по которому
-    принимают решение.
+    Авторитетен он, а не публикуемый документ, по двум причинам. Он структурный: ``severity``,
+    ``status``, ``mitigation`` и ``planned_fix`` — поля, а не абзацы, и §20 требует проверять
+    именно их. И его разбор нельзя испортить правкой формулировки, тогда как разбор прозы
+    приходилось исправлять дважды, причём во второй раз — незаметно для трёх пробелов из четырёх.
+
+    Публикуемый документ при этом не перестаёт иметь значение: отдельное условие сверяет его с
+    этим реестром, потому что организация читает документ, а решение принимается по реестру.
+    """
+    path = REPO_ROOT / "datasets" / "detection_gaps.yaml"
+    try:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    entries = parsed.get("gaps")
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    gaps: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        gaps.append(
+            {
+                "gap_id": str(entry.get("id") or ""),
+                "severity": str(entry.get("severity") or UNKNOWN).upper(),
+                "status": str(entry.get("status") or "").upper(),
+                # Компенсирующая мера и причина статуса — это ``mitigation`` и ``planned_fix``:
+                # поля, а не абзацы, и именно их требует §20.
+                "compensating_controls": str(entry.get("mitigation") or "").strip(),
+                "operational_reason": str(entry.get("planned_fix") or "").strip(),
+                "owner": str(entry.get("owner") or "").strip(),
+                "target_release": str(entry.get("target_release") or "").strip(),
+            }
+        )
+    return gaps or None
+
+
+def registry_agreement_checks() -> list[Check]:
+    """Публикуемый документ обязан совпадать с машинным реестром.
+
+    Расхождение здесь — не опечатка. Серьёзность решает, блокирует ли незарегистрированный
+    пробел готовность, а статус — можно ли переходить к шлюзу. Организация читает документ,
+    инструменты читают реестр, и два разных ответа на один вопрос означают, что зелёный отчёт и
+    прочитанный документ говорят разное.
+
+    Сверка нашла именно это: у GAP-001 серьёзность различалась.
+    """
+    machine = read_gap_registry()
+    published = read_published_gap_registry()
+    if machine is None or published is None:
+        return [
+            Check(
+                "gap_registries_agree",
+                "Публикуемый реестр совпадает с машинным",
+                True,
+                None,
+                UNKNOWN,
+                [],
+                "один из реестров не прочитан",
+            )
+        ]
+
+    by_id = {gap["gap_id"]: gap for gap in machine}
+    mismatches: list[str] = []
+    for gap in published:
+        gap_id = str(gap.get("gap_id"))
+        counterpart = by_id.get(gap_id)
+        if counterpart is None:
+            mismatches.append(f"{gap_id}: есть в документе, нет в реестре")
+            continue
+        if gap.get("status") != counterpart["status"]:
+            mismatches.append(
+                f"{gap_id}: статус {gap.get('status') or UNKNOWN} против {counterpart['status']}"
+            )
+        if gap.get("severity") != counterpart["severity"]:
+            mismatches.append(f"{gap_id}: серьёзность {gap.get('severity')} против {counterpart['severity']}")
+    for gap_id in by_id:
+        if gap_id not in {str(item.get("gap_id")) for item in published}:
+            mismatches.append(f"{gap_id}: есть в реестре, нет в документе")
+
+    return [
+        Check(
+            "gap_registries_agree",
+            "Публикуемый реестр совпадает с машинным",
+            True,
+            not mismatches,
+            mismatches,
+            [],
+            f"сверено пробелов: {len(published)}",
+        )
+    ]
+
+
+def read_published_gap_registry() -> list[dict[str, Any]] | None:
+    """Прочитать публикуемый реестр из ``docs/DETECTION_GAPS.md``.
+
+    Нужен не как источник решения, а как предмет сверки: документ читают люди, и он обязан
+    говорить то же, что машинный реестр. Разбор прозы здесь остаётся, но ошибка в нём теперь
+    стоит ложного расхождения, а не неверного решения о готовности.
 
     Пустой результат возвращается как ``None``, а не как пустой список. Разница существенная:
     пустой список означает «пробелов нет» и условие по нему проходит, а ``None`` означает «не
-    прочитали» и блокирует готовность. Первый прогон этого скрипта как раз и сообщил
-    «критические пробелы зарегистрированы» при нуле найденных пробелов.
+    прочитали» и блокирует. Первый прогон этого скрипта как раз и сообщил «критические пробелы
+    зарегистрированы» при нуле найденных пробелов.
     """
     path = REPO_ROOT / "docs" / "DETECTION_GAPS.md"
     try:
@@ -180,11 +281,26 @@ def read_gap_registry() -> list[dict[str, Any]] | None:
                 "title": (match.group(2) or "").strip(),
                 "severity": UNKNOWN,
                 "status": "",
+                "compensating_controls": "",
+                "operational_reason": "",
             }
             gaps.append(current)
             continue
         if current is None:
             continue
+        # Прозаические абзацы: компенсирующая мера и причина статуса записаны так, а не
+        # строками таблицы. Накапливаются, потому что мер у пробела бывает несколько — «что
+        # защищает при установленном декодере» и «что защищает без него» — и обе существенны.
+        prose = _PROSE_RE.match(stripped)
+        if prose is not None:
+            label = prose.group(1).lower()
+            body = prose.group(2).strip()
+            if label.startswith("что защищает"):
+                current["compensating_controls"] = f"{current['compensating_controls']} {body}".strip()
+            elif label.startswith("почему статус"):
+                current["operational_reason"] = body
+            continue
+
         cells = field.match(stripped)
         if cells is None:
             continue
@@ -197,6 +313,10 @@ def read_gap_registry() -> list[dict[str, Any]] | None:
 
     return gaps or None
 
+
+#: Абзац вида «**Что защищает пока.** текст» — так в документе записаны компенсирующие меры и
+#: причина статуса. Точка после полужирного заголовка может стоять внутри или снаружи.
+_PROSE_RE = re.compile(r"^\*\*([^*]+?)\.?\*\*\.?\s*(.*)$")
 
 #: Реестр написан по-русски, и читать его надо по-русски. Таблица соответствия стоит рядом с
 #: разбором, чтобы при добавлении слова в документ было видно, где его завести здесь.
@@ -219,18 +339,26 @@ _STATUS_RU = {
 
 
 def _severity_from_russian(value: str) -> str:
+    """Серьёзность из русской записи.
+
+    Берётся **самое левое** вхождение, а не первое по порядку таблицы. В документе бывает
+    «низкая (была средняя)»: обе степени присутствуют, и текущая — та, что стоит раньше.
+    Перебор по таблице давал здесь «среднюю», то есть прошлую серьёзность вместо нынешней, и
+    сверка реестров показывала расхождение там, где его нет.
+    """
     lowered = value.lower()
-    for prefix, word in _SEVERITY_RU.items():
-        if prefix in lowered:
-            return word
-    return UNKNOWN
+    found = [(lowered.index(prefix), word) for prefix, word in _SEVERITY_RU.items() if prefix in lowered]
+    if not found:
+        return UNKNOWN
+    return min(found)[1]
 
 
 def _status_from_russian(value: str) -> str:
+    """Статус из русской записи — по тому же правилу самого левого вхождения."""
     lowered = value.lower()
-    for prefix, word in _STATUS_RU.items():
-        if prefix in lowered:
-            return word
+    found = [(lowered.index(prefix), word) for prefix, word in _STATUS_RU.items() if prefix in lowered]
+    if found:
+        return min(found)[1]
     # Пустая строка означает «статус не записан», и условие о регистрации по ней не проходит.
     return ""
 
@@ -283,6 +411,194 @@ def test_checks(run_tests: bool) -> list[Check]:
 
 
 # ---------------------------------------------------------------------------------------------
+# Условия по состоянию репозитория (ТЗ §19)
+# ---------------------------------------------------------------------------------------------
+#: Задания CI, которые этап назвал обязательными (ТЗ §26) плюс основной регрессионный гейт.
+REQUIRED_CI_JOBS = (
+    "short-domain-regression",
+    "real-flow-anonymization-tests",
+    "qr-profile-tests",
+    "gateway-readiness-smoke",
+    "detection-gate",
+    "security-scan",
+)
+
+
+def _digest(fingerprint: str | None) -> str:
+    """Короткая форма отпечатка пакета правил для отчёта."""
+    if not fingerprint:
+        return UNKNOWN
+    rules = [part for part in fingerprint.split(",") if part]
+    short = hashlib.sha256(fingerprint.encode()).hexdigest()[:16]
+    return f"{len(rules)} правил, sha256:{short}"
+
+
+def previous_stage_checks() -> list[Check]:
+    """Приёмка предыдущего этапа.
+
+    Переход к шлюзу через этап, который сам не закрыт, означал бы, что готовность считается по
+    незавершённому основанию. Документ читается, а не предполагается: его отсутствие — ``unknown``.
+    """
+    path = REPO_ROOT / "docs" / "MSP_1_0_3B_ACCEPTANCE.md"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return [
+            Check(
+                "previous_stage_accepted",
+                "Предыдущий этап (1.0.3B) принят",
+                True,
+                None,
+                UNKNOWN,
+                "документ приёмки существует и содержит решение",
+                "docs/MSP_1_0_3B_ACCEPTANCE.md не прочитан",
+            )
+        ]
+    decided = any(word in body for word in ("READY WITH WARNINGS", "READY", "ПРИНЯТ"))
+    return [
+        Check(
+            "previous_stage_accepted",
+            "Предыдущий этап (1.0.3B) принят",
+            True,
+            decided,
+            "решение найдено" if decided else "решение не найдено",
+            "документ приёмки содержит решение",
+        )
+    ]
+
+
+def release_checks() -> list[Check]:
+    """Манифест действующего выпуска правил.
+
+    Вердикты на реальном потоке считались каким-то пакетом правил. Если манифест этого пакета не
+    опубликован, расхождение между прогонами объяснить нечем, и сравнение выпусков теряет смысл.
+    """
+    rules = REPO_ROOT / "rules"
+    baseline = REPO_ROOT / "datasets" / "baseline.json"
+    try:
+        rule_files = sorted(rules.rglob("*.yaml"))
+    except OSError:
+        rule_files = []
+    fingerprint = None
+    if baseline.is_file():
+        parsed = _load_json(baseline) or {}
+        fingerprint = parsed.get("ruleset_fingerprint")
+    return [
+        Check(
+            "ruleset_present",
+            "Пакет правил на месте",
+            True,
+            bool(rule_files),
+            len(rule_files),
+            "> 0 файлов правил",
+        ),
+        Check(
+            "ruleset_fingerprint_recorded",
+            "Отпечаток пакета правил записан в baseline",
+            True,
+            bool(fingerprint),
+            # Отпечаток — перечень всех правил с версиями, несколько килобайт. В отчёте от него
+            # нужен не он сам, а то, что он есть и по чему посчитан: полная строка сделала бы
+            # таблицу нечитаемой, то есть обменяла бы пользу отчёта на полноту поля.
+            _digest(fingerprint),
+            "непустой отпечаток",
+            "без него расхождение между прогонами необъяснимо",
+        ),
+    ]
+
+
+def migration_checks() -> list[Check]:
+    """Одна голова миграций и отсутствие расхождения с моделями.
+
+    Две головы означают, что база в одном развёртывании окажется не той, что в другом, и это
+    выяснится при первом же обновлении. Расхождение с моделями означает, что схема, по которой
+    работает код, нигде не записана как шаг обновления.
+    """
+    versions = REPO_ROOT / "apps" / "api" / "msp_api" / "migrations" / "versions"
+    revisions: dict[str, str | None] = {}
+    try:
+        files = sorted(versions.glob("*.py"))
+    except OSError:
+        files = []
+    for path in files:
+        body = path.read_text(encoding="utf-8")
+        revision = re.search(r'^revision: str = "([^"]+)"', body, re.MULTILINE)
+        down = re.search(r'^down_revision: str \| None = (?:"([^"]+)"|None)', body, re.MULTILINE)
+        if revision:
+            revisions[revision.group(1)] = down.group(1) if down else None
+
+    if not revisions:
+        return [
+            Check(
+                "migrations_single_head",
+                "У миграций одна голова",
+                True,
+                None,
+                UNKNOWN,
+                1,
+                "ревизии не прочитаны",
+            )
+        ]
+    parents = {value for value in revisions.values() if value}
+    heads = sorted(set(revisions) - parents)
+    return [
+        Check(
+            "migrations_single_head",
+            "У миграций одна голова",
+            True,
+            len(heads) == 1,
+            heads,
+            1,
+            f"всего ревизий: {len(revisions)}",
+        )
+    ]
+
+
+def ci_checks() -> list[Check]:
+    """Обязательные задания CI существуют.
+
+    Проверяется наличие, а не зелёность: зелёность устанавливает сам конвейер. Отсутствующее
+    задание при этом хуже красного — красное видно, а отсутствующее выглядит как успех.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return [
+            Check(
+                "required_ci_jobs_present",
+                "Обязательные задания CI описаны",
+                True,
+                None,
+                UNKNOWN,
+                list(REQUIRED_CI_JOBS),
+                ".github/workflows/ci.yml не прочитан",
+            )
+        ]
+    missing = [job for job in REQUIRED_CI_JOBS if f"\n  {job}:" not in body]
+    security_artifacts = all(marker in body for marker in ("bandit", "pip-audit", "gitleaks", "trivy"))
+    return [
+        Check(
+            "required_ci_jobs_present",
+            "Обязательные задания CI описаны",
+            True,
+            not missing,
+            missing,
+            [],
+            f"проверено заданий: {len(REQUIRED_CI_JOBS)}",
+        ),
+        Check(
+            "security_artifacts_present",
+            "Проверки безопасности в конвейере на месте",
+            True,
+            security_artifacts,
+            "bandit, pip-audit, gitleaks, trivy" if security_artifacts else "не все проверки найдены",
+            "bandit, pip-audit, gitleaks, trivy",
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------------------------
 # Сбор и отчёт
 # ---------------------------------------------------------------------------------------------
 def collect(
@@ -295,6 +611,11 @@ def collect(
     readiness.extend(corpus_checks(baseline))
     readiness.extend(real_flow_checks(real_flow_summary))
     readiness.extend(gap_checks(read_gap_registry()))
+    readiness.extend(registry_agreement_checks())
+    readiness.extend(previous_stage_checks())
+    readiness.extend(release_checks())
+    readiness.extend(migration_checks())
+    readiness.extend(ci_checks())
     readiness.extend(test_checks(run_tests))
     return readiness
 

@@ -432,7 +432,10 @@ class TestScenario6ReadinessAnswersWithOneOfThree:
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["decision"] == "NOT_READY"
-        assert "real_flow_sample" in body["blocking"]
+        # Блокирует не недобор выборки, а то, что конвейер не доказан ни одним письмом: по §21
+        # недобор даёт замечание с фактическим числом, и ноль от 480 отличается именно этим.
+        assert "real_flow_pipeline_proven" in body["blocking"]
+        assert "real_flow_sample" in body["warnings"]
         assert "critical_gaps_registered" in body["blocking"], "пустой реестр — не «пробелов нет»"
 
     def test_the_answer_states_what_it_does_not_cover(self, client, people, engine, organization) -> None:  # type: ignore[no-untyped-def]

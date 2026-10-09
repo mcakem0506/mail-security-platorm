@@ -105,6 +105,8 @@ class AuditAction:
     REALFLOW_PROMOTED = "realflow.promoted"
     #: Подтверждение, что пробел закрыт на реальной почте, — отдельное утверждение.
     GAP_VALIDATED = "gap.validated"
+    #: Вывод человека о шумном правиле. Правило при этом не отключается (ТЗ 1.0.4 §12).
+    REALFLOW_RULE_NOISE_REVIEWED = "realflow.rule_noise_reviewed"
 
 
 _SENSITIVE_KEY_RE = re.compile(

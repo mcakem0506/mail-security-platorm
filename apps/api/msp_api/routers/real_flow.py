@@ -29,6 +29,8 @@ from ..schemas import (
     PromotionRequestIn,
     RealFlowMessageOut,
     RealFlowReviewRequest,
+    RuleNoiseReviewOut,
+    RuleNoiseReviewRequest,
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
@@ -174,6 +176,7 @@ def review_real_flow_message(
             classification=payload.classification,
             analyst=actor.email,
             comment=payload.comment,
+            gap_id=payload.gap_id,
         )
     except real_flow.RealFlowError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -186,6 +189,7 @@ def review_real_flow_message(
         detail={
             "from": previous.value if previous else None,
             "to": payload.classification.value,
+            "gap_id": found.gap_id,
         },
     )
     session.commit()
@@ -268,6 +272,80 @@ def decide_promotion(
     _audit(session, actor, request, action=action, object_id=found.id, detail=detail)
     session.commit()
     return RealFlowMessageOut(**real_flow.as_dict(found))
+
+
+# ---------------------------------------------------------------------------------------------
+# Разбор шумных правил (ТЗ §12, §20)
+# ---------------------------------------------------------------------------------------------
+@router.get("/detection/real-flow/rule-reviews", response_model=list[RuleNoiseReviewOut])
+def list_rule_noise_reviews(actor: RealFlowReader, session: DbSession) -> list[RuleNoiseReviewOut]:
+    return [RuleNoiseReviewOut(**row) for row in real_flow.rule_noise_reviews(session, actor.organization_id)]
+
+
+@router.post("/detection/real-flow/rules/{rule_id}/noise-review", response_model=RuleNoiseReviewOut)
+def review_rule_noise(
+    rule_id: str,
+    payload: RuleNoiseReviewRequest,
+    actor: RealFlowReviewer,
+    session: DbSession,
+    request: Request,
+) -> RuleNoiseReviewOut:
+    """Записать вывод о правиле, шумящем на реальном потоке.
+
+    Здесь и только здесь правило получает ``PRODUCTION_NOISY``, и присвоение состояния его **не
+    отключает**: отключение — отдельное изменение, проходящее ревью. Платформа этот вывод не
+    делает сама, потому что правило, впервые столкнувшееся с новой кампанией, по числам выглядит
+    так же, как правило с дефектом.
+    """
+    # Числа, на которые смотрел человек, берутся из той же сводки, что он видел: вывод без них
+    # через полгода невозможно соотнести с текущим поведением правила.
+    pressure = next(
+        (
+            row
+            for row in real_flow.rule_pressure(session, actor.organization_id)
+            if str(row.get("rule_id")) == rule_id
+        ),
+        None,
+    )
+    try:
+        # Не record: это имя занято функцией записи в журнал аудита, и затенять её внутри
+        # обработчика значило бы сломать вызов ниже тихо и невоспроизводимо.
+        review = real_flow.review_rule_noise(
+            session,
+            organization_id=actor.organization_id,
+            rule_id=rule_id,
+            verdict=payload.verdict,
+            analyst=actor.email,
+            note=payload.note,
+            pressure=pressure,
+        )
+    except real_flow.RealFlowError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    record(
+        session,
+        action=AuditAction.REALFLOW_RULE_NOISE_REVIEWED,
+        actor_id=actor.user_id,
+        actor_email=actor.email,
+        actor_role=actor.role.value,
+        organization_id=actor.organization_id,
+        object_type="detection_rule",
+        object_id=rule_id,
+        detail={"verdict": payload.verdict.value},
+        ip_address=client_ip(request),
+        request_id=getattr(request.state, "request_id", ""),
+    )
+    session.commit()
+    return RuleNoiseReviewOut(
+        rule_id=review.rule_id,
+        verdict=review.verdict.value,
+        reviewed_by=review.reviewed_by,
+        reviewed_at=review.reviewed_at.isoformat(),
+        note=review.note,
+        triggers_per_1000=review.triggers_per_1000,
+        fp_per_1000=review.fp_per_1000,
+        distinct_messages=review.distinct_messages,
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -381,6 +459,11 @@ def gateway_readiness_state(actor: ReadinessReader, session: DbSession) -> dict[
             "real_flow_validated_at": (
                 row.real_flow_validated_at.isoformat() if row.real_flow_validated_at else None
             ),
+            # Два поля, которых требует политика перехода (ТЗ §20): принятый пробел без
+            # компенсирующей меры — необъявленная дыра с номером, а пробел, оставленный на
+            # подтверждении без причины, — отсутствие решения, а не решение.
+            "compensating_controls": row.compensating_controls,
+            "operational_reason": row.validation_reason,
         }
         for row in session.execute(
             select(DetectionGapRecord).where(DetectionGapRecord.organization_id == actor.organization_id)
