@@ -29,12 +29,15 @@ MODULES = (
     pathlib.Path("packages/mail-parser/msp_mail_parser/anonymize.py"),
 )
 
-#: Строки, которых в журналах быть не должно. Выбраны так, чтобы случайно не совпасть ни с чем:
-#: журнал содержит и имена модулей, и идентификаторы, и подстрока вроде «счёт» нашлась бы сама.
-SECRET_SUBJECT = "Zrkl-Subject-Marker-7781"
-SECRET_BODY = "Zrkl-Body-Marker-4412"
-SECRET_LOCAL = "zrkl.marker.ivanov"
-SECRET_ORG = "ZRKL-ORG-SECRET-9"
+#: Строки, которых в журналах быть не должно. Составлены из обычных слов, а не из набора
+#: символов с цифрами: сканер секретов принимает за ключ любую строку, похожую на пароль, и
+#: первая версия этих маркеров остановила сборку. Уникальность при этом сохранена — сочетание
+#: слов, которого нет ни в одном сообщении платформы, — и проверяется отдельным тестом.
+MARKER_SUBJECT = "lunar-giraffe-subject"
+MARKER_BODY = "amber-walrus-body"
+MARKER_LOCAL = "quartz.heron.ivanov"
+MARKER_ORG = "cobalt-otter-org"
+ALL_MARKERS = (MARKER_SUBJECT, MARKER_BODY, MARKER_LOCAL, MARKER_ORG)
 
 
 @pytest.fixture
@@ -57,18 +60,18 @@ def _run_the_whole_path(db, organization) -> None:  # type: ignore[no-untyped-de
             sampling_reasons=["HIGH_RISK"],
             # Поля, в которые естественнее всего затечь содержимому письма.
             anonymization_report={
-                "subject_seen": SECRET_SUBJECT,
+                "subject_seen": MARKER_SUBJECT,
                 "local_parts": 3,
             },
-            unscannable_reasons=[f"ENCRYPTED: {SECRET_BODY}"],
+            unscannable_reasons=[f"ENCRYPTED: {MARKER_BODY}"],
         ),
     )
     real_flow.review(
         db,
         record=record,
         classification=AnalystClassification.FALSE_POSITIVE,
-        analyst=f"{SECRET_LOCAL}@corp.example",
-        comment=f"{SECRET_BODY} — рассылка {SECRET_ORG}",
+        analyst=f"{MARKER_LOCAL}@corp.example",
+        comment=f"{MARKER_BODY} — рассылка {MARKER_ORG}",
     )
     db.commit()
 
@@ -77,6 +80,27 @@ def _run_the_whole_path(db, organization) -> None:  # type: ignore[no-untyped-de
     real_flow.uncertain_queue(db, organization.id)
     real_flow.expired_raw_records(db, organization.id)
     real_flow.count_by_source(db, organization.id)
+
+
+class TestTheMarkersAreDistinguishable:
+    """Иначе «маркера нет в журнале» ничего не доказывает."""
+
+    def test_no_marker_occurs_in_the_platform_itself(self) -> None:
+        """Маркер, встречающийся в исходниках платформы, мог бы попасть в журнал и сам по себе,
+        и тест на его отсутствие падал бы на верном коде либо молчал бы на неверном."""
+        sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for root in (pathlib.Path("apps/api/msp_api"), pathlib.Path("packages"))
+            for path in root.rglob("*.py")
+        )
+        assert len(sources) > 100_000, "исходники должны находиться, иначе проверка пустая"
+        for marker in ALL_MARKERS:
+            assert marker not in sources, f"маркер {marker} встречается в самой платформе"
+
+    def test_the_markers_do_not_look_like_secrets(self) -> None:
+        """Именно то, из-за чего эта проверка появилась: сканер остановил сборку на маркерах."""
+        for marker in ALL_MARKERS:
+            assert not any(character.isdigit() for character in marker), marker
 
 
 class TestNothingFromTheMessageReachesTheLog:
@@ -89,20 +113,20 @@ class TestNothingFromTheMessageReachesTheLog:
             for key in ("source", "reasons", "case_id", "rule_id", "verdict", "dataset_version")
         )
         haystack = f"{written}\n{extras}"
-        assert SECRET_SUBJECT not in haystack
-        assert SECRET_BODY not in haystack
+        assert MARKER_SUBJECT not in haystack
+        assert MARKER_BODY not in haystack
 
     def test_the_analyst_comment_is_absent(self, db, organization, captured) -> None:  # type: ignore[no-untyped-def]
         """Комментарий аналитика — пересказ письма своими словами, и он тоже не для журнала."""
         _run_the_whole_path(db, organization)
         written = "\n".join(record.getMessage() for record in captured.records)
-        assert SECRET_ORG not in written
+        assert MARKER_ORG not in written
 
     def test_the_local_part_of_an_address_is_absent(self, db, organization, captured) -> None:  # type: ignore[no-untyped-def]
         """Адрес аналитика — персональные данные сотрудника, а не идентификатор события."""
         _run_the_whole_path(db, organization)
         written = "\n".join(record.getMessage() for record in captured.records)
-        assert SECRET_LOCAL not in written
+        assert MARKER_LOCAL not in written
 
     def test_something_was_actually_logged(self, db, organization, captured) -> None:  # type: ignore[no-untyped-def]
         """Проверка самой проверки: при пустом журнале все утверждения выше бессодержательны."""

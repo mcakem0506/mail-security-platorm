@@ -770,11 +770,12 @@ jobs:
           python - <<'PY'
           import sys
 
-          try:
-              import cv2  # noqa: F401
-              from pyzbar import pyzbar  # noqa: F401
-          except ImportError as error:
-              sys.exit(f"профиль qr требует установленного декодера: {error}")
+          # Спрашивается сам продукт, а не угадывается его устройство: первая версия этого шага
+          # проверяла pyzbar, которого в проекте нет, и падала на верной установке.
+          from msp_mail_parser.images import decoder_available
+
+          if not decoder_available():
+              sys.exit("профиль qr требует установленного декодера (extra 'qr')")
           print("декодер на месте")
           PY
 
@@ -829,9 +830,16 @@ jobs:
           body = json.loads(open("readiness.json", encoding="utf-8").read())
           if body["decision"] != "NOT_READY":
               sys.exit(f"ожидалось NOT_READY, получено {body['decision']}")
-          for key in ("real_flow_sample", "regression_suite"):
+          # Блокирует отсутствие доказательства, что конвейер работает, и непроверенная
+          # регрессия. Недобор выборки блокировать НЕ должен: по §21 это замечание с
+          # фактическим числом, а отказ скрывал бы разницу между «почти набрали» и «не начинали».
+          for key in ("real_flow_pipeline_proven", "regression_suite"):
               if key not in body["blocking"]:
                   sys.exit(f"условие {key} должно блокировать готовность")
+          if "real_flow_sample" in body["blocking"]:
+              sys.exit("недобор выборки обязан быть замечанием, а не блокировкой (ТЗ §21)")
+          if "real_flow_sample" not in body["warnings"]:
+              sys.exit("недобор выборки должен быть виден среди замечаний")
           print("гейт отказал по", ", ".join(body["blocking"]))
           PY
 
