@@ -28,7 +28,7 @@ from msp_mail_parser.images import (
     decode_images_with_stats,
     decoder_available,
 )
-from msp_mail_parser.qr_worker import MAX_BYTES, MAX_PAYLOAD, MAX_PIXELS, apply_limits
+from msp_mail_parser.qr_worker import MAX_BYTES, MAX_PAYLOAD, MAX_PIXELS
 
 WORKER = pathlib.Path("packages/mail-parser/msp_mail_parser/qr_worker.py")
 
@@ -120,9 +120,34 @@ class TestTheWorkerReachesNothing:
         assert "open" not in names, "декодер открывает файлы: всё нужное приходит на stdin"
 
 
+def _apply_limits_in_a_fresh_process() -> dict[str, object]:
+    """Вызвать ``apply_limits()`` в отдельном процессе и вернуть то, что он сообщил.
+
+    Вызывать её прямо в тесте нельзя, и это была реальная ошибка: ``RLIMIT_CPU`` и
+    ``RLIMIT_FSIZE`` необратимо ограничивают тот процесс, который их поставил. В процессе pytest
+    это значило бы 15 секунд процессорного времени на весь прогон и запрет записи любых файлов.
+    На Windows модуля ``resource`` нет, вызов был пустой, и локально всё проходило; на Linux
+    первый же прогон CI убил pytest сигналом ``SIGXCPU`` на 69% тестов.
+
+    Отдельный процесс здесь не обход, а более точная проверка: воркер так и живёт — ставит
+    пределы себе в собственном процессе, до того как возьмётся за данные.
+    """
+    code = (
+        "import json; from msp_mail_parser.qr_worker import apply_limits; print(json.dumps(apply_limits()))"
+    )
+    completed = subprocess.run(  # nosec B603 - fixed argv, no shell
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return dict(json.loads(completed.stdout))
+
+
 class TestResourceLimits:
     def test_limits_are_applied_where_the_platform_allows(self) -> None:
-        applied = apply_limits()
+        applied = _apply_limits_in_a_fresh_process()
         try:
             import resource  # noqa: F401
         except ImportError:
@@ -135,6 +160,25 @@ class TestResourceLimits:
         assert applied["RLIMIT_FSIZE"] == 0, "запись файлов должна быть запрещена совсем"
         assert applied["RLIMIT_CPU"] > 0
         assert applied["RLIMIT_AS"] > 0
+
+    def test_the_test_process_itself_is_not_limited(self) -> None:
+        """Пределы воркера не должны оказаться на процессе, который его проверяет.
+
+        Проверка самой проверки для ошибки, которая уже случалась: вызов ``apply_limits()`` в
+        процессе pytest ставил ему 15 секунд процессорного времени. Тест не падал сам, он
+        убивал весь прогон позже, на случайном месте, — поэтому ловить это нужно прямо.
+        """
+        try:
+            import resource
+        except ImportError:
+            pytest.skip("на этой платформе пределов процесса нет")
+        soft, _hard = resource.getrlimit(resource.RLIMIT_CPU)  # type: ignore[attr-defined]
+        assert soft in (resource.RLIM_INFINITY, -1) or soft > 600, (  # type: ignore[attr-defined]
+            f"у процесса тестов предел процессорного времени {soft} с: кто-то вызвал apply_limits() "
+            "в нём самом"
+        )
+        fsize, _ = resource.getrlimit(resource.RLIMIT_FSIZE)  # type: ignore[attr-defined]
+        assert fsize != 0, "процессу тестов запрещена запись файлов"
 
     def test_the_declared_caps_are_sane(self) -> None:
         """Пределы существуют, чтобы изображение не стало отказом в обслуживании."""
