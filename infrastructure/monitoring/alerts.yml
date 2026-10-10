@@ -184,3 +184,113 @@ groups:
         annotations:
           summary: "Резкий рост числа вредоносных писем"
           description: "Возможна массовая кампания против организации. Проверьте раздел кампаний."
+
+  # Реальный поток и готовность к inline-шлюзу (ТЗ 1.0.4 §25).
+  #
+  # Три особенности этой группы, из которых следуют все пороги ниже.
+  #
+  # Первая: здесь нет ни одного правила на «качество упало ниже N процентов». Доля на реальном
+  # потоке может не иметь знаменателя, и в Prometheus отсутствующее значение читается как ноль —
+  # то есть такое правило срабатывало бы громче всего ровно тогда, когда мерить ещё нечем.
+  # Поэтому алерты смотрят на числители и на объём, а вывод о качестве делает человек.
+  #
+  # Вторая: тишина в этой группе — тоже состояние, и за ней следят отдельно. Пилот, в который
+  # перестали поступать письма, выглядит как пилот без проблем.
+  #
+  # Третья: ни одно правило здесь не предлагает автоматического действия. Шумное правило не
+  # отключается, письмо не продвигается в корпус, пробел не закрывается — всё это решения
+  # человека (ТЗ §10, §12).
+  - name: msp-real-flow
+    interval: 60s
+    rules:
+      - alert: MspRealFlowStalled
+        expr: sum(increase(msp_realflow_messages_total[6h])) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "В набор валидации 6 часов не поступало писем"
+          description: >-
+            Пилот, в который перестали поступать письма, выглядит как пилот без проблем.
+            Проверьте приём из ящика безопасности и копий из журнала.
+
+      - alert: MspRealFlowHighRiskUnreviewed
+        expr: msp_realflow_high_risk_unreviewed > 10
+        for: 24h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Письма с высоким риском не разобраны сутки"
+          description: >-
+            Это не «ещё не дошли», а неизвестный ответ на самый дорогой вопрос. Пока они не
+            разобраны, гейт готовности к MSP 1.1 не пройдёт.
+
+      - alert: MspRealFlowNoReviewsAtAll
+        expr: |
+          msp_realflow_messages_total > 50
+          and sum(increase(msp_realflow_reviewed_total[7d])) == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Набор валидации растёт, разборов нет"
+          description: >-
+            Без разборов аналитиков метрики качества не имеют знаменателя, и точность
+            возвращается как null. Набор сам по себе ничего не измеряет.
+
+      - alert: MspRealFlowRuleNoisy
+        expr: msp_realflow_rule_pressure_per_1000 > 50
+        for: 6h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Правило {{ $labels.rule_id }} срабатывает чаще 50 раз на 1000 писем"
+          description: >-
+            Повод посмотреть, на чём именно оно срабатывает. Правило не отключается
+            автоматически и состояние PRODUCTION_NOISY само не получает: это вывод человека.
+
+      - alert: MspRealFlowUnscannableGrowing
+        expr: msp_realflow_unscannable_total > 20
+        for: 12h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Много писем, проверенных не до конца"
+          description: >-
+            Шифрование, пароль на архиве, нераспознанный QR-код. Отсутствие детекта по таким
+            письмам — не безопасность, а пробел, и он виден в очереди неопределённых.
+
+      - alert: MspRealFlowRawRetentionOverdue
+        expr: msp_realflow_raw_retention_overdue > 0
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "Исходные данные не удалены по истечении срока хранения"
+          description: >-
+            Исходные письма реального потока обязаны удаляться раньше обезличенных метрик
+            (ТЗ 1.0.4 §22). Просроченные записи означают, что платформа хранит переписку
+            организации дольше, чем ей разрешено.
+
+      - alert: MspShortDomainLookalikeSpike
+        expr: sum(increase(msp_short_domain_lookalike_total[1h])) > 20
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Резкий рост обнаружений похожих коротких доменов"
+          description: >-
+            Либо кампания против организации, либо правило SND-024 шумит на легитимной почте.
+            Различить можно только разбором: посмотрите нагрузку правил на реальном потоке.
+
+      - alert: MspQrDecoderUnhealthy
+        expr: msp_qr_component_health >= 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Декодер QR работает не так, как ожидается"
+          description: >-
+            Компонент необязательный, и его отсутствие — не отказ платформы. Но письма с
+            QR-кодами при этом помечаются проверенными не до конца, и вердикт по ним не
+            опускается до LOW_RISK. Состояние 3 означает, что компонент считался включённым.

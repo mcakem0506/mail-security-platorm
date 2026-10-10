@@ -21,3 +21,5 @@ apps/security-console/node_modules/
 
 # TypeScript incremental build cache: changes on every build, carries no information.
 apps/security-console/tsconfig.tsbuildinfo
+# Сборка проверки монтирования консоли; удаляется при успехе.
+dist-smoke/

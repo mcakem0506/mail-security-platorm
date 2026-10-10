@@ -71,6 +71,7 @@ def _build(
     received: tuple[str, ...] = (),
     source_host: str = "mail.partner.example",
     source_ip: str = "203.0.113.10",
+    dkim_signature: bool = True,
 ) -> bytes:
     message = EmailMessage()
     message["From"] = f'"{from_name}" <{from_addr}>' if from_name else from_addr
@@ -91,6 +92,18 @@ def _build(
     for filename, data, mime in attachments or []:
         maintype, _, subtype = mime.partition("/")
         message.add_attachment(data, maintype=maintype, subtype=subtype or "octet-stream", filename=filename)
+
+    # A message whose Authentication-Results claim dkim=pass has to carry the signature that
+    # passed. Without this the whole corpus asserted a pass for a signature that was not there —
+    # an anomaly that does not occur in legitimate mail, and one that made the fact useless as
+    # evidence because every single case had it.
+    if dkim_signature and auth and "dkim=pass" in auth and "DKIM-Signature" not in (extra_headers or {}):
+        domain = from_addr.rsplit("@", 1)[-1]
+        message["DKIM-Signature"] = (
+            f"v=1; a=rsa-sha256; c=relaxed/relaxed; d={domain}; s=mail; t=1700000000; "
+            "bh=2jmj7l5rSw0yVb/vlWAYkK/YBwk=; h=From:To:Subject:Date; "
+            "b=ZmFrZXNpZ25hdHVyZWZvcnRoZXZhbGlkYXRpb25jb3JwdXNvbmx5"
+        )
 
     raw = message.as_bytes()
     chain = received or ("from {source} ({source} [{ip}]) by " + RELAY + " with ESMTPS id dd44",)
@@ -427,6 +440,406 @@ class GoldenCorpusBuilder:
         )
 
     # -- categories ------------------------------------------------------------------------------
+    def _short_domain_lookalike(self) -> None:
+        """190 cases for the short-label detector of ТЗ 1.0.4 §3 (closes GAP-001).
+
+        The detector exists in a place where a false positive is cheap to create and expensive
+        to have: one edit on the four-letter label ``corp`` also spells core, cord, cork, corn,
+        carp, copr and corps, and a vendor may own any of them. So the section is built the
+        other way round from the rest of the corpus — the negatives come first and outnumber the
+        positives two to one, because the question this detector has to answer is not "can it
+        fire" but "does it stay quiet".
+
+        Case families, each with its own prefix so a failure names its family:
+
+        * ``SDN-`` 100 negatives: ordinary mail from short domains, 40 of them one edit from the
+          corporate label. Must stay clean.
+        * ``SDM-`` 30 positives covering the four transforms at every position.
+        * ``SDE-`` 20 positives, one per kind of secondary evidence ТЗ §3 lists.
+        * ``SDW-`` 20 one-edit domains with no secondary evidence at all. Must stay clean: this
+          is the family that would break if the rule ever stopped requiring corroboration.
+        * ``SDV-`` 20 real vendors whose names are one edit from the corporate label.
+        """
+        # -- 100 negatives ----------------------------------------------------------------------
+        # 60 short domains unrelated to the corporate label.
+        unrelated = [
+            "bank.example", "shop.example", "news.example", "post.example", "mail.example",
+            "bike.example", "food.example", "park.example", "lamp.example", "desk.example",
+            "glass.test", "paper.test", "steel.test", "stone.test", "water.test",
+            "cedar.test", "radio.test", "video.test", "metal.test", "linen.test",
+        ]  # fmt: skip
+        index = 0
+        for domain in unrelated:
+            for subject, body in LEGIT_SUBJECTS[:3]:
+                index += 1
+                month = MONTHS[index % len(MONTHS)]
+                date = DATES[index % len(DATES)]
+                self._add(
+                    f"SDN-{index:03d}",
+                    DatasetCategory.LEGITIMATE,
+                    _build(
+                        subject=subject.format(month=month, date=date, num=2000 + index),
+                        from_addr=f"info@{domain}",
+                        from_name="Контрагент",
+                        to=f"{COLLEAGUES[index % len(COLLEAGUES)][1]}@{CORP}",
+                        text=body.format(month=month, date=date),
+                        source_host=f"mail.{domain}",
+                        source_ip=f"198.51.100.{10 + (index % 200)}",
+                    ),
+                    RiskLevel.LOW_RISK,
+                    labels=["short_domain", "unrelated"],
+                    forbidden_rules=["SND-024", "SND-025"],
+                    notes="Короткая метка домена, никакого отношения к домену организации.",
+                )
+
+        # 40 legitimate senders whose label really is one edit from "corp". Full authentication,
+        # ordinary business content, no payment or credential request. SND-025 may record them;
+        # SND-024 must not fire and the verdict must stay clean.
+        one_edit_legitimate = [
+            "cord.example", "cork.example", "corn.example", "core.example", "carp.example",
+            "corps.example", "coro.example", "corb.example", "corf.example", "cort.example",
+        ]  # fmt: skip
+        for domain in one_edit_legitimate:
+            for subject, body in LEGIT_SUBJECTS[:4]:
+                index += 1
+                month = MONTHS[index % len(MONTHS)]
+                date = DATES[index % len(DATES)]
+                self._add(
+                    f"SDN-{index:03d}",
+                    DatasetCategory.LEGITIMATE,
+                    _build(
+                        subject=subject.format(month=month, date=date, num=3000 + index),
+                        from_addr=f"sales@{domain}",
+                        from_name="Поставщик",
+                        to=f"{COLLEAGUES[index % len(COLLEAGUES)][1]}@{CORP}",
+                        text=body.format(month=month, date=date),
+                        source_host=f"mail.{domain}",
+                        source_ip=f"198.51.100.{30 + (index % 200)}",
+                    ),
+                    RiskLevel.LOW_RISK,
+                    labels=["short_domain", "one_edit", "authenticated"],
+                    forbidden_rules=["SND-024"],
+                    notes=(
+                        "Одна правка от метки организации, но аутентификация полная и содержание "
+                        "обычное: второго признака нет, поэтому вердикт должен остаться чистым."
+                    ),
+                )
+
+        # -- 30 positives, four transforms at every position ------------------------------------
+        mutations = [
+            ("ccorp.example", "insertion"), ("coorp.example", "insertion"),
+            ("corrp.example", "insertion"), ("corpp.example", "insertion"),
+            ("acorp.example", "insertion"), ("corpa.example", "insertion"),
+            ("corp2.example", "insertion"), ("corpe.example", "insertion"),
+            ("orp.example", "deletion"), ("crp.example", "deletion"),
+            ("cop.example", "deletion"), ("cor.example", "deletion"),
+            ("dorp.example", "substitution"), ("cnrp.example", "substitution"),
+            ("cokp.example", "substitution"), ("corq.example", "substitution"),
+            ("xorp.example", "substitution"), ("cirp.example", "substitution"),
+            ("ocrp.example", "transposition"), ("crop.example", "transposition"),
+            ("copr.example", "transposition"),
+        ]  # fmt: skip
+        payment_bodies = [
+            "Направляем счёт на оплату по договору. Реквизиты изменились, используйте новые.",
+            "Просим срочно оплатить счёт до конца дня, иначе поставка будет приостановлена.",
+            "Обновите, пожалуйста, платёжные реквизиты в вашей системе: банк у нас сменился.",
+        ]
+        index = 0
+        for position, (domain, transform) in enumerate(mutations):
+            for body in payment_bodies[: 2 if position < 9 else 1]:
+                index += 1
+                self._add(
+                    f"SDM-{index:03d}",
+                    DatasetCategory.IMPERSONATION,
+                    _build(
+                        subject="Счёт на оплату",
+                        from_addr=f"billing@{domain}",
+                        from_name="Отдел расчётов",
+                        to=f"buh@{CORP}",
+                        text=body,
+                        auth="spf=pass; dkim=none; dmarc=none",
+                        source_host=f"mx.{domain}",
+                        source_ip=f"203.0.113.{200 - (index % 50)}",
+                    ),
+                    RiskLevel.SUSPICIOUS,
+                    scenarios=["THR-ID-002"],
+                    labels=["short_domain", f"short_{transform}"],
+                    expected_rules=["SND-024"],
+                    notes=f"Одна правка ({transform}) от короткой метки плюс платёжный запрос.",
+                )
+
+        # -- 20 positives, one per kind of secondary evidence -----------------------------------
+        # Each case carries exactly one corroborating signal, so a regression in any single
+        # branch of the rule's `any:` shows up as one failing case rather than as a metric drift.
+        evidence_cases: list[tuple[str, dict[str, object], str]] = [
+            ("dmarc_fail", {"auth": "spf=pass; dkim=pass; dmarc=fail"}, "провал DMARC"),
+            ("spf_fail", {"auth": "spf=fail; dkim=pass; dmarc=pass"}, "провал SPF"),
+            ("dmarc_soft", {"auth": "spf=pass; dkim=pass; dmarc=softfail"}, "мягкий провал DMARC"),
+            ("spf_soft", {"auth": "spf=softfail; dkim=pass; dmarc=pass"}, "мягкий провал SPF"),
+            (
+                # Claims a DKIM pass and carries no signature. That inconsistency is the
+                # informative fact; plain absence of a signature is ordinary (ТЗ 1.0.4 §3).
+                "dkim_absent",
+                {"auth": "spf=pass; dkim=pass; dmarc=pass", "dkim_signature": False},
+                "заявлен проход DKIM, подписи нет",
+            ),
+            ("dkim_fail", {"auth": "spf=pass; dkim=fail; dmarc=pass"}, "провал DKIM"),
+            (
+                "reply_to",
+                {"reply_to": "finance@other-domain.test"},
+                "Reply-To в другом домене",
+            ),
+            (
+                "display_name",
+                {"from_name": "Бухгалтерия corp.example", "to": f"buh@{CORP}"},
+                "внешний отправитель с корпоративным именем",
+            ),
+            (
+                "payment",
+                {"text": "Направляем счёт на оплату по договору, реквизиты изменились."},
+                "запрос платежа",
+            ),
+            (
+                "urgent_payment",
+                {"text": "Срочно оплатите счёт сегодня до 17:00, задержка недопустима."},
+                "срочный платёж",
+            ),
+            (
+                "bank_details",
+                {"text": "Сообщаем о смене платёжных реквизитов: новый счёт в другом банке."},
+                "смена платёжных реквизитов",
+            ),
+            (
+                "credentials",
+                {"text": "Подтвердите пароль по ссылке, иначе доступ будет закрыт."},
+                "запрос учётных данных",
+            ),
+            (
+                "urgency",
+                {"text": "Это крайне срочно, ответьте немедленно, время на исходе."},
+                "давление срочностью",
+            ),
+            (
+                "secrecy",
+                {"text": "Прошу не обсуждать это ни с кем из коллег, вопрос конфиденциальный."},
+                "требование секретности",
+            ),
+            (
+                "suspicious_tld",
+                {"text": "Подробности по ссылке: http://invoice-details.zip/open"},
+                "ссылка в подозрительной зоне",
+            ),
+            (
+                "url_lookalike",
+                {"text": "Документы здесь: http://corp-example.example/invoice"},
+                "ссылка на похожий домен",
+            ),
+            # A gateway verdict counts only when the delivery chain shows the message really
+            # passed through the gateway, so these three carry VIA_GATEWAY. Header names are
+            # the ones KSMG writes; the earlier spellings were invented and ignored.
+            (
+                "gateway_phishing",
+                {
+                    "extra_headers": {"X-KSMG-AntiPhishing-Status": "Detected"},
+                    "received": VIA_GATEWAY,
+                    "authserv": GATEWAY_HOST,
+                },
+                "шлюз распознал фишинг",
+            ),
+            (
+                "gateway_malware",
+                {
+                    "extra_headers": {"X-KSMG-Antivirus-Status": "Infected: EICAR-Test-File"},
+                    "received": VIA_GATEWAY,
+                    "authserv": GATEWAY_HOST,
+                },
+                "шлюз распознал вредоносное вложение",
+            ),
+            (
+                "gateway_suspicious",
+                {
+                    "extra_headers": {"X-KSMG-AntiSpam-Status": "Probable spam"},
+                    "received": VIA_GATEWAY,
+                    "authserv": GATEWAY_HOST,
+                },
+                "шлюз пометил письмо спамом",
+            ),
+            (
+                "reply_to_local",
+                {"reply_to": "buhgalteria@coorp.example"},
+                "Reply-To с другим локальным адресом",
+            ),
+        ]
+        for index, (name, overrides, why) in enumerate(evidence_cases, start=1):
+            params: dict[str, object] = {
+                "subject": "По договору",
+                "from_addr": "office@coorp.example",
+                "from_name": "Контрагент",
+                "to": f"buh@{CORP}",
+                "text": "Добрый день, во вложении документы по договору.",
+                "auth": "spf=pass; dkim=pass; dmarc=pass",
+                "source_host": "mx.coorp.example",
+                "source_ip": f"203.0.113.{100 + index}",
+            }
+            params.update(overrides)
+            self._add(
+                f"SDE-{index:03d}",
+                DatasetCategory.IMPERSONATION,
+                _build(**params),  # type: ignore[arg-type]
+                RiskLevel.SUSPICIOUS,
+                scenarios=["THR-ID-002"],
+                labels=["short_domain", "secondary_evidence", name],
+                expected_rules=["SND-024"],
+                notes=f"Короткая метка плюс ровно один второй признак: {why}.",
+            )
+
+        # -- 20 one-edit domains with no secondary evidence -------------------------------------
+        # The family that fails first if the rule ever drops its corroboration requirement.
+        for index, domain in enumerate(
+            [
+                "corrp.example",
+                "ccorp.example",
+                "corpa.example",
+                "acorp.example",
+                "cor.example",
+                "cop.example",
+                "crp.example",
+                "orp.example",
+                "dorp.example",
+                "cnrp.example",
+                "cokp.example",
+                "corq.example",
+                "ocrp.example",
+                "crop.example",
+                "copr.example",
+                "cirp.example",
+                "xorp.example",
+                "corp2.example",
+                "corpe.example",
+                "corf.example",
+            ],
+            start=1,
+        ):
+            month = MONTHS[index % len(MONTHS)]
+            self._add(
+                f"SDW-{index:03d}",
+                DatasetCategory.LEGITIMATE,
+                _build(
+                    subject=f"Протокол совещания за {month}",
+                    from_addr=f"office@{domain}",
+                    from_name="Секретариат",
+                    to=f"{COLLEAGUES[index % len(COLLEAGUES)][1]}@{CORP}",
+                    text=(
+                        "Добрый день! Направляем протокол прошедшего совещания для ознакомления. "
+                        "Отдельных действий не требуется."
+                    ),
+                    source_host=f"mail.{domain}",
+                    source_ip=f"198.51.100.{120 + index}",
+                ),
+                RiskLevel.LOW_RISK,
+                labels=["short_domain", "one_edit", "no_secondary_evidence"],
+                expected_rules=["SND-025"],
+                forbidden_rules=["SND-024"],
+                notes=(
+                    "Одна правка от метки организации и ни одного второго признака. Должно "
+                    "остаться чистым: иначе условность сигнала перестала работать."
+                ),
+            )
+
+        # -- 20 legitimate invoices from one-edit domains ---------------------------------------
+        # The control the rule most needs and the corpus did not have: real money mail from a
+        # vendor whose label happens to be one edit from ours. Fully authenticated, signed with
+        # a company name rather than a department, no urgency. Must stay clean — otherwise the
+        # platform accuses every supplier with an unlucky name of fraud.
+        invoice_vendors = [
+            ("core.example", "Core Systems"),
+            ("cord.example", "Cord Logistics"),
+            ("cork.example", "Cork Materials"),
+            ("corn.example", "Corn Agro"),
+            ("carp.example", "Carp Fisheries"),
+            ("corps.example", "Corps Security"),
+            ("coro.example", "Coro Design"),
+            ("corb.example", "Corb Engineering"),
+            ("cort.example", "Cort Audio"),
+            ("corf.example", "Corf Textile"),
+        ]
+        index = 0
+        for domain, vendor in invoice_vendors:
+            for _ in (1, 2):
+                index += 1
+                month = MONTHS[index % len(MONTHS)]
+                self._add(
+                    f"SDI-{index:03d}",
+                    DatasetCategory.LEGITIMATE,
+                    _build(
+                        subject=f"Счёт № {4000 + index} за {month}",
+                        from_addr=f"invoice@{domain}",
+                        from_name=vendor,
+                        to=f"buh@{CORP}",
+                        text=(
+                            f"Добрый день! Направляем счёт № {4000 + index} за {month} "
+                            "по действующему договору. Оплата в обычные сроки, реквизиты "
+                            "без изменений. Акт приложим после оплаты."
+                        ),
+                        source_host=f"mail.{domain}",
+                        source_ip=f"198.51.100.{200 + index}",
+                    ),
+                    RiskLevel.LOW_RISK,
+                    labels=["short_domain", "one_edit", "legitimate_invoice"],
+                    # Only the absence of SND-024 is asserted. Whether the informational
+                    # SND-025 fires depends on the label: "corn" folds to "com" through the
+                    # rn->m confusable, so it is not corp-like at all and nothing fires — the
+                    # detector is right and the expectation would have been wrong.
+                    forbidden_rules=["SND-024"],
+                    notes=(
+                        "Легитимный счёт от поставщика, чья метка на одну правку от нашей. "
+                        "Проверяет, что «письмо про деньги» само по себе не является вторым "
+                        "признаком."
+                    ),
+                )
+
+        # -- 20 vendors and common words --------------------------------------------------------
+        vendors = [
+            ("core.example", "Core Systems", "Обслуживание серверов"),
+            ("cord.example", "Cord Logistics", "Доставка груза"),
+            ("cork.example", "Cork Materials", "Поставка упаковки"),
+            ("corn.example", "Corn Agro", "Поставка сырья"),
+            ("carp.example", "Carp Fisheries", "Поставка продукции"),
+            ("corps.example", "Corps Security", "Охрана объекта"),
+            ("coro.example", "Coro Design", "Макеты для печати"),
+            ("corb.example", "Corb Engineering", "Проектные работы"),
+            ("cort.example", "Cort Audio", "Аренда оборудования"),
+            ("corf.example", "Corf Textile", "Пошив формы"),
+        ]
+        index = 0
+        for domain, vendor, topic in vendors:
+            for suffix in ("договор", "акт"):
+                index += 1
+                month = MONTHS[index % len(MONTHS)]
+                self._add(
+                    f"SDV-{index:03d}",
+                    DatasetCategory.LEGITIMATE,
+                    _build(
+                        subject=f"{topic}: {suffix} за {month}",
+                        from_addr=f"sales@{domain}",
+                        from_name=vendor,
+                        to=f"{COLLEAGUES[index % len(COLLEAGUES)][1]}@{CORP}",
+                        text=(
+                            f"Добрый день! {topic} по нашему соглашению. Направляем {suffix} "
+                            f"за {month} для подписания в обычном порядке."
+                        ),
+                        source_host=f"mail.{domain}",
+                        source_ip=f"198.51.100.{160 + index}",
+                    ),
+                    RiskLevel.LOW_RISK,
+                    labels=["short_domain", "vendor", "common_word"],
+                    forbidden_rules=["SND-024"],
+                    notes=(
+                        f"«{domain.split('.')[0]}» — обычное слово и имя настоящего поставщика. "
+                        "Детектор коротких меток обязан молчать по вердикту."
+                    ),
+                )
+
     def _legitimate(self) -> None:
         """100 ordinary business messages that must not be flagged (§58).
 
@@ -1698,6 +2111,7 @@ class GoldenCorpusBuilder:
         self._document_references()
         self._internal_abuse()
         self._lookalike()
+        self._short_domain_lookalike()
         self._malicious_attachment()
         self._malformed_adversarial()
         self._gateway_conflict()

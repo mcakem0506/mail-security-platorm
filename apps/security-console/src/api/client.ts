@@ -487,6 +487,111 @@ function query(params: Record<string, string | number | boolean | undefined | nu
   return text ? `?${text}` : "";
 }
 
+/**
+ * Запись набора валидации реального потока (ТЗ 1.0.4 §8).
+ *
+ * Ни темы, ни текста письма здесь нет: набор существует для измерения качества
+ * детектирования, содержимое для этого не нужно, а в списке оно стало бы доступно всем, кто
+ * смотрит метрики.
+ */
+export interface RealFlowMessage {
+  id: string;
+  source: string;
+  received_at: string;
+  message_fingerprint: string;
+  anonymized: boolean;
+  pii_status: string;
+  anonymization_report: Record<string, unknown>;
+  /** null — обычный случай: на реальном потоке ожидаемого ответа не существует. */
+  expected_classification: string | null;
+  /** null означает «не разобрано», а не «верно». */
+  analyst_classification: string | null;
+  reviewed_by: string;
+  reviewed_at: string | null;
+  production_verdict: RiskLevel | null;
+  validation_verdict: RiskLevel | null;
+  ruleset_version: string;
+  parser_version: string;
+  risk_engine_version: string;
+  triggered_rules: string[];
+  sampling_reasons: string[];
+  unscannable_reasons: string[];
+  promotion_state: string;
+  promotion_requested_by: string;
+  promotion_approved_by: string;
+  promotion_case_id: string;
+  promoted_dataset_version: string;
+  reproducibility_report: Record<string, unknown>;
+  raw_retained_until: string | null;
+}
+
+export interface RealFlowRulePressure {
+  rule_id: string;
+  triggers: number;
+  triggers_per_1000_messages: number;
+  false_positives: number;
+  fp_per_1000_messages: number;
+  /** Правило, сработавшее сто раз на одном письме и на ста разных, требует разного. */
+  distinct_messages: number;
+}
+
+export interface RealFlowSummary {
+  messages_total: number;
+  reviewed_total: number;
+  true_positive: number;
+  false_positive: number;
+  false_negative: number;
+  unknown: number;
+  unscannable: number;
+  verdict_distribution: Record<string, number>;
+  /** null, пока нет знаменателя. Ноль читался бы как «ложных срабатываний нет». */
+  precision: number | null;
+  /** Оценка, а не измерение: полной разметки реального потока не существует. */
+  recall_estimate: number | null;
+  recall_is_estimate: boolean;
+  ground_truth_complete: boolean;
+  sample: {
+    analyzed: number;
+    analyzed_target: number;
+    reviewed: number;
+    reviewed_target: number;
+    high_risk_unreviewed: number;
+  };
+  by_source: Record<string, number>;
+  rule_pressure: RealFlowRulePressure[];
+  promotion: {
+    by_state: Record<string, number>;
+    awaiting_approval: number;
+    not_reproducible: number;
+    promoted_versions: string[];
+    automatic_promotion: boolean;
+    last_updated: string;
+  };
+}
+
+export interface ReadinessCheck {
+  key: string;
+  title: string;
+  required: boolean;
+  /** "passed" | "failed" | "unknown". unknown блокирует готовность так же, как failed. */
+  state: string;
+  value: unknown;
+  expected: unknown;
+  detail: string;
+}
+
+export interface GatewayReadiness {
+  generated_at: string;
+  decision: "READY_FOR_MSP_1_1" | "READY_WITH_WARNINGS" | "NOT_READY";
+  decision_label: string;
+  blocking: string[];
+  warnings: string[];
+  checks: ReadinessCheck[];
+  thresholds: Record<string, number>;
+  /** Что готовность не означает. Приходит из API, а не дописывается в интерфейсе. */
+  scope_note: string;
+}
+
 export const api = {
   async login(email: string, password: string) {
     const result = await request<CurrentUser & { csrf_token: string }>("/api/v1/auth/login", {
@@ -777,6 +882,43 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  realFlowSummary: (days?: number) =>
+    request<RealFlowSummary>(`/api/v1/detection/real-flow/summary${query({ days })}`),
+
+  realFlowMessages: (params: {
+    uncertain_only?: boolean;
+    unreviewed_only?: boolean;
+    limit?: number;
+  }) => request<RealFlowMessage[]>(`/api/v1/detection/real-flow/messages${query(params)}`),
+
+  reviewRealFlowMessage: (id: string, body: { classification: string; comment?: string }) =>
+    request<RealFlowMessage>(`/api/v1/detection/real-flow/messages/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  requestRealFlowPromotion: (id: string, body: { case_id: string }) =>
+    request<RealFlowMessage>(`/api/v1/detection/real-flow/messages/${id}/promote-request`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  decideRealFlowPromotion: (
+    id: string,
+    body: {
+      decision: "approve" | "reject" | "promote";
+      reason?: string;
+      dataset_version?: string;
+      current_dataset_version?: string;
+    },
+  ) =>
+    request<RealFlowMessage>(`/api/v1/detection/real-flow/messages/${id}/promote-decision`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  gatewayReadiness: () => request<GatewayReadiness>("/api/v1/detection/readiness"),
 
   reanalysisJobs: () => request<ReanalysisJob[]>("/api/v1/reanalysis/jobs"),
 

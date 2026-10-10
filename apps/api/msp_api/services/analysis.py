@@ -65,8 +65,8 @@ from ..db.models import (
     ProviderLookup,
     RiskVerdictHistory,
 )
-from ..observability import rule_triggers
-from . import canary
+from ..observability import record_qr_decode, rule_triggers, short_domain_lookalike_total
+from . import canary, domain_variants
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
 from .gateways import collect_findings as collect_gateway_findings
@@ -342,12 +342,22 @@ def _sender_history(
         .join(MailMessage, MailMessage.id == AnalysisResult.message_id)
         .where(*filters, AnalysisResult.classification == RiskLevel.MALICIOUS)
     ).scalar_one()
+    # How much mail the organisation has analysed at all. Without it "this sender is new"
+    # cannot be told apart from "we have only just been installed", and a rule that treats
+    # novelty as evidence would fire on every correspondent for the first weeks of a pilot.
+    organization_filters = [MailMessage.organization_id == organization_id]
+    if exclude_message_id:
+        organization_filters.append(MailMessage.id != exclude_message_id)
+    organization_count = session.execute(
+        select(func.count(MailMessage.id)).where(*organization_filters)
+    ).scalar_one()
     return SenderHistory(
         known_sender=count > 0,
         first_seen=first_seen,
         message_count=count,
         previously_reported=reported,
         previously_malicious=int(malicious or 0),
+        organization_message_count=int(organization_count or 0),
     )
 
 
@@ -565,6 +575,24 @@ def persist_result(
     result.ruleset_fingerprint = detection.ruleset_fingerprint[:4000]
     result.risk_engine_version = RISK_ENGINE_VERSION
 
+    # Если домен отправителя оказался известным вариантом защищаемого домена, отметить это в
+    # реестре (ТЗ 1.0.4 §4). Запрос один и по индексу; для подавляющего большинства писем он
+    # не находит ничего, и это нормальный ответ, а не ошибка. Решение человека о варианте
+    # наблюдение не перезаписывает.
+    if message.sender_domain:
+        domain_variants.record_observation(
+            session,
+            organization_id=job.organization_id,
+            candidate_domain=message.sender_domain,
+        )
+
+    # Короткие похожие домены считаются по виду преобразования (ТЗ 1.0.4 §3, §25). Признак
+    # сам по себе ничего не весит, но его частота — это то, по чему видно, закрылся ли GAP-001.
+    if detection.facts.get("from_domain_short_lookalike_corporate"):
+        # Сам признак — True; вид преобразования лежит в доказательствах к нему.
+        evidence = detection.facts.evidence.get("from_domain_short_lookalike_corporate", {})
+        short_domain_lookalike_total.labels(transform=str(evidence.get("technique") or "unknown")).inc()
+
     record_rule_triggers(session, organization_id=job.organization_id, signals=detection.signals)
     for detected in detection.signals:
         rule_triggers.labels(detected.rule_id or "unknown").inc()
@@ -664,6 +692,12 @@ def run_local_analysis(
     persist_indicators(
         session, organization_id=job.organization_id, message_id=message.id, detection=detection
     )
+    # Стоимость и исход чтения QR-кодов (ТЗ 1.0.4 §6). Для письма без изображений ничего
+    # не записывается: нули здесь утверждали бы, что изображения были и в них ничего не
+    # нашлось.
+    if parsed.qr:
+        record_qr_decode(parsed.qr.get("stats") or {})
+
     persist_result(session, job=job, message=message, detection=detection, verdict=verdict)
 
     correlation = correlate(

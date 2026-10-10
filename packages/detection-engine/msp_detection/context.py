@@ -84,6 +84,17 @@ class DetectionPolicy:
     max_reasons_employee: int = 5
 
 
+#: How many messages an organisation must have analysed before "this sender is new" says
+#: anything. Below it the platform has not seen enough mail for novelty to be informative: on a
+#: fresh deployment every sender is new, and treating that as evidence would make the first
+#: weeks of any pilot a stream of false positives (ТЗ 1.0.4 §3).
+#:
+#: The number is a judgement, not a measurement, and it is deliberately on the high side: the
+#: cost of waiting is a weak signal missing for a while, the cost of being wrong is every
+#: correspondent looking suspicious.
+MIN_HISTORY_FOR_NOVELTY = 500
+
+
 @dataclass
 class SenderHistory:
     """What the platform has seen about this sender before (ТЗ 16.3)."""
@@ -94,6 +105,14 @@ class SenderHistory:
     distinct_recipients: int = 0
     previously_reported: int = 0
     previously_malicious: int = 0
+    #: Messages the organisation has analysed in total, excluding the one under analysis. Zero
+    #: means "we do not know", which is not the same as "nothing was seen".
+    organization_message_count: int = 0
+
+    @property
+    def novelty_is_informative(self) -> bool:
+        """True when "never seen before" is a statement about the sender, not about us."""
+        return self.organization_message_count >= MIN_HISTORY_FOR_NOVELTY
 
 
 @dataclass

@@ -24,6 +24,7 @@ from msp_contracts import (
     Role,
     RootCause,
     RuleHealth,
+    RuleNoiseVerdict,
     RuleStatus,
     Severity,
     SignalDisposition,
@@ -1096,3 +1097,106 @@ class ReanalysisOut(ApiModel):
     created_at: str
     started_at: str | None
     finished_at: str | None
+
+
+# ---------------------------------------------------------------------------------------------
+# Реальный поток (ТЗ 1.0.4 §23)
+# ---------------------------------------------------------------------------------------------
+class RealFlowMessageOut(ApiModel):
+    """Запись набора валидации.
+
+    Ни темы, ни текста письма здесь нет, и это не упущение. Набор валидации существует для
+    измерения качества детектирования; содержимое письма для этого не нужно, а отдавать его в
+    список значило бы раздать персональные данные всем, кто смотрит метрики.
+    """
+
+    id: str
+    source: str
+    received_at: str
+    message_fingerprint: str
+    anonymized: bool
+    pii_status: str
+    anonymization_report: dict[str, Any]
+    #: ``None`` — обычный случай: на реальном потоке ожидаемого ответа не существует.
+    expected_classification: str | None
+    #: ``None`` означает «не разобрано», а не «верно».
+    analyst_classification: str | None
+    reviewed_by: str
+    reviewed_at: str | None
+    production_verdict: str | None
+    validation_verdict: str | None
+    ruleset_version: str
+    parser_version: str
+    risk_engine_version: str
+    triggered_rules: list[str]
+    sampling_reasons: list[str]
+    unscannable_reasons: list[str]
+    gap_id: str
+    promotion_state: str
+    promotion_requested_by: str
+    promotion_approved_by: str
+    promotion_case_id: str
+    promoted_dataset_version: str
+    reproducibility_report: dict[str, Any]
+    raw_retained_until: str | None
+
+
+class RealFlowReviewRequest(ApiModel):
+    classification: AnalystClassification
+    comment: str = Field(default="", max_length=2000)
+    #: Пробел, в который попадает подтверждённый пропуск (ТЗ §21). Пропуск без пробела
+    #: блокирует гейт готовности: пропуск без зарегистрированного пробела и есть
+    #: незарегистрированный пробел.
+    gap_id: str = Field(default="", max_length=32)
+
+
+class RuleNoiseReviewRequest(ApiModel):
+    """Вывод человека о правиле, шумящем на реальном потоке (ТЗ §12, §20).
+
+    Правило при этом **не отключается**: отключение — отдельное изменение, проходящее ревью.
+    """
+
+    verdict: RuleNoiseVerdict
+    note: str = Field(default="", max_length=2000)
+
+
+class RuleNoiseReviewOut(ApiModel):
+    rule_id: str
+    verdict: str
+    reviewed_by: str
+    reviewed_at: str
+    note: str
+    #: Числа на момент вывода. ``None`` — не ноль: правило могло ещё не срабатывать.
+    triggers_per_1000: float | None
+    fp_per_1000: float | None
+    distinct_messages: int
+
+
+class PromotionRequestIn(ApiModel):
+    #: Номер разбора обязателен: кейс в корпусе без ссылки на то, откуда он взялся, через год
+    #: невозможно ни объяснить, ни оспорить.
+    case_id: str = Field(min_length=1, max_length=32)
+
+
+class PromotionDecisionRequest(ApiModel):
+    """Согласование, отказ или продвижение — одним решением за раз.
+
+    Продвижение отделено от согласования намеренно: между ними стоит проверка
+    воспроизводимости, и решение, принятое до неё, принималось бы без её результата.
+    """
+
+    decision: Literal["approve", "reject", "promote"]
+    reason: str = Field(default="", max_length=1000)
+    dataset_version: str = Field(default="", max_length=32)
+    current_dataset_version: str = Field(default="", max_length=32)
+
+
+class GapValidationRequest(ApiModel):
+    """Подтверждение пробела реальным потоком.
+
+    Письма обязательны. Подтверждение без свидетельства — это заявление, а реестр пробелов
+    существует как раз чтобы «мы про это знали» нельзя было сказать после события.
+    """
+
+    validation_message_ids: list[str] = Field(min_length=1, max_length=100)
+    comment: str = Field(default="", max_length=2000)

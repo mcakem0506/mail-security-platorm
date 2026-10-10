@@ -180,6 +180,13 @@ class Settings(BaseSettings):
     ews_timeout_seconds: float = 30.0
     ews_quarantine_folder: str = "MSP Quarantine"
     remediation_enabled: bool = False  # ТЗ 7.1 — remediation account off by default
+    #: Теневой режим на реальном потоке (ТЗ 1.0.4 §11). Вердикты считаются и сохраняются, ящик
+    #: пользователя не меняется, реагирование выключено, уведомления сотрудникам не уходят.
+    #: Обратная связь аналитиков и метрики, наоборот, включены — ради них режим и существует.
+    #:
+    #: Это не «режим пониженной функциональности», а осознанное состояние пилота: платформа
+    #: смотрит на настоящую почту и ничего с ней не делает, пока ей не начали доверять.
+    real_flow_shadow: bool = False
     remediation_dry_run_only: bool = True
     remediation_second_approver_threshold: int = 10  # ТЗ 20.1
 
@@ -261,6 +268,15 @@ class Settings(BaseSettings):
     retention_attachment_days: int = 30
     retention_audit_days: int = 400
     retention_malicious_sample_days: int = 365
+    # -- сроки хранения набора валидации (ТЗ 1.0.4 §22)
+    #: Исходное письмо реального потока. Самый короткий срок из трёх: это переписка организации,
+    #: и она нужна ровно до разбора и обезличивания.
+    raw_message_retention_days: int = 14
+    #: Обезличенные записи валидации. Переживают исходник: ради них всё и делалось, и без них
+    #: сравнивать выпуски будет нечем.
+    anonymized_validation_retention_days: int = 365
+    #: Разборы аналитиков. Вывод человека — самое долгоживущее и самое дешёвое в хранении.
+    analyst_feedback_retention_days: int = 730
 
     # -- notifications
     smtp_host: str = ""
@@ -271,6 +287,10 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_from: str = "mail-security@localhost"
     security_team_email: str = ""
+    #: Письма сотруднику о его собственной почте. Выключены по умолчанию и принудительно
+    #: выключены в теневом режиме (ТЗ 1.0.4 §11): пилот смотрит на поток и молчит, иначе
+    #: сотрудники узнают о недообученном детектировании раньше, чем служба безопасности.
+    employee_notifications_enabled: bool = False
 
     # -- observability
     log_level: str = "INFO"
@@ -294,6 +314,28 @@ class Settings(BaseSettings):
         storage_secret = _read_secret_file(self.object_storage_secret_key_file)
         if storage_secret:
             object.__setattr__(self, "object_storage_secret_key", storage_secret)
+
+        # Теневой режим гасит сами флаги, а не их отображение. Точек, где реагирование
+        # разрешается, в коде девять, и каждая читает ``remediation_enabled`` напрямую: если бы
+        # режим правил только словарь возможностей, он сообщал бы о себе правду и не делал
+        # ничего (ТЗ 1.0.4 §11).
+        if self.real_flow_shadow:
+            if self.remediation_enabled:
+                logger.warning(
+                    "real flow shadow mode is on: remediation stays disabled despite MSP_REMEDIATION_ENABLED"
+                )
+            object.__setattr__(self, "remediation_enabled", False)
+            object.__setattr__(self, "employee_notifications_enabled", False)
+
+        # Порядок сроков — не рекомендация. Исходные данные, живущие дольше обезличенных
+        # метрик, означали бы, что платформа хранит переписку ради чисел, которые уже
+        # посчитаны (ТЗ 1.0.4 §22).
+        if self.raw_message_retention_days > self.anonymized_validation_retention_days:
+            raise ValueError(
+                "MSP_RAW_MESSAGE_RETENTION_DAYS должен быть не больше "
+                "MSP_ANONYMIZED_VALIDATION_RETENTION_DAYS: исходные данные удаляются раньше "
+                "обезличенных метрик (ТЗ 1.0.4 §22)"
+            )
 
         if not self.secret_key:
             if self.environment == "production":
@@ -427,7 +469,15 @@ class Settings(BaseSettings):
             "vt_mode": self.vt_mode if self.vt_mode != "disabled" else None,
             "ad_enabled": self.ad_enabled,
             "auth_backend": self.auth_backend,
+            # ``real_flow_shadow`` здесь уже не участвует: он погасил сам флаг выше.
             "remediation_enabled": self.remediation_enabled and not self.remediation_dry_run_only,
+            "real_flow_shadow": self.real_flow_shadow,
+            "employee_notifications_enabled": self.employee_notifications_enabled,
+            "retention": {
+                "raw_message_days": self.raw_message_retention_days,
+                "anonymized_validation_days": self.anonymized_validation_retention_days,
+                "analyst_feedback_days": self.analyst_feedback_retention_days,
+            },
             "url_fetch_enabled": self.url_fetch_enabled,
             "gateway_syslog_enabled": self.gateway_syslog_enabled,
             "semantic_enabled": self.semantic_enabled,

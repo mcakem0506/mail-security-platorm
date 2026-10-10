@@ -214,6 +214,126 @@ def damerau_levenshtein(a: str, b: str, max_distance: int = 4) -> int:
 
 _MIN_TYPOSQUAT_LENGTH = 6
 
+#: Labels of this length or shorter are handled by the short-label detector below instead of by
+#: edit distance. Four and five character labels are the problem case: "corp" is one edit away
+#: from card, core, cork, corn, cord, carp and corps, all of which are ordinary words that
+#: appear in legitimate mail.
+MAX_SHORT_LABEL = 5
+
+#: Characters a variant may be built from. Deliberately not the whole alphabet: a domain label
+#: is letters, digits and hyphen (RFC 1123), and generating anything else would produce variants
+#: that cannot be registered.
+_LABEL_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789-"
+
+#: The four transforms ТЗ 1.0.4 §3 names, in the order they are tried.
+SHORT_TRANSFORMS = ("insertion", "deletion", "substitution", "transposition")
+
+
+def _insertions(label: str) -> set[str]:
+    return {label[:i] + ch + label[i:] for i in range(len(label) + 1) for ch in _LABEL_ALPHABET}
+
+
+def _deletions(label: str) -> set[str]:
+    return {label[:i] + label[i + 1 :] for i in range(len(label))}
+
+
+def _substitutions(label: str) -> set[str]:
+    return {
+        label[:i] + ch + label[i + 1 :] for i in range(len(label)) for ch in _LABEL_ALPHABET if ch != label[i]
+    }
+
+
+def _transpositions(label: str) -> set[str]:
+    """Adjacent transpositions only: "corp" -> "ocrp", "crop", "copr"."""
+    return {
+        label[:i] + label[i + 1] + label[i] + label[i + 2 :]
+        for i in range(len(label) - 1)
+        if label[i] != label[i + 1]
+    }
+
+
+@lru_cache(maxsize=4096)
+def short_label_variants(label: str) -> dict[str, str]:
+    """Every single-edit variant of a short label, mapped to the transform that produced it.
+
+    Pure and offline by construction: no DNS, no WHOIS, no crawling (ТЗ 1.0.4 §4). The result is
+    a dictionary rather than a set because the transform is part of the evidence an analyst
+    reads — "letter doubled" and "two letters swapped" are different stories about intent.
+
+    A variant reachable by more than one transform keeps the first in ``SHORT_TRANSFORMS``
+    order, so the classification is stable rather than dependent on set iteration.
+    """
+    label = (label or "").lower()
+    if not label or len(label) > MAX_SHORT_LABEL:
+        return {}
+
+    produced = {
+        "insertion": _insertions(label),
+        "deletion": _deletions(label),
+        "substitution": _substitutions(label),
+        "transposition": _transpositions(label),
+    }
+    variants: dict[str, str] = {}
+    for transform in SHORT_TRANSFORMS:
+        for variant in produced[transform]:
+            # A label cannot start or end with a hyphen, and the label itself is not a variant.
+            if variant == label or variant.startswith("-") or variant.endswith("-"):
+                continue
+            variants.setdefault(variant, transform)
+    return variants
+
+
+def compare_short_labels(candidate: str, target: str) -> LookalikeMatch | None:
+    """Match a candidate label against a short protected label, one edit away.
+
+    Separate from :func:`compare_labels` on purpose. Edit distance on a short label produces far
+    too many matches to score on its own, so this detector returns a match with a **low**
+    confidence and the caller is required to find corroborating evidence before the signal
+    counts (ТЗ 1.0.4 §3). The match itself is a statement that the shape is suspicious, not that
+    the message is.
+    """
+    cand = (candidate or "").lower()
+    targ = (target or "").lower()
+    if not cand or not targ or cand == targ or len(targ) > MAX_SHORT_LABEL:
+        return None
+    # Skeletons, so that a homoglyph or a visual substitution inside the variant still matches;
+    # compare_labels already catches a pure skeleton collision, which is a stronger signal.
+    sk_c, sk_t = skeleton(cand), skeleton(targ)
+    if sk_c == sk_t:
+        return None
+    transform = short_label_variants(sk_t).get(sk_c)
+    if transform is None:
+        return None
+    return LookalikeMatch(
+        target,
+        f"short_{transform}",
+        1,
+        0.35,
+        f"одна правка ({transform}) от короткой метки «{targ}»",
+    )
+
+
+def find_short_lookalike(
+    registrable: str, label: str, targets: dict[str, str], target_labels: dict[str, str]
+) -> LookalikeMatch | None:
+    """The short-label counterpart of :func:`find_lookalike`.
+
+    Returns ``None`` for an exact protected domain, and for anything :func:`find_lookalike`
+    would already have caught — this detector exists for the gap below that threshold
+    (GAP-001), not to duplicate it.
+    """
+    if not label or registrable in targets:
+        return None
+    best: LookalikeMatch | None = None
+    for t_label, t_reg in target_labels.items():
+        match = compare_short_labels(label, t_label)
+        if match is None:
+            continue
+        match = LookalikeMatch(t_reg, match.technique, match.distance, match.confidence, match.detail)
+        if best is None or match.confidence > best.confidence:
+            best = match
+    return best
+
 
 def _allowed_distance(length: int) -> int:
     if length <= 5:
@@ -257,6 +377,31 @@ def compare_labels(candidate: str, target: str) -> LookalikeMatch | None:
     return None
 
 
+def contains_domain(host: str, domain: str) -> bool:
+    """True when ``domain`` appears inside ``host`` as a run of whole labels.
+
+    A plain substring test is not enough and was a defect: ``corp.example`` is a substring of
+    ``ccorp.example``, so a different company with a longer name was reported as pushing our
+    domain out of the registrable part — an explanation that sends an analyst looking for
+    something that is not there.
+
+    Each label is compared through :func:`skeleton`, so ``co-rp.example.evil.test`` and
+    ``c0rp.example.evil.test`` still match, but the comparison happens **per label**: calling
+    ``skeleton`` on the whole host first would be no better than a substring test, because the
+    skeleton drops the dots that carry the label boundaries.
+    """
+    if not host or not domain:
+        return False
+    host_labels = [skeleton(part) for part in host.split(".") if part]
+    domain_labels = [skeleton(part) for part in domain.split(".") if part]
+    if not domain_labels or len(domain_labels) > len(host_labels):
+        return False
+    return any(
+        host_labels[i : i + len(domain_labels)] == domain_labels
+        for i in range(len(host_labels) - len(domain_labels) + 1)
+    )
+
+
 def find_lookalike(
     host: str, registrable: str, label: str, targets: dict[str, str], target_labels: dict[str, str]
 ) -> LookalikeMatch | None:
@@ -279,14 +424,42 @@ def find_lookalike(
                 best = m
     if best is not None:
         return best
-    # subdomain deception: corp.example.evil.ru / corp-example.evil.ru
-    sk_host = skeleton(host)
+    # subdomain deception: our domain appears as whole labels but is not the registrable one,
+    # as in corp.example.attacker.test or mail.corp.example.evil.ru.
     for t_reg in targets:
         sk_t = skeleton(t_reg)
-        if len(sk_t) >= 6 and sk_t in sk_host and skeleton(registrable) != sk_t:
+        if len(sk_t) >= 6 and contains_domain(host, t_reg) and skeleton(registrable) != sk_t:
             return LookalikeMatch(
                 t_reg, "subdomain_deception", 0, 0.8, f"'{t_reg}' appears outside the registrable domain"
             )
+
+    # Label merge: the whole corporate domain squeezed into a single label, with the dot
+    # dropped or replaced — corpexample.example, corp-example.example, corp--example.example.
+    # A separate technique from subdomain deception, and named separately: the two look alike
+    # in a substring test and mean different things to whoever reads the verdict.
+    host_labels = [part for part in host.split(".") if part]
+    for t_reg in targets:
+        merged = skeleton(t_reg)
+        if len(merged) < 6 or skeleton(registrable) == merged:
+            continue
+        for part in host_labels:
+            sk_part = skeleton(part)
+            if sk_part == merged:
+                return LookalikeMatch(
+                    t_reg, "label_merge", 0, 0.85, f"'{t_reg}' записан одной меткой «{part}»"
+                )
+            # One edit on top of the merge — corp-exampl.example. Kept at a single edit on
+            # purpose: the merge is already the strong part of the signal, and allowing the
+            # usual distance for an eleven-character name would widen the false-positive
+            # surface for the sake of a rarer variant.
+            if len(sk_part) >= 6 and damerau_levenshtein(sk_part, merged, 1) == 1:
+                return LookalikeMatch(
+                    t_reg,
+                    "label_merge",
+                    1,
+                    0.75,
+                    f"'{t_reg}' записан одной меткой «{part}» с одной правкой",
+                )
     return None
 
 
@@ -296,6 +469,21 @@ def common_service_targets() -> tuple[dict[str, str], dict[str, str]]:
     for d in _COMMON_SERVICE_DOMAINS:
         labels.setdefault(d.split(".")[0], d)
     return targets, labels
+
+
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-zа-яё0-9])(?=[A-ZА-ЯЁ])")
+
+
+def display_name_words(name: str) -> list[str]:
+    """Split a display name into words, including across camel-case boundaries.
+
+    The camel-case split is what keeps "CorpSecurity" distinguishable from "Corps": the capital
+    letter is the boundary, and lower-casing before splitting throws that information away.
+    """
+    if not name:
+        return []
+    spaced = _CAMEL_BOUNDARY.sub(" ", name)
+    return [word for word in re.split(r"[^0-9A-Za-zА-Яа-яЁё]+", spaced) if word]
 
 
 def normalize_person_name(name: str) -> str:

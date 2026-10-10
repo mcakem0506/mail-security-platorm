@@ -17,6 +17,7 @@ from msp_contracts import (
     CanaryScope,
     CanaryState,
     CandidateState,
+    DomainVariantStatus,
     ExceptionType,
     GapStatus,
     IncidentStatus,
@@ -24,16 +25,20 @@ from msp_contracts import (
     IntakeState,
     IOCType,
     JobState,
+    PiiStatus,
+    PromotionState,
     ReanalysisState,
     RemediationState,
     RemediationType,
     RiskLevel,
     Role,
     RuleHealth,
+    RuleNoiseVerdict,
     Severity,
     SignalDisposition,
     TIState,
     TIStatus,
+    ValidationSource,
 )
 from sqlalchemy import (
     Boolean,
@@ -1175,9 +1180,22 @@ class DetectionGapRecord(Base, IdMixin, TimestampMixin):
     #: What protects in the meantime. A gap without one is an unmitigated hole, and the
     #: registry should make that visible rather than comfortable.
     compensating_controls: Mapped[str] = mapped_column(Text, default="")
+    #: Почему пробел оставлен на подтверждении, а не закрыт (ТЗ 1.0.4 §20). Гейт готовности
+    #: требует этого объяснения: «ещё проверяем» без причины — не причина, а отсутствие решения.
+    #: Пустая строка при статусе VALIDATION блокирует готовность к MSP 1.1.
+    validation_reason: Mapped[str] = mapped_column(Text, default="")
     mitigation: Mapped[str] = mapped_column(Text, default="")
     planned_fix: Mapped[str] = mapped_column(Text, default="")
     closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    #: Подтверждение на реальной почте (ТЗ 1.0.4 §23). Отдельно от ``status``, потому что
+    #: статус ``VALIDATION`` означает согласие золотого корпуса, а корпус содержит ровно те
+    #: случаи, которые мы придумали. ``None`` здесь — «на живой почте не проверено», и это
+    #: честнее, чем молчание.
+    real_flow_validated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    real_flow_validated_by: Mapped[str] = mapped_column(String(320), default="")
+    #: Свидетельство: сколько писем реального потока и какие именно это подтверждают. Без него
+    #: «проверено» было бы словом.
+    real_flow_evidence: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1564,6 +1582,184 @@ class CampaignMatch(Base, IdMixin):
     rejected: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     decided_by: Mapped[str] = mapped_column(String(320), default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+
+
+class ValidationMessage(Base, IdMixin):
+    """Письмо реального потока, взятое в набор валидации (ТЗ 1.0.4 §8).
+
+    Запись существует отдельно от ``mail_messages`` намеренно. Обычное письмо хранится, чтобы по
+    нему работал аналитик, и удаляется по сроку хранения почты. Запись валидации хранится, чтобы
+    по ней измеряли качество детектирования, и живёт по своему сроку — более долгому для
+    обезличенных метрик и более короткому для исходных данных (ТЗ §22). Смешать их значило бы
+    либо потерять измерения вместе с почтой, либо держать почту ради измерений.
+
+    Два вердикта хранятся рядом и значат разное:
+
+    * ``production_verdict`` — что платформа решила тогда, на том пакете правил;
+    * ``validation_verdict`` — что она решает сейчас, при повторном прогоне.
+
+    Расхождение между ними — не ошибка, а предмет разбора: именно по нему видно, что изменение
+    правил дало на настоящей почте.
+    """
+
+    __tablename__ = "validation_messages"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "message_fingerprint", name="uq_validation_message"),
+        Index("ix_validation_org_received", "organization_id", "received_at"),
+        Index("ix_validation_org_review", "organization_id", "analyst_classification"),
+        Index("ix_validation_org_pii", "organization_id", "pii_status"),
+        Index("ix_validation_org_promotion", "organization_id", "promotion_state"),
+        # Выборка писем с истёкшим сроком хранения исходных данных (ТЗ §22).
+        Index("ix_validation_org_raw_retention", "organization_id", "raw_retained_until"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
+    #: Письмо платформы, если оно ещё не удалено по сроку хранения. Запись валидации переживает
+    #: его, поэтому связь необязательная и обнуляется, а не каскадно удаляет запись.
+    message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("mail_messages.id", ondelete="SET NULL"), default=None, index=True
+    )
+    source: Mapped[ValidationSource] = mapped_column(_enum(ValidationSource, "validation_source_enum"))
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    #: Отпечаток по структуре, устойчивый к обезличиванию: по нему одно письмо не попадает в
+    #: набор дважды из двух источников.
+    message_fingerprint: Mapped[str] = mapped_column(String(64))
+    anonymized: Mapped[bool] = mapped_column(Boolean, default=False)
+    pii_status: Mapped[PiiStatus] = mapped_column(_enum(PiiStatus, "pii_status_enum"), default=PiiStatus.RAW)
+    #: Отчёт об обезличивании: сколько замен какого вида сделано. Нужен, чтобы «обезличено» было
+    #: проверяемым утверждением.
+    anonymization_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    #: Ключи двух экземпляров письма в объектном хранилище. Разделены потому, что живут разное
+    #: время: исходный удаляется по ``raw_retained_until``, обезличенный остаётся для метрик и
+    #: для проверки воспроизводимости при продвижении в корпус (ТЗ §10, §22).
+    raw_object_key: Mapped[str] = mapped_column(String(512), default="")
+    anonymized_object_key: Mapped[str] = mapped_column(String(512), default="")
+
+    #: Чего ожидали от платформы, если это известно заранее (учения, red team). ``None`` —
+    #: обычный случай: на реальном потоке ожидаемого ответа нет, и притворяться, что есть,
+    #: значило бы считать recall по выдуманной разметке.
+    expected_classification: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    #: Что сказал аналитик. ``None`` означает «не разобрано», а не «верно».
+    analyst_classification: Mapped[AnalystClassification | None] = mapped_column(
+        _enum(AnalystClassification, "analyst_classification_enum"), default=None
+    )
+    reviewed_by: Mapped[str] = mapped_column(String(320), default="")
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    review_comment: Mapped[str] = mapped_column(String(2000), default="")
+
+    production_verdict: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    validation_verdict: Mapped[RiskLevel | None] = mapped_column(
+        _enum(RiskLevel, "risk_level_enum"), default=None
+    )
+    #: Всё, от чего зависит вердикт, на момент прогона — иначе расхождение не объяснимо.
+    ruleset_version: Mapped[str] = mapped_column(String(64), default="")
+    parser_version: Mapped[str] = mapped_column(String(64), default="")
+    risk_engine_version: Mapped[str] = mapped_column(String(64), default="")
+
+    #: Правила, сработавшие при прогоне валидации: по ним считается шум на реальной почте.
+    triggered_rules: Mapped[list[Any]] = mapped_column(default=list)
+    #: Почему письмо попало в выборку (ТЗ §14): высокий риск, обращение сотрудника, QR, случайная
+    #: доля легитимной почты. Нужно, чтобы метрику нельзя было прочитать как долю от всего потока.
+    sampling_reasons: Mapped[list[Any]] = mapped_column(default=list)
+    #: Проверка оказалась неполной: шифрование, пароль на архиве, нераспознанный QR-код.
+    unscannable_reasons: Mapped[list[Any]] = mapped_column(default=list)
+    #: Пробел, в который попадает подтверждённый пропуск (ТЗ §21). Пустая строка у пропуска
+    #: означает «не задокументирован», и гейт готовности это блокирует: пропуск без
+    #: зарегистрированного пробела и есть незарегистрированный пробел.
+    gap_id: Mapped[str] = mapped_column(String(32), default="")
+
+    promotion_state: Mapped[PromotionState] = mapped_column(
+        _enum(PromotionState, "promotion_state_enum"),
+        default=PromotionState.NOT_REQUESTED,
+    )
+    promotion_requested_by: Mapped[str] = mapped_column(String(320), default="")
+    promotion_approved_by: Mapped[str] = mapped_column(String(320), default="")
+    promotion_case_id: Mapped[str] = mapped_column(String(32), default="")
+    #: Версия датасета, в которую письмо вошло. Заполняется только когда версия действительно
+    #: повышена — автоматического продвижения нет, и пустое значение здесь означает ровно
+    #: «в корпусе этого письма ещё нет» (ТЗ §10).
+    promoted_dataset_version: Mapped[str] = mapped_column(String(32), default="")
+    #: Результат проверки воспроизводимости по обезличенной копии: вердикт и совпал ли он.
+    reproducibility_report: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    #: Срок, после которого исходные данные удаляются раньше обезличенных метрик (ТЗ §22).
+    raw_retained_until: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class RealFlowRuleReview(Base, IdMixin):
+    """Вывод человека о правиле, шумящем на реальном потоке (ТЗ 1.0.4 §12, §20).
+
+    Хранится отдельно от ``RuleQualitySnapshot`` намеренно. Снимок — измерение за период, и его
+    пересчитывают; вывод — суждение человека, которое пересчёт не отменяет. Запись суждения в
+    таблицу измерений означала бы, что следующий пересчёт его затрёт.
+
+    Рядом с выводом сохраняются числа, на которые человек смотрел. Без них через полгода нельзя
+    будет понять, относился ли вывод к тому же поведению правила, что наблюдается сейчас.
+    """
+
+    __tablename__ = "real_flow_rule_reviews"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "rule_id", name="uq_real_flow_rule_review"),
+        Index("ix_real_flow_rule_review_org", "organization_id", "verdict"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
+    rule_id: Mapped[str] = mapped_column(String(32))
+    verdict: Mapped[RuleNoiseVerdict] = mapped_column(_enum(RuleNoiseVerdict, "rule_noise_verdict_enum"))
+    reviewed_by: Mapped[str] = mapped_column(String(320))
+    reviewed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    note: Mapped[str] = mapped_column(String(2000), default="")
+    #: Числа на момент вывода: на что именно смотрел человек.
+    triggers_per_1000: Mapped[float | None] = mapped_column(Float, default=None)
+    fp_per_1000: Mapped[float | None] = mapped_column(Float, default=None)
+    distinct_messages: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ProtectedDomainVariant(Base, IdMixin):
+    """Один вариант написания защищаемого домена (ТЗ 1.0.4 §4).
+
+    Варианты вычисляются **офлайн и чисто**: никакого DNS, WHOIS или обхода сети. Реестр не
+    отвечает на вопрос «зарегистрирован ли такой домен» — он отвечает на вопрос «если письмо
+    придёт с такого домена, что мы о нём уже решили». Первый вопрос требует обращений наружу по
+    каждому из сотен вариантов и выдал бы наружу список доменов, которые организация защищает.
+
+    Статус — это память о решении человека. Без реестра аналитик принимал бы одно и то же
+    решение про «corps.example» столько раз, сколько приходит писем.
+    """
+
+    __tablename__ = "protected_domain_variants"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "protected_domain", "candidate_domain", name="uq_domain_variant"),
+        Index("ix_domain_variant_candidate", "organization_id", "candidate_domain"),
+        Index("ix_domain_variant_status", "organization_id", "status"),
+    )
+
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    #: Защищаемый домен, от которого произведён вариант.
+    protected_domain: Mapped[str] = mapped_column(String(253))
+    #: Сам вариант.
+    candidate_domain: Mapped[str] = mapped_column(String(253))
+    #: Какое преобразование его дало: insertion, deletion, substitution, transposition.
+    transform_type: Mapped[str] = mapped_column(String(32))
+    #: Число правок. Для вариантов этого реестра всегда 1.
+    distance: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[DomainVariantStatus] = mapped_column(
+        _enum(DomainVariantStatus, "domain_variant_status_enum"),
+        default=DomainVariantStatus.GENERATED,
+    )
+    generated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    #: Когда вариант впервые встретился в почте. ``None`` означает «ни разу», а не «неизвестно».
+    first_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    last_observed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    observed_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: Кто и почему изменил статус. Для KNOWN_LEGITIMATE это обязательно: статус гасит сигнал.
+    decided_by: Mapped[str] = mapped_column(String(320), default="")
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    reason: Mapped[str] = mapped_column(String(1000), default="")
 
 
 class ReanalysisJob(Base, IdMixin):

@@ -19,7 +19,9 @@ from .bec import bec_facts
 from .context import AnalysisContext
 from .gateway import gateway_facts
 from .similarity import (
+    display_name_words,
     find_lookalike,
+    find_short_lookalike,
     has_homoglyph,
     has_mixed_script_token,
     homoglyph_chars,
@@ -208,6 +210,26 @@ def _sender_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> None
                 confidence=svc.confidence,
             )
 
+        # One edit away from a short protected label (ТЗ 1.0.4 §3, closes GAP-001). Raised only
+        # when the stronger checks above found nothing: this detector sits below their
+        # threshold, and a domain that is already a homoglyph or a typosquat does not need a
+        # weaker description of itself. The fact carries no weight on its own — the rules that
+        # read it require corroborating evidence, because one edit on a four-letter label also
+        # describes "core", "carp" and "corps".
+        if corp is None and svc is None:
+            short = find_short_lookalike(
+                dom.registrable_ascii, dom.label, ctx.corporate_targets, ctx.corporate_labels
+            )
+            if short is not None:
+                fs.flag(
+                    "from_domain_short_lookalike_corporate",
+                    domain=frm.domain,
+                    target=short.target,
+                    technique=short.technique,
+                    detail=short.detail,
+                    confidence=short.confidence,
+                )
+
     # Reply-To / Return-Path / Sender mismatch
     reply_to = msg.reply_to[0] if msg.reply_to else None
     if reply_to is not None and reply_to.address and reply_to.address != frm.address:
@@ -369,10 +391,16 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
         fs.set("display_name_is_generic_role", True, display_name=display)
 
     # Display name claiming the organisation or a known brand while sending externally.
+    #
+    # Compared word by word, not as a substring. "Corps Security" is a real company and
+    # contains "corp"; treating that as a claim to be us accused a vendor of impersonation and
+    # explained the verdict with something untrue. Words are split on non-alphanumerics and on
+    # camel-case boundaries, so "CorpSecurity" — the organisation's name glued to a word, which
+    # is a real trick — is still a claim, while "Corps" is not.
     if not internal_sender:
-        sk_display = skeleton(display)
+        display_words = {skeleton(word) for word in display_name_words(display)}
         org_sk = skeleton(ctx.organization_name)
-        if org_sk and len(org_sk) >= 4 and org_sk in sk_display:
+        if org_sk and len(org_sk) >= 4 and org_sk in display_words:
             fs.set(
                 "display_name_claims_organization",
                 True,
@@ -381,7 +409,7 @@ def _identity_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> No
             )
         for corp in ctx.corporate_domains_ascii:
             label = split_domain(corp).label
-            if len(label) >= 4 and skeleton(label) in sk_display:
+            if len(label) >= 4 and skeleton(label) in display_words:
                 fs.set("display_name_claims_organization", True, display_name=display, matched=label)
                 break
 
@@ -680,6 +708,13 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
             )
     if msg.dkim_signatures == 0:
         fs.set("dkim_signature_absent", True)
+        # A verified authentication server reported a DKIM pass for a message that carries no
+        # signature at all. One of the two is untrue, and neither case is ordinary: legitimate
+        # mail that passes DKIM carries the signature it passed on. Plain absence, by contrast,
+        # is the normal state of a great deal of legitimate mail and says nothing on its own
+        # (ТЗ 1.0.4 §3).
+        if fs.get("dkim_pass"):
+            fs.set("dkim_pass_without_signature", True)
 
     for key, value, ev in received_chain_facts(msg.received):
         fs.set(key, value, **ev)
@@ -704,6 +739,15 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
         fs.set("sender_known", True, message_count=hist.message_count)
     elif fs.get("sender_external"):
         fs.set("sender_first_time", True)
+    # Whether "first time" means anything. A rule that treats novelty as evidence must read
+    # this too, otherwise it fires on every sender of a freshly installed platform — and on
+    # every message of the synthetic corpus, where there is no history by construction.
+    if hist.novelty_is_informative:
+        fs.set(
+            "sender_novelty_is_informative",
+            True,
+            organization_message_count=hist.organization_message_count,
+        )
     if hist.previously_malicious:
         fs.set("sender_previously_malicious", True, count=hist.previously_malicious)
     if hist.previously_reported:

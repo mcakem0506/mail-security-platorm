@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import Any
 
@@ -316,3 +317,212 @@ RULE_HEALTH_LEVEL: dict[str, int] = {
     "REGRESSED": 4,
     "NOISY": 5,
 }
+
+
+# ---------------------------------------------------------------------------------------------
+# Профиль чтения QR-кодов (ТЗ 1.0.4 §6)
+# ---------------------------------------------------------------------------------------------
+#: Изображения, отданные декодеру. Знаменатель для всего остального здесь.
+qr_images_total = Counter("msp_qr_images_total", "Images handed to the QR decoder", registry=REGISTRY)
+qr_codes_found_total = Counter(
+    "msp_qr_codes_found_total", "QR codes decoded out of those images", registry=REGISTRY
+)
+qr_decode_success_total = Counter(
+    "msp_qr_decode_success_total", "Images the decoder processed without error", registry=REGISTRY
+)
+#: Таймаут и отказ разделены намеренно: первое означает «не успели», второе «не смогли», и
+#: лечатся они по-разному — ресурсами и исправлением соответственно.
+qr_decode_timeout_total = Counter(
+    "msp_qr_decode_timeout_total", "Decoder batches killed by the timeout", registry=REGISTRY
+)
+qr_decode_failure_total = Counter(
+    "msp_qr_decode_failure_total", "Images the decoder could not process", registry=REGISTRY
+)
+qr_worker_duration_seconds = Histogram(
+    "msp_qr_worker_duration_seconds",
+    "Wall time of one decoder batch, launch included",
+    buckets=(0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+    registry=REGISTRY,
+)
+#: Отдельно от общей длительности: запуск интерпретатора стоит около половины секунды, и без
+#: этой метрики он читается как медленное декодирование.
+qr_worker_spawn_duration_seconds = Histogram(
+    "msp_qr_worker_spawn_duration_seconds",
+    "Of that time, how much went on starting the process",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0),
+    registry=REGISTRY,
+)
+#: Состояние компонента числом, в порядке, удобном для оповещения: больше — хуже.
+QR_HEALTH_LEVEL: dict[str, int] = {
+    "AVAILABLE": 0,
+    "DISABLED": 1,
+    "DEGRADED": 2,
+    "FAILED": 3,
+}
+qr_component_health = Gauge(
+    "msp_qr_component_health",
+    "QR decoding component: 0 available, 1 disabled, 2 degraded, 3 failed",
+    registry=REGISTRY,
+)
+
+
+# ---------------------------------------------------------------------------------------------
+# Реальный поток (ТЗ 1.0.4 §12, §25)
+# ---------------------------------------------------------------------------------------------
+realflow_messages_total = Counter(
+    "msp_realflow_messages_total",
+    "Письма, взятые в набор валидации",
+    ["source"],
+    registry=REGISTRY,
+)
+realflow_sampled_total = Counter(
+    "msp_realflow_sampled_total",
+    "Попадания в выборку по причинам (у письма их может быть несколько)",
+    ["reason"],
+    registry=REGISTRY,
+)
+realflow_duplicates_total = Counter(
+    "msp_realflow_duplicates_total",
+    "Повторные поступления того же письма: узнаны по отпечатку и не посчитаны дважды",
+    registry=REGISTRY,
+)
+realflow_reviewed_total = Counter(
+    "msp_realflow_reviewed_total",
+    "Разборы аналитиков по письмам реального потока",
+    ["classification"],
+    registry=REGISTRY,
+)
+#: Числители и знаменатели, а не доли. Prometheus не умеет «нет данных», и precision=0
+#: читался бы как «платформа всегда ошибается», тогда как значит «никто ещё не разбирал».
+realflow_confirmed_total = Gauge(
+    "msp_realflow_confirmed_total",
+    "Разборы, подтвердившие, что письмо стоило отметить",
+    registry=REGISTRY,
+)
+realflow_false_positive_total = Gauge(
+    "msp_realflow_false_positive_total",
+    "Разборы, сказавшие, что отмечать было не за что",
+    registry=REGISTRY,
+)
+realflow_missed_total = Gauge(
+    "msp_realflow_missed_total",
+    "Подтверждённые угрозы, которые платформа не отметила",
+    registry=REGISTRY,
+)
+realflow_high_risk_unreviewed = Gauge(
+    "msp_realflow_high_risk_unreviewed",
+    "Письма с высоким риском, которые никто не разобрал: долг, а не ноль",
+    registry=REGISTRY,
+)
+realflow_unscannable_total = Gauge(
+    "msp_realflow_unscannable_total",
+    "Письма, проверенные не до конца: шифрование, пароль на архиве, нераспознанный QR",
+    registry=REGISTRY,
+)
+realflow_rule_pressure = Gauge(
+    "msp_realflow_rule_pressure_per_1000",
+    "Срабатываний правила на тысячу писем реального потока",
+    ["rule_id"],
+    registry=REGISTRY,
+)
+#: Записи, у которых срок хранения исходных данных истёк, а данные ещё на месте. Отдельная
+#: метрика, а не метка состояния продвижения: это не шаг жизненного цикла письма, а нарушение
+#: срока хранения (ТЗ §22), и смешивать их значило бы спрятать второе внутри первого.
+realflow_raw_retention_overdue = Gauge(
+    "msp_realflow_raw_retention_overdue",
+    "Записи с истёкшим сроком хранения исходных данных, которые ещё не удалены",
+    registry=REGISTRY,
+)
+realflow_promotion_state = Gauge(
+    "msp_realflow_promotion_state",
+    "Письма по шагам продвижения в корпус; продвижение не автоматическое (ТЗ §10)",
+    ["state"],
+    registry=REGISTRY,
+)
+
+#: Короткие похожие домены (ТЗ 1.0.4 §3, GAP-001).
+short_domain_lookalike_total = Counter(
+    "msp_short_domain_lookalike_total",
+    "Обнаружения похожих коротких доменов по виду преобразования",
+    ["transform"],
+    registry=REGISTRY,
+)
+domain_variant_registry_size = Gauge(
+    "msp_domain_variant_registry_size",
+    "Размер реестра вариантов защищаемых доменов по статусу",
+    ["status"],
+    registry=REGISTRY,
+)
+
+
+def record_realflow_ingest(source: str, reasons: list[str], *, created: bool) -> None:
+    """Приём письма в набор. Дубликат считается отдельно, а не как ещё одно письмо."""
+    if not created:
+        realflow_duplicates_total.inc()
+        return
+    realflow_messages_total.labels(source=source).inc()
+    for reason in reasons:
+        realflow_sampled_total.labels(reason=reason).inc()
+
+
+def record_realflow_summary(summary: dict[str, Any]) -> None:
+    """Перенести сводку в метрики.
+
+    Доли в метрики не идут: ``precision`` в сводке может быть ``None``, и единственный способ
+    выразить это в Prometheus — не выражать вовсе. Знаменатель виден по соседним числам.
+    """
+    realflow_confirmed_total.set(int(summary.get("true_positive") or 0))
+    realflow_false_positive_total.set(int(summary.get("false_positive") or 0))
+    realflow_missed_total.set(int(summary.get("false_negative") or 0))
+    realflow_unscannable_total.set(int(summary.get("unscannable") or 0))
+    sample = summary.get("sample") or {}
+    realflow_high_risk_unreviewed.set(int(sample.get("high_risk_unreviewed") or 0))
+
+
+def record_rule_pressure(rows: list[dict[str, Any]]) -> None:
+    """Нагрузка правил на реальном потоке.
+
+    ``PRODUCTION_NOISY`` здесь не выставляется: это вывод человека, глядящего на эти числа, а не
+    следствие порога (ТЗ §12).
+    """
+    for row in rows:
+        realflow_rule_pressure.labels(rule_id=str(row.get("rule_id"))).set(
+            float(row.get("triggers_per_1000_messages") or 0.0)
+        )
+
+
+def record_promotion_states(counts: dict[str, int]) -> None:
+    for state, value in counts.items():
+        realflow_promotion_state.labels(state=state).set(int(value))
+
+
+def _stat(stats: object, name: str) -> Any:
+    """Прочитать поле статистики, не зная её формы.
+
+    Разборщик отдаёт ``DecodeStats``, а сохранённое письмо — тот же набор словарём. Наблюдаемость
+    не импортирует ни то, ни другое: она не должна тянуть за собой разбор писем, а разбор —
+    наблюдаемость.
+    """
+    if isinstance(stats, Mapping):
+        return stats.get(name)
+    return getattr(stats, name, None)
+
+
+def record_qr_decode(stats: object) -> None:
+    """Перенести статистику одного письма в метрики (``DecodeStats`` или его словарь)."""
+    submitted = int(_stat(stats, "images_submitted") or 0)
+    if not submitted:
+        # Декодер не вызывался. Записать нули означало бы утверждать, что письма с
+        # изображениями были и в них ничего не нашлось.
+        return
+    qr_images_total.inc(submitted)
+    qr_codes_found_total.inc(int(_stat(stats, "codes_found") or 0))
+    qr_decode_success_total.inc(int(_stat(stats, "successes") or 0))
+    qr_decode_timeout_total.inc(int(_stat(stats, "timeouts") or 0))
+    qr_decode_failure_total.inc(int(_stat(stats, "failures") or 0))
+    duration = float(_stat(stats, "duration_seconds") or 0.0)
+    if duration:
+        qr_worker_duration_seconds.observe(duration)
+    spawn = _stat(stats, "spawn_seconds")
+    if spawn is not None:
+        qr_worker_spawn_duration_seconds.observe(float(spawn))
