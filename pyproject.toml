@@ -58,6 +58,7 @@ where = [
   "apps/api",
   "apps/worker",
   "packages/shared-contracts",
+  "packages/gateway",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",

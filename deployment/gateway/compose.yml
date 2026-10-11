@@ -1,0 +1,100 @@
+# Стенд проверки транспорта шлюза (ТЗ 1.1 §67). Профиль: gateway-test.
+#
+# Стенд изолирован: своя сеть, свои тома, ничего не публикуется наружу кроме loopback-портов
+# для проверок с хоста. Он не подключается к почте организации и не меняет DNS (§60).
+#
+# Адреса статические намеренно. Доверие шлюза определяется подсетью источника, поэтому
+# «доверенный Exchange» и «недоверенный клиент» в проверках обязаны различаться адресом:
+#   10.77.0.64/26  — доверенные источники (internal.trusted_networks)
+#   прочие адреса  — недоверенные
+name: ${COMPOSE_PROJECT_NAME:-msp-gwtest}
+
+x-tools: &tools
+  build:
+    context: ../..
+    dockerfile: deployment/gateway/test/Dockerfile.tools
+  image: msp-gateway-tools:test
+  profiles: [gateway-test]
+  restart: "no"
+
+services:
+  gateway-postfix:
+    build:
+      context: ../..
+      dockerfile: deployment/gateway/Dockerfile
+    image: msp-gateway:test
+    profiles: [gateway-test]
+    hostname: gw.lab.example
+    restart: "no"
+    # Минимальные возможности (§8): ничего сверх нужного Postfix. Привилегированный режим и
+    # доступ к сокету Docker не используются.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL, NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.10
+    ports:
+      - "127.0.0.1:${GW_PORT_IN:-12525}:25"
+      - "127.0.0.1:${GW_PORT_INTERNAL:-12526}:2525"
+    volumes:
+      - gw-queue:/var/spool/postfix
+      - gw-var:/var/lib/msp
+      - ${GW_TEST_DIR:?укажите каталог стенда}/bootstrap:/bootstrap:ro
+      - ${GW_TEST_DIR}/bundles:/bundles:ro
+      - ${GW_TEST_DIR}/secrets/gateway:/run/secrets/gateway:ro
+
+  fake-exchange:
+    <<: *tools
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.20
+    environment:
+      SMTP_PORT: "2526"
+      CONTROL_PORT: "8025"
+      TLS_CERT: /run/secrets/exchange/exchange.crt
+      TLS_KEY: /run/secrets/exchange/exchange.key
+      REQUIRE_STARTTLS: "1"
+    ports:
+      - "127.0.0.1:${EX1_CONTROL:-18025}:8025"
+    volumes:
+      - ${GW_TEST_DIR}/secrets/exchange:/run/secrets/exchange:ro
+
+  fake-exchange-2:
+    <<: *tools
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.21
+    environment:
+      SMTP_PORT: "2526"
+      CONTROL_PORT: "8025"
+      TLS_CERT: /run/secrets/exchange/exchange.crt
+      TLS_KEY: /run/secrets/exchange/exchange.key
+      REQUIRE_STARTTLS: "1"
+    ports:
+      - "127.0.0.1:${EX2_CONTROL:-18026}:8025"
+    volumes:
+      - ${GW_TEST_DIR}/secrets/exchange:/run/secrets/exchange:ro
+
+  outbound-sink:
+    <<: *tools
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.30
+    environment:
+      SMTP_PORT: "2527"
+      CONTROL_PORT: "8025"
+    ports:
+      - "127.0.0.1:${SINK_CONTROL:-18027}:8025"
+
+networks:
+  gwnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.77.0.0/24
+          gateway: 10.77.0.1
+
+volumes:
+  gw-queue:
+  gw-var:
