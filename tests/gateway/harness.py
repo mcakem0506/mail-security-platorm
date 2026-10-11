@@ -270,6 +270,7 @@ class Stack:
         self.ports = {
             "GW_PORT_IN": _free_port(),
             "GW_PORT_INTERNAL": _free_port(),
+            "GW_PORT_METRICS": _free_port(),
             "EX1_CONTROL": _free_port(),
             "EX2_CONTROL": _free_port(),
             "SINK_CONTROL": _free_port(),

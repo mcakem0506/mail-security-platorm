@@ -37,6 +37,7 @@ services:
     ports:
       - "127.0.0.1:${GW_PORT_IN:-12525}:25"
       - "127.0.0.1:${GW_PORT_INTERNAL:-12526}:2525"
+      - "127.0.0.1:${GW_PORT_METRICS:-19100}:9100"
     volumes:
       - gw-queue:/var/spool/postfix
       - gw-var:/var/lib/msp

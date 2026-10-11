@@ -12,13 +12,15 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends debconf \
  && echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections \
  && apt-get install -y --no-install-recommends \
-      postfix postfix-pcre python3 ca-certificates procps \
+      postfix postfix-pcre python3 ca-certificates procps util-linux \
  && rm -rf /var/lib/apt/lists/*
 
 # Пользователь, от имени которого Postfix запускает писателя журнала. Не postfix: писатель
 # выполняет код над письмом, и у него не должно быть прав на очередь.
 RUN groupadd --gid 10002 mspjournal \
- && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin mspjournal
+ && useradd --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin mspjournal \
+ && groupadd --gid 10003 mspagent \
+ && useradd --uid 10003 --gid 10003 --no-create-home --shell /usr/sbin/nologin mspagent
 
 # Только стандартная библиотека: образу транспорта не нужны зависимости продукта.
 COPY packages/gateway/msp_gateway /opt/msp/msp_gateway

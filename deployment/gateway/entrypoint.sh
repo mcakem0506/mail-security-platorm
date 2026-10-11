@@ -22,6 +22,11 @@ chmod 0700 "$ROOT/journal"
 
 chown postfix:postfix /var/log/msp
 
+# Собственные данные агента наблюдения: единственное место, куда он вправе писать.
+mkdir -p "$ROOT/agent"
+chown mspagent:mspagent "$ROOT/agent"
+chmod 0750 "$ROOT/agent"
+
 if [ ! -L "$ROOT/config/active" ]; then
   if [ ! -d /bootstrap ]; then
     echo "msp-gateway: нет активной конфигурации и нет /bootstrap — запускать нечего" >&2
@@ -32,4 +37,26 @@ fi
 
 # postfix check создаёт недостающие каталоги очереди на пустом томе и исправляет права.
 postfix -c "$MAIL_CONFIG" check
+# Журнал Postfix создаётся с правами 0600 для root. Агенту нужно чтение, остальным — нет:
+# в журнале адреса отправителей и получателей. Читает только группа агента.
+touch /var/log/msp/postfix.log
+chown root:mspagent /var/log/msp/postfix.log
+chmod 0640 /var/log/msp/postfix.log
+
+# Агент наблюдения: читает журнал и очередь, отдаёт метрики. Работает без прав на изменение
+# Postfix; если он упадёт, почта продолжит ходить (пропадёт только наблюдаемость).
+if [ "${MSP_AGENT:-1}" = "1" ]; then
+  # Снимок очереди снимает root: у агента нет права говорить с postqueue (см. agent.py).
+  (
+    while true; do
+      if postqueue -j > "$ROOT/agent/queue.json.tmp" 2>/dev/null; then
+        chown root:mspagent "$ROOT/agent/queue.json.tmp"
+        chmod 0640 "$ROOT/agent/queue.json.tmp"
+        mv -f "$ROOT/agent/queue.json.tmp" "$ROOT/agent/queue.json"
+      fi
+      sleep 5
+    done
+  ) &
+  setpriv --reuid=mspagent --regid=mspagent --clear-groups     python3 -m msp_gateway.node agent --queue-snapshot "$ROOT/agent/queue.json" --role "${MSP_ROLE:-LAB}" --port "${MSP_METRICS_PORT:-9100}" &
+fi
 exec postfix -c "$MAIL_CONFIG" start-fg

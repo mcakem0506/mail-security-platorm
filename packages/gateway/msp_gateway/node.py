@@ -120,6 +120,45 @@ def cmd_status(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agent(args: argparse.Namespace) -> int:
+    """Наблюдающий агент: работает без прав на изменение Postfix (только чтение журнала и очереди)."""
+    from .agent import Agent, Thresholds, http_sender, run_forever, serve_metrics
+
+    state = Path(STATE_DIR)
+    store = ConfigStore(CONFIG_ROOT, state_dir=STATE_DIR)
+
+    def config() -> tuple[str, str]:
+        return (store.active_version() or "", store.active_checksum() or "")
+
+    agent = Agent(
+        state_dir=state,
+        data_dir=Path(args.data_dir),
+        queue_snapshot=Path(args.queue_snapshot) if args.queue_snapshot else None,
+        log_path=Path(args.log),
+        role=args.role,
+        thresholds=Thresholds(),
+        config_reader=config,
+    )
+    serve_metrics(agent, args.listen, args.port)
+    sender = None
+    url = os.environ.get("MSP_CONTROL_URL", "")
+    token_file = os.environ.get("MSP_CONTROL_TOKEN_FILE", "")
+    if url and token_file:
+        sender = http_sender(url, Path(token_file).read_text(encoding="utf-8").strip(), agent.node_id)
+    run_forever(agent, interval=args.interval, sender=sender)
+    return 0
+
+
+def cmd_drain(args: argparse.Namespace) -> int:
+    """Включить или выключить слив. Запускается от root: нужен ``postfix reload``."""
+    from .state import is_draining, set_drain
+
+    if args.mode in ("on", "off"):
+        set_drain(args.mode == "on", state_dir=Path(STATE_DIR))
+    print(json.dumps({"draining": is_draining(Path(STATE_DIR))}))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="msp-gateway-node")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -132,6 +171,18 @@ def main(argv: list[str] | None = None) -> int:
     apply.set_defaults(func=cmd_apply)
     status = sub.add_parser("status")
     status.set_defaults(func=cmd_status)
+    agent = sub.add_parser("agent")
+    agent.add_argument("--log", default="/var/log/msp/postfix.log")
+    agent.add_argument("--role", default="LAB")
+    agent.add_argument("--queue-snapshot", default="")
+    agent.add_argument("--data-dir", default=os.environ.get("MSP_AGENT_DIR", "/var/lib/msp/agent"))
+    agent.add_argument("--listen", default="0.0.0.0")  # noqa: S104 - порт доступен только во внутренней сети узла
+    agent.add_argument("--port", type=int, default=9100)
+    agent.add_argument("--interval", type=float, default=5.0)
+    agent.set_defaults(func=cmd_agent)
+    drain = sub.add_parser("drain")
+    drain.add_argument("mode", choices=["on", "off", "status"])
+    drain.set_defaults(func=cmd_drain)
     args = parser.parse_args(argv)
     return int(args.func(args))
 

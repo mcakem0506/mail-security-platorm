@@ -24,7 +24,18 @@ PACKAGE = Path(__file__).resolve().parents[2] / "packages" / "gateway" / "msp_ga
 
 #: Модули, которые работают на узле и поэтому не вправе иметь зависимостей кроме стандартной
 #: библиотеки. render и spec — на стороне центра управления, им pydantic можно.
-NODE_MODULES = ("apply", "node", "probes", "journal_writer", "validation", "bundle")
+NODE_MODULES = (
+    "apply",
+    "node",
+    "probes",
+    "journal_writer",
+    "validation",
+    "bundle",
+    "state",
+    "logparser",
+    "metrics",
+    "agent",
+)
 
 
 def third_party_imports(module: str) -> set[str]:
@@ -59,7 +70,8 @@ class TestTheNodeNeedsOnlyTheStandardLibrary:
         code = (
             "import sys; sys.modules['pydantic'] = None; sys.modules['yaml'] = None; "
             "import msp_gateway.node, msp_gateway.journal_writer, msp_gateway.probes, "
-            "msp_gateway.apply, msp_gateway.validation, msp_gateway.bundle; print('ok')"
+            "msp_gateway.apply, msp_gateway.validation, msp_gateway.bundle, msp_gateway.state, "
+            "msp_gateway.logparser, msp_gateway.metrics, msp_gateway.agent; print('ok')"
         )
         completed = subprocess.run(  # nosec B603 - фиксированная команда
             [sys.executable, "-c", code],
@@ -297,3 +309,27 @@ class TestProbes:
             "127.0.0.1", 1, mail_from="a@x.invalid", rcpt_to="secret@x.invalid", timeout=0.5
         )
         assert "secret" not in result.message
+
+
+class TestCommandLine:
+    """Парсер аргументов собирается на каждом запуске контейнера; ошибка в нём роняет узел."""
+
+    @pytest.mark.parametrize("command", ["apply x", "status", "agent", "drain on"])
+    def test_every_command_parses(self, command: str) -> None:
+        from msp_gateway import node
+
+        parser_calls = []
+        original = node.argparse.ArgumentParser.parse_args
+
+        def spy(self, args=None, namespace=None):  # type: ignore[no-untyped-def]
+            parsed = original(self, args, namespace)
+            parser_calls.append(parsed)
+            return parsed
+
+        node.argparse.ArgumentParser.parse_args = spy  # type: ignore[method-assign]
+        try:
+            with pytest.raises(SystemExit) as info:
+                node.main([*command.split(), "--help"])
+        finally:
+            node.argparse.ArgumentParser.parse_args = original  # type: ignore[method-assign]
+        assert info.value.code == 0
