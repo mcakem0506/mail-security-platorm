@@ -489,6 +489,38 @@ class Stack:
         ]
         return "\n".join(f"--- {name} ---\n{text}" for name, text in parts)
 
+    # --- сбои соседей ----------------------------------------------------------------------
+    def container(self, service: str) -> str:
+        return f"{self.project}-{service}-1"
+
+    def stop_service(self, service: str) -> None:
+        """Остановить соседа целиком: для шлюза это «хост недоступен», а не «хост отказал»."""
+        docker("stop", "-t", "2", self.container(service), timeout=60)
+
+    def start_service(self, service: str) -> None:
+        docker("start", self.container(service), timeout=60)
+        control = {
+            "fake-exchange": self.exchange1,
+            "fake-exchange-2": self.exchange2,
+            "outbound-sink": self.sink,
+        }[service]
+        control.wait_up()
+
+    def wait_until(
+        self, condition, *, timeout: float = 60.0, interval: float = 0.5, what: str = "условие"
+    ) -> None:  # type: ignore[no-untyped-def]
+        """Дождаться условия. Слепые паузы в этих тестах недопустимы: они делают тест либо
+        медленным, либо ненадёжным, а чаще и тем и другим."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if condition():
+                return
+            time.sleep(interval)
+        raise TimeoutError(f"не дождались: {what}\n{self.postfix_log()[-2500:]}")
+
+    def queue_ids(self) -> set[str]:
+        return {str(item.get("queue_id")) for item in self.queue()}
+
     # --- двойники --------------------------------------------------------------------------
     @property
     def exchange1(self) -> Control:
