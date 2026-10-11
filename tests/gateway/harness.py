@@ -367,6 +367,49 @@ class Stack:
         except (ValueError, IndexError):
             return {"outcome": "ERROR", "message": (result.stdout + result.stderr)[-500:]}
 
+    def apply_crafted(
+        self,
+        spec: GatewaySpec,
+        mutate: dict[str, object],
+        recipients: list[Recipient] | None = None,
+    ) -> dict[str, object]:
+        """Применить пакет, в котором файлы изменены ПОСЛЕ генерации, с пересчитанной суммой.
+
+        Так выглядит конфигурация, написанная руками или испорченная по дороге: сумма верна, потому
+        что её пересчитали, а смысл другой. Сверка суммы такую не поймает по построению — ловить её
+        должны проверки postfix check и проверка здоровья после перезагрузки.
+        """
+        from msp_gateway.bundle import bundle_checksum
+
+        self._bundle_counter += 1
+        version = self._bundle_counter + 1
+        config = render(spec, recipients if recipients is not None else LAB_RECIPIENTS, version=version)
+        files = dict(config.files)
+        for name, change in mutate.items():
+            files[name] = change(files[name].decode()).encode()  # type: ignore[operator]
+        manifest = dict(config.manifest)
+        manifest["checksum"] = bundle_checksum(files)
+        directory = self.workdir / "bundles" / f"c{version}"
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, content in files.items():
+            (directory / name).write_bytes(content)
+        (directory / "manifest.json").write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        ports = f"--internal-port {spec.internal.port}" if spec.internal.enabled else ""
+        result = self.exec(
+            f"python3 -m msp_gateway.node apply /bundles/c{version} "
+            f"--inbound-port {spec.inbound.port} {ports}",
+            check=False,
+        )
+        try:
+            return dict(json.loads(result.stdout.strip().splitlines()[-1]))
+        except (ValueError, IndexError):
+            return {"outcome": "ERROR", "message": (result.stdout + result.stderr)[-500:]}
+
+    def node_status(self) -> dict[str, object]:
+        return dict(
+            json.loads(self.exec("python3 -m msp_gateway.node status").stdout.strip().splitlines()[-1])
+        )
+
     # --- жизненный цикл --------------------------------------------------------------------
     def up(self, spec: GatewaySpec | None = None, recipients: list[Recipient] | None = None) -> None:
         self.issue_certificates()

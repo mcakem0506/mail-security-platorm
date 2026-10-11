@@ -104,19 +104,21 @@ class ControlHandler(BaseHTTPRequestHandler):
     def log_message(self, *_args: object) -> None:  # тишина: тестам нужен только результат
         return
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/health":
             self._send({"ok": True})
         elif self.path == "/state":
             with STATE_LOCK:
-                self._send({k: v for k, v in STATE.items() if k != "received"} | {"count": len(STATE["received"])})  # type: ignore[arg-type]
+                summary = {k: v for k, v in STATE.items() if k != "received"}
+                summary["count"] = len(STATE["received"])  # type: ignore[arg-type]
+                self._send(summary)
         elif self.path == "/received":
             with STATE_LOCK:
                 self._send(list(STATE["received"]))  # type: ignore[call-overload]
         else:
             self._send({"error": "unknown"}, 404)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         payload = json.loads(self.rfile.read(length) or b"{}")
         with STATE_LOCK:

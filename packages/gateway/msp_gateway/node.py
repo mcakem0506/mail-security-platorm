@@ -15,10 +15,11 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from .apply import ConfigStore, Outcome, apply_bundle
-from .probes import ProbeState, banner_probe, open_relay_probe
+from .probes import ProbeResult, ProbeState, banner_probe, open_relay_probe
 
 CONFIG_ROOT = os.environ.get("MSP_CONFIG_ROOT", "/var/lib/msp/config")
 STATE_DIR = os.environ.get("MSP_STATE_DIR", "/var/lib/msp/state")
@@ -31,7 +32,22 @@ def load_bundle(directory: Path) -> tuple[dict[str, bytes], dict[str, object]]:
     return files, manifest
 
 
-def make_healthcheck(inbound_port: int | None, internal_port: int | None, host: str = "127.0.0.1"):  # type: ignore[no-untyped-def]
+def _wait_for_greeting(host: str, port: int, deadline_seconds: float) -> ProbeResult:
+    """Опрашивать слушатель до срока. Возвращает первый ответ или последнюю неудачу."""
+    deadline = time.monotonic() + deadline_seconds
+    result = banner_probe(host, port)
+    while result.state is ProbeState.UNREACHABLE and time.monotonic() < deadline:
+        time.sleep(0.5)
+        result = banner_probe(host, port)
+    return result
+
+
+def make_healthcheck(
+    inbound_port: int | None,
+    internal_port: int | None,
+    host: str = "127.0.0.1",
+    deadline_seconds: float = 20.0,
+):  # type: ignore[no-untyped-def]
     """Проверка после перезагрузки: слушатели отвечают, а шлюз по-прежнему не открытый релей.
 
     Проверка открытого релея входит в проверку здоровья, а не только в тесты, потому что
@@ -44,15 +60,24 @@ def make_healthcheck(inbound_port: int | None, internal_port: int | None, host: 
         for name, port in (("inbound", inbound_port), ("internal", internal_port)):
             if port is None:
                 continue
-            greeting = banner_probe(host, port)
-            if greeting.state is not ProbeState.ACCEPTED:
+            # `postfix reload` асинхронен: мастер перечитывает конфигурацию и перезапускает
+            # службы, на что под нагрузкой уходит заметное время. Первая версия ждала
+            # фиксированную секунду и принимала запоздавший слушатель за неисправный — ровно та
+            # гонка, из-за которой исправная конфигурация откатывалась. Слушатель опрашивается
+            # до срока, и неисправным он считается только если не ответил за весь срок.
+            greeting = _wait_for_greeting(host, port, deadline_seconds)
+            # Жив — значит ответил ЛЮБЫМ приветствием SMTP. Внутренний слушатель отвечает чужим
+            # отказом при подключении (554), а проверка идёт с 127.0.0.1, то есть как чужая:
+            # отказ здесь — правильный ответ закрытого порта, а не признак неисправности.
+            # Неисправность — это когда ответа нет вовсе.
+            if greeting.state is ProbeState.UNREACHABLE:
                 problems.append(f"слушатель {name} не отвечает приветствием ({greeting.stage})")
                 continue
             relay = open_relay_probe(host, port)
-            if not relay.is_safe_for_relay_test:
-                problems.append(
-                    f"слушатель {name} принял внешнего получателя с недоверенного адреса или недоступен"
-                )
+            if relay.state is ProbeState.UNREACHABLE:
+                problems.append(f"слушатель {name} не удалось проверить на открытый релей")
+            elif not relay.is_safe_for_relay_test:
+                problems.append(f"слушатель {name} принял внешнего получателя с недоверенного адреса")
         return problems
 
     return check

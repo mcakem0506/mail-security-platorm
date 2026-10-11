@@ -17,10 +17,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 
-from .bundle import bundle_checksum
+from .bundle import (
+    BundleError,
+    bundle_checksum,
+    check_main_cf,
+)
 from .spec import (
     DeploymentMode,
     Direction,
@@ -38,76 +41,6 @@ JOURNAL_DOMAIN = "journal.msp.invalid"
 #: Каталог изменяемых состояний. Живёт вне версий конфигурации: смена версии не должна сбрасывать
 #: режим слива или состояние справочника получателей.
 DEFAULT_STATE_DIR = "/var/lib/msp/state"
-
-#: Параметры, которые генератор вправе выпустить в main.cf. Любой другой ключ — ошибка генерации.
-MAIN_CF_PARAMETERS = frozenset(
-    {
-        "compatibility_level",
-        "meta_directory",
-        "myhostname",
-        "myorigin",
-        "mydestination",
-        "local_recipient_maps",
-        "local_transport",
-        "alias_maps",
-        "alias_database",
-        "mynetworks",
-        "inet_interfaces",
-        "inet_protocols",
-        "smtpd_banner",
-        "biff",
-        "append_dot_mydomain",
-        "disable_vrfy_command",
-        "smtpd_helo_required",
-        "smtpd_forbid_bare_newline",
-        "smtpd_forbid_bare_newline_exclusions",
-        "smtpd_peername_lookup",
-        "maillog_file",
-        "maillog_file_prefixes",
-        "relay_domains",
-        "relay_recipient_maps",
-        "transport_maps",
-        "smtpd_reject_unlisted_recipient",
-        "default_transport",
-        "message_size_limit",
-        "mailbox_size_limit",
-        "smtpd_recipient_limit",
-        "header_size_limit",
-        "smtpd_client_connection_count_limit",
-        "smtpd_client_connection_rate_limit",
-        "anvil_rate_time_unit",
-        "default_process_limit",
-        "smtpd_timeout",
-        "smtpd_starttls_timeout",
-        "maximal_queue_lifetime",
-        "bounce_queue_lifetime",
-        "queue_minfree",
-        "hopcount_limit",
-        "smtpd_tls_cert_file",
-        "smtpd_tls_key_file",
-        "smtpd_tls_CAfile",
-        "smtpd_tls_security_level",
-        "smtpd_tls_protocols",
-        "smtpd_tls_mandatory_protocols",
-        "smtp_tls_CAfile",
-        "smtp_tls_security_level",
-        "smtp_tls_protocols",
-        "smtp_tls_mandatory_protocols",
-        "smtp_tls_loglevel",
-        "smtpd_tls_loglevel",
-        "smtpd_tls_received_header",
-        "smtp_tls_session_cache_database",
-        "smtpd_tls_session_cache_database",
-        "tls_random_source",
-        "smtpd_restriction_classes",
-        "msp_in_client",
-        "msp_in_recipient",
-        "msp_out_client",
-        "msp_out_recipient",
-    }
-)
-
-_KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*) =( |$)")
 
 
 class RenderError(RuntimeError):
@@ -183,6 +116,12 @@ def render_main_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str, log_fi
         "append_dot_mydomain = no",
         "disable_vrfy_command = yes",
         "smtpd_helo_required = yes",
+        # Маршрут внутри адреса — классический обход проверки релея: «user%внешний@наш» проходит
+        # проверку по домену «наш», а доставляется на «внешний». Шлюз принимает адреса только в
+        # обычной форме, поэтому все три приёма выключены явно, а не по умолчанию Postfix.
+        "allow_percent_hack = no",
+        "swap_bangpath = no",
+        "allow_untrusted_routing = no",
         f"smtpd_peername_lookup = {'yes' if spec.inbound.peername_lookup else 'no'}",
         # SMTP smuggling (ТЗ §63): голый LF не нормализуется, а отвергается.
         "smtpd_forbid_bare_newline = reject",
@@ -243,17 +182,15 @@ def render_main_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str, log_fi
 
 
 def _assert_whitelisted(main_cf: str) -> None:
-    """Второй слой защиты от инъекции: в main.cf только известные параметры."""
-    for number, line in enumerate(main_cf.splitlines(), start=1):
-        if not line or line.startswith("#"):
-            continue
-        match = _KEY_LINE.match(line)
-        if match is None:
-            raise RenderError(f"main.cf:{number}: строка не похожа на «параметр = значение»")
-        if match.group(1) not in MAIN_CF_PARAMETERS:
-            raise RenderError(f"main.cf:{number}: параметр вне белого списка генератора")
-    if "\r" in main_cf or "\0" in main_cf:
-        raise RenderError("main.cf: управляющий символ в результате генерации")
+    """Второй слой защиты от инъекции: в main.cf только известные параметры.
+
+    Списки общие с узлом (:mod:`bundle`): то, что допускает узел, и то, что генерирует центр,
+    не могут разойтись.
+    """
+    try:
+        check_main_cf(main_cf)
+    except BundleError as exc:
+        raise RenderError(str(exc)) from exc
 
 
 def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> str:
