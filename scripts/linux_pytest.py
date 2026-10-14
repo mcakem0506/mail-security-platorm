@@ -7,6 +7,11 @@
 
     python scripts/linux_pytest.py tests/unit/test_gateway_apply.py
     python scripts/linux_pytest.py tests/unit -k gateway
+    python scripts/linux_pytest.py --sandbox tests/unit/test_attachment_sandbox.py
+
+Ключ ``--sandbox`` добавляет библиотеки изолированного разбора вложений (7z, RAR, PDF, QR): без
+них эти тесты не запустятся. Пределы процесса (RLIMIT_*) проверяются только здесь — на Windows
+модуля ``resource`` нет.
 
 Репозиторий монтируется только для чтения, без ``.venv`` и ``node_modules``; пакеты ставятся
 в контейнере, на хост ничего не пишется.
@@ -22,19 +27,26 @@ REPO = Path(__file__).resolve().parent.parent
 
 #: Зависимости, которых хватает для тестов без базы данных. Для тестов с БД используйте CI.
 DEPENDENCIES = "pytest pydantic pyyaml cryptography prometheus-client"
+SANDBOX_DEPENDENCIES = "py7zr rarfile pypdfium2 opencv-python-headless numpy idna nh3 tldextract"
 
 
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__)
         return 2
+    dependencies = DEPENDENCIES
+    pythonpath = "packages/gateway:packages/shared-contracts:packages/mail-parser"
+    if "--sandbox" in argv:
+        argv = [item for item in argv if item != "--sandbox"]
+        dependencies = f"{DEPENDENCIES} {SANDBOX_DEPENDENCIES}"
+        pythonpath += ":packages/attachment-sandbox:packages/detection-engine:tests"
     pytest_args = " ".join(f"'{item}'" for item in argv)
     script = (
         "mkdir -p /w/repo && cd /src && "
         "tar --exclude=.venv --exclude=node_modules --exclude=.git --exclude=dist "
         "-cf - . | tar -xf - -C /w/repo && cd /w/repo && "
-        f"pip install -q {DEPENDENCIES} 2>&1 | tail -1; "
-        "PYTHONPATH=packages/gateway:packages/shared-contracts:packages/mail-parser "
+        f"pip install -q {dependencies} 2>&1 | tail -1; "
+        f"PYTHONPATH={pythonpath} "
         f"python -m pytest --noconftest -p no:cacheprovider -rs -q {pytest_args}"
     )
     completed = subprocess.run(  # noqa: S603  # nosec B603 B607 - фиксированный docker

@@ -42,6 +42,16 @@ qr = [
   "opencv-python-headless>=4.10",
   "numpy>=1.26",
 ]
+# Изолированный разбор вложений (ТЗ 1.1 §55-§57). Эти библиотеки парсят недоверенные байты, поэтому
+# подключаются только внутри отдельных процессов-воркеров (``msp_attachment_sandbox``) и не
+# импортируются ни API, ни основным воркером.
+sandbox = [
+  "py7zr>=0.22",
+  "rarfile>=4.2",
+  "pypdfium2>=4.30",
+  "opencv-python-headless>=4.10",
+  "numpy>=1.26",
+]
 dev = [
   "pytest>=8",
   "pytest-cov>=5",
@@ -59,6 +69,7 @@ where = [
   "apps/worker",
   "packages/shared-contracts",
   "packages/gateway",
+  "packages/attachment-sandbox",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",

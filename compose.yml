@@ -74,6 +74,10 @@ services:
 
   worker-mail:
     <<: *python-base
+    # Общий том с очередью песочницы. Переменная MSP_SANDBOX_SPOOL приходит из .env (env_file).
+    volumes:
+      - content-data:/var/lib/msp/content
+      - sandbox-spool:/var/lib/msp/sandbox
     # Mail parsing has no outbound access: the parser must never reach the network (ТЗ 29).
     command: celery -A msp_worker.app.celery_app worker -Q mail_parse,attachment_analysis,campaign -c ${WORKER_MAIL_CONCURRENCY:-2} -l info
     networks: [data]
@@ -156,6 +160,32 @@ services:
       retries: 5
 
   # Optional supplementary scanner. Not equivalent to enterprise malware protection (ТЗ 12.3).
+  # Песочница вложений (ТЗ 1.1 §55). Включается профилем и переменной MSP_SANDBOX_SPOOL в .env:
+  #
+  #     docker compose --profile sandbox up -d
+  #     MSP_SANDBOX_SPOOL=/var/lib/msp/sandbox
+  #
+  # Без сети вообще (network_mode: none), непривилегированный пользователь, корневая файловая
+  # система только для чтения, рабочий каталог в памяти. Единственная связь с воркером - каталог
+  # очереди в общем томе. Если сервис не отвечает, воркер получает TIMEOUT и помечает вложение
+  # непросмотренным; на разбор внутри самого воркера он молча не переходит.
+  attachment-sandbox:
+    build:
+      context: .
+      dockerfile: infrastructure/compose/Dockerfile.sandbox
+    restart: unless-stopped
+    profiles: [sandbox]
+    network_mode: none
+    read_only: true
+    user: "10004:10004"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 3g
+    cpus: 2
+    tmpfs: ["/tmp:size=64m,noexec,nosuid"]
+    volumes: [sandbox-spool:/spool]
+
   clamav:
     image: clamav/clamav:1.4
     restart: unless-stopped
@@ -176,6 +206,7 @@ volumes:
   object-data:
   clamav-data:
   console-dist:
+  sandbox-spool:
 
 secrets:
   msp_secret_key:

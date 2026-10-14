@@ -168,8 +168,15 @@ class TestArchiveSafety:
         assert "CORRUPT_ARCHIVE" in report.flags
 
     def test_unsupported_format_reported_not_executed(self) -> None:
-        report = inspect_archive(b"Rar!\x1a\x07\x00rest", "rar")
+        # CAB безопасного разбора не имеет; 7z и RAR с 1.1 идут в изолированный процесс.
+        report = inspect_archive(b"MSCF\x00\x00\x00\x00rest", "cab")
         assert "UNSUPPORTED_ARCHIVE_FORMAT" in report.flags
+
+    def test_a_damaged_rar_is_corrupt_and_listing_only_never_clean(self) -> None:
+        report = inspect_archive(b"Rar!\x1a\x07\x00rest", "rar")
+        assert "CORRUPT_ARCHIVE" in report.flags
+        assert "LISTING_ONLY" in report.flags
+        assert not report.entries
 
 
 class TestFileTypeDetection:

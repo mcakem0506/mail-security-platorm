@@ -1,0 +1,45 @@
+# Песочница вложений (ТЗ 1.1 §55): разбор 7z, RAR и PDF в контейнере без сети.
+#
+# Что даёт образ вместе с настройками в compose.yml:
+#   - непривилегированный пользователь (10004);
+#   - файловая система только для чтения, рабочий каталог в памяти;
+#   - никаких сетевых интерфейсов (network_mode: none) - связь только через каталог-очередь;
+#   - пределы процесса на каждое задание (RLIMIT_*), которые воркер ставит себе сам.
+FROM python:3.12-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/opt/sandbox \
+    OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1
+
+# Обновления безопасности дистрибутива берутся при сборке, как и в основном образе.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY infrastructure/compose/sandbox-requirements.txt /tmp/sandbox-requirements.txt
+RUN pip install -r /tmp/sandbox-requirements.txt && rm /tmp/sandbox-requirements.txt
+
+COPY packages/attachment-sandbox/msp_attachment_sandbox /opt/sandbox/msp_attachment_sandbox
+
+# Каталоги очереди открыты для записи всем: задания пишет родитель, результаты - этот сервис, и
+# оба должны уметь убирать за собой. Имена файлов - случайные 128-битные идентификаторы.
+RUN groupadd --gid 10004 sandbox \
+    && useradd --uid 10004 --gid 10004 --no-create-home --shell /usr/sbin/nologin sandbox \
+    && mkdir -p /spool/in /spool/out /spool/work \
+    && chmod 0777 /spool/in /spool/out \
+    && chown -R sandbox:sandbox /spool
+
+USER 10004:10004
+VOLUME /spool
+
+# Сервис раз в несколько секунд отмечается в рабочем каталоге; устаревшая отметка - сервис завис.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.stat('/spool/work/alive').st_mtime < 60 else 1)"]
+
+CMD ["python", "-m", "msp_attachment_sandbox.service", "/spool"]
