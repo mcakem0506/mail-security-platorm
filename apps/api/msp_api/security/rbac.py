@@ -88,6 +88,22 @@ class Permission(StrEnum):
     #: в реестре (``gap:manage``).
     VALIDATE_GAP = "gap:validate"
 
+    # транспорт почты (ТЗ 1.1 §42, §43)
+    VIEW_GATEWAY = "gateway:read"
+    VIEW_GATEWAY_CONFIG = "gateway:config:read"
+    VALIDATE_GATEWAY_CONFIG = "gateway:config:validate"
+    #: Применение конфигурации меняет то, кого и как принимает почтовая граница организации.
+    ACTIVATE_GATEWAY_CONFIG = "gateway:config:activate"
+    ROLLBACK_GATEWAY_CONFIG = "gateway:config:rollback"
+    VIEW_GATEWAY_QUEUE = "gateway:queue:read"
+    #: Слив узла останавливает приём почты на нём: действие администратора, не аналитика.
+    DRAIN_GATEWAY_NODE = "gateway:node:drain"
+    SYNC_GATEWAY_RECIPIENTS = "gateway:recipient:sync"
+    VIEW_GATEWAY_TLS = "gateway:tls:read"
+    #: Повторить доставку отложенной почты. Удаление писем из очереди через панель не предусмотрено
+    #: (только ручной разбор на узле): оно необратимо и в 1.1 не автоматизируется.
+    ADMIN_GATEWAY_QUEUE = "gateway:queue:admin"
+
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
@@ -101,6 +117,9 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.VIEW_INCIDENTS,
     Permission.VIEW_REAL_FLOW,
     Permission.VIEW_READINESS,
+    Permission.VIEW_GATEWAY,
+    Permission.VIEW_GATEWAY_QUEUE,
+    Permission.VIEW_GATEWAY_TLS,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.CLASSIFY_INCIDENT,
@@ -135,6 +154,13 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.VIEW_AUDIT,
     Permission.PROMOTE_REAL_FLOW,
     Permission.VALIDATE_GAP,
+    Permission.VIEW_GATEWAY_CONFIG,
+    Permission.VALIDATE_GATEWAY_CONFIG,
+    Permission.ACTIVATE_GATEWAY_CONFIG,
+    Permission.ROLLBACK_GATEWAY_CONFIG,
+    Permission.DRAIN_GATEWAY_NODE,
+    Permission.SYNC_GATEWAY_RECIPIENTS,
+    Permission.ADMIN_GATEWAY_QUEUE,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.
@@ -146,6 +172,15 @@ _PLATFORM_ADMIN: frozenset[Permission] = frozenset(
         Permission.MANAGE_PROVIDERS,
         Permission.MANAGE_INTEGRATIONS,
         Permission.VIEW_AUDIT,
+        # Платформа эксплуатируется администратором платформы: узлы, очередь, TLS и слив.
+        # Содержимое писем остаётся недоступным (см. комментарий выше).
+        Permission.VIEW_GATEWAY,
+        Permission.VIEW_GATEWAY_CONFIG,
+        Permission.VALIDATE_GATEWAY_CONFIG,
+        Permission.VIEW_GATEWAY_QUEUE,
+        Permission.DRAIN_GATEWAY_NODE,
+        Permission.ADMIN_GATEWAY_QUEUE,
+        Permission.VIEW_GATEWAY_TLS,
     }
 )
 

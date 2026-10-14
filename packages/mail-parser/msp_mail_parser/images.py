@@ -454,6 +454,7 @@ def inspect_images(
     decode: bool = True,
     max_images: int = 20,
     max_bytes: int = 4 * 1024 * 1024,
+    forced: frozenset[str] = frozenset(),
 ) -> QrReport:
     """Look for QR codes among a message's images (ТЗ 1.0.3 §38).
 
@@ -469,9 +470,12 @@ def inspect_images(
     for name, data in images[:max_images]:
         if not data or len(data) > max_bytes:
             continue
-        info = read_image_header(data)
-        if not info.qr_shaped(prompted=report.scan_prompt):
-            continue
+        # Страница PDF, отрисованная песочницей, — не «картинка, похожая на QR»: QR на ней может
+        # занимать угол листа, и фильтр по форме отбросил бы именно её.
+        if name not in forced:
+            info = read_image_header(data)
+            if not info.qr_shaped(prompted=report.scan_prompt):
+                continue
         report.candidate_images.append(name[:255])
         candidates.append((name[:255], data))
 

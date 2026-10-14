@@ -428,6 +428,14 @@ sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key
 у `detection_gaps` добавлены три колонки для подтверждения пробела на реальной почте и причина
 статуса `VALIDATION`, у `validation_messages` — ссылка на пробел для подтверждённого пропуска.
 
+Голова на момент MSP 1.1 — `a1c4e7b90d11`. Новые таблицы транспорта: `transport_nodes`,
+`transport_config_versions`, `accepted_recipients`, `recipient_sync_runs`, `transport_certificates`,
+`mail_transport_events`, `transport_messages`. Существующие таблицы не меняются. Шлюз
+разворачивается отдельно (`deployment/gateway/`, см. `docs/GATEWAY_OPERATIONS.md`), песочница
+вложений — профилем Compose `sandbox`, лабораторный стенд — профилем `gateway-test`
+(`docs/GATEWAY_LAB_RUNBOOK.md`). Токен узла — `MSP_GATEWAY_INGEST_TOKEN` (не короче 32 символов,
+иначе приём событий отвечает 503). **MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
+
 Таблица `validation_messages` живёт отдельно от `mail_messages` намеренно: обычное письмо
 удаляется по сроку хранения почты, запись валидации — по своему, и объединение означало бы либо
 потерю измерений вместе с почтой, либо хранение почты ради измерений.
