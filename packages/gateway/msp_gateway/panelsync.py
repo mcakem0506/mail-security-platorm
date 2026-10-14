@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import subprocess  # nosec B404 - фиксированная команда postqueue
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -81,6 +82,7 @@ class SyncResult:
     outcome: str = ""
     detail: str = ""
     drain_changed: bool = False
+    flushed: bool = False
     panel_reachable: bool = True
 
 
@@ -108,6 +110,7 @@ def sync_once(
     report: Report,
     *,
     drain_setter: Callable[[bool], None] | None = None,
+    flusher: Callable[[], bool] | None = None,
 ) -> SyncResult:
     """Один проход синхронизации."""
     result = SyncResult()
@@ -124,6 +127,12 @@ def sync_once(
         (drain_setter or (lambda on: set_drain(on, state_dir=state_dir)))(wanted)
         result.drain_changed = True
         report("drain", {"draining": wanted})
+
+    # Повтор доставки отложенной почты: разовая команда, письма не удаляются и не меняются.
+    if data.get("flush") is True and flusher is not None:
+        done = flusher()
+        report("flush_done" if done else "flush_failed", {})
+        result.flushed = done
 
     try:
         parsed = _bundle_from(data)
@@ -162,6 +171,20 @@ def detect_drift(store: ConfigStore) -> dict[str, object] | None:
     if active is None or disk is None or active == disk:
         return None
     return {"expected": active[:64], "found": disk[:64]}
+
+
+def postfix_flush() -> bool:
+    """``postqueue -f``: попросить Postfix повторить доставку всего отложенного."""
+    try:
+        completed = subprocess.run(  # nosec B603 B607 - фиксированная команда
+            ["postqueue", "-f"],  # noqa: S607
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
 
 
 def drift_state(store: ConfigStore) -> bool | None:

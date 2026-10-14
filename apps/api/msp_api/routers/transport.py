@@ -36,7 +36,7 @@ from ..db.models_transport import (
 from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import transport
+from ..services import transport, transport_alerts
 from ..services.storage import build_storage
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ QueueReader = Annotated[Actor, Depends(require_permission(Permission.VIEW_GATEWA
 NodeDrainer = Annotated[Actor, Depends(require_permission(Permission.DRAIN_GATEWAY_NODE))]
 RecipientSyncer = Annotated[Actor, Depends(require_permission(Permission.SYNC_GATEWAY_RECIPIENTS))]
 TlsReader = Annotated[Actor, Depends(require_permission(Permission.VIEW_GATEWAY_TLS))]
+QueueAdmin = Annotated[Actor, Depends(require_permission(Permission.ADMIN_GATEWAY_QUEUE))]
 
 
 def _audit(
@@ -97,6 +98,15 @@ def _node_out(node: TransportNode, settings: Settings) -> dict[str, Any]:
         "drain_requested": node.drain_requested,
         "drain_requested_by": node.drain_requested_by,
         "drain_requested_at": node.drain_requested_at,
+        "flush_requested": node.flush_requested,
+        "oldest_message_seconds": node.oldest_message_seconds,
+        "exchange_ok": node.exchange_ok,
+        "open_relay_safe": node.open_relay_safe,
+        "config_drift": node.config_drift,
+        "collector_report_age": node.collector_report_age,
+        "shadow_pending_seconds": node.shadow_pending_seconds,
+        "probes": (node.details or {}).get("probes", {}),
+        "last_apply": (node.details or {}).get("last_apply"),
     }
 
 
@@ -173,6 +183,37 @@ def resume_node(node_id: str, request: Request, session: DbSession, actor: NodeD
         {"node": node.node_id},
     )
     return {"node_id": node.node_id, "drain_requested": False}
+
+
+@router.post("/nodes/{node_id}/flush")
+def flush_node(node_id: str, request: Request, session: DbSession, actor: QueueAdmin) -> dict[str, Any]:
+    """Повторить доставку отложенной почты. Безопасно: письма не удаляются и не изменяются."""
+    node = _node_or_404(session, actor, node_id)
+    node.flush_requested = True
+    node.flush_requested_by = actor.email
+    node.flush_requested_at = transport.now()
+    _audit(
+        session,
+        actor,
+        request,
+        AuditAction.TRANSPORT_NODE_FLUSH,
+        "transport_node",
+        node.id,
+        {"node": node.node_id},
+    )
+    return {"node_id": node.node_id, "flush_requested": True}
+
+
+@router.get("/alerts")
+def list_alerts(session: DbSession, actor: GatewayReader, settings: AppSettings) -> dict[str, Any]:
+    alerts = transport_alerts.compute(session, actor.organization_id, settings)
+    return {
+        "items": [alert.as_dict() for alert in alerts],
+        "counts": {
+            level: sum(1 for a in alerts if a.severity == level)
+            for level in (transport_alerts.CRITICAL, transport_alerts.WARNING, transport_alerts.INFO)
+        },
+    }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -507,6 +548,7 @@ def agent_config(
         "checksum": current.checksum if current else None,
         "bundle": current.bundle if current else None,
         "drain": node.drain_requested,
+        "flush": node.flush_requested,
     }
 
 

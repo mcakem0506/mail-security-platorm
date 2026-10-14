@@ -62,6 +62,7 @@ class AuditAction:
     TRANSPORT_CONFIG_ROLLED_BACK = "transport.config_rolled_back"
     TRANSPORT_NODE_DRAIN = "transport.node_drain"
     TRANSPORT_NODE_RESUME = "transport.node_resume"
+    TRANSPORT_NODE_FLUSH = "transport.node_flush"
     TRANSPORT_RECIPIENTS_SYNC = "transport.recipients_sync"
     TRANSPORT_QUEUE_VIEWED = "transport.queue_viewed"
     # Detection quality, rule lifecycle and analyst decisions (ТЗ 1.0.3 §56).

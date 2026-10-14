@@ -100,6 +100,9 @@ class Permission(StrEnum):
     DRAIN_GATEWAY_NODE = "gateway:node:drain"
     SYNC_GATEWAY_RECIPIENTS = "gateway:recipients:sync"
     VIEW_GATEWAY_TLS = "gateway:tls:read"
+    #: Повторить доставку отложенной почты. Удаление писем из очереди через панель не предусмотрено
+    #: (только ручной разбор на узле): оно необратимо и в 1.1 не автоматизируется.
+    ADMIN_GATEWAY_QUEUE = "gateway:queue:admin"
 
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
@@ -157,6 +160,7 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.ROLLBACK_GATEWAY_CONFIG,
     Permission.DRAIN_GATEWAY_NODE,
     Permission.SYNC_GATEWAY_RECIPIENTS,
+    Permission.ADMIN_GATEWAY_QUEUE,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.
@@ -175,6 +179,7 @@ _PLATFORM_ADMIN: frozenset[Permission] = frozenset(
         Permission.VALIDATE_GATEWAY_CONFIG,
         Permission.VIEW_GATEWAY_QUEUE,
         Permission.DRAIN_GATEWAY_NODE,
+        Permission.ADMIN_GATEWAY_QUEUE,
         Permission.VIEW_GATEWAY_TLS,
     }
 )

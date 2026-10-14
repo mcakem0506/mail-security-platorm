@@ -162,6 +162,54 @@ class TestDrain:
         assert drains == []
 
 
+class TestFlush:
+    def run_with(self, tmp_path: Path, data: dict[str, Any], flusher) -> tuple[Any, Recorder]:  # type: ignore[no-untyped-def]
+        rec = Recorder()
+        result = sync_once(
+            lambda: data,
+            Store("c1"),
+            tmp_path,
+            rec.apply,
+            rec.report,
+            flusher=flusher,  # type: ignore[arg-type]
+        )
+        return result, rec
+
+    def test_a_flush_command_is_executed_once_and_reported(self, tmp_path: Path) -> None:
+        calls: list[int] = []
+        result, rec = self.run_with(
+            tmp_path, {**reply(1, "c1"), "flush": True}, lambda: calls.append(1) or True
+        )
+        assert calls == [1]
+        assert result.flushed is True
+        assert ("flush_done", {}) in rec.events
+
+    def test_a_failed_flush_is_reported_as_failed(self, tmp_path: Path) -> None:
+        _, rec = self.run_with(tmp_path, {**reply(1, "c1"), "flush": True}, lambda: False)
+        assert ("flush_failed", {}) in rec.events
+        assert all(kind != "flush_done" for kind, _ in rec.events)
+
+    @pytest.mark.parametrize("value", [False, None, "yes", 1])
+    def test_no_command_means_no_flush(self, tmp_path: Path, value: object) -> None:
+        calls: list[int] = []
+        self.run_with(tmp_path, {**reply(1, "c1"), "flush": value}, lambda: calls.append(1) or True)
+        assert calls == []
+
+    def test_flush_does_not_wait_for_a_broken_bundle(self, tmp_path: Path) -> None:
+        calls: list[int] = []
+        self.run_with(
+            tmp_path,
+            {"flush": True, "bundle": {"files": "broken", "manifest": {}}},
+            lambda: calls.append(1) or True,
+        )
+        assert calls == [1]
+
+    def test_the_real_flush_never_raises_when_postqueue_is_absent(self) -> None:
+        from msp_gateway.panelsync import postfix_flush
+
+        assert postfix_flush() in (True, False)
+
+
 class TestDrift:
     def test_equal_checksums_mean_no_drift(self) -> None:
         assert detect_drift(Store("abc", "abc")) is None  # type: ignore[arg-type]

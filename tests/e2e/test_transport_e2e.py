@@ -631,3 +631,268 @@ class TestCollectorContract:
 
         out = _header_safe("<a\r\nX-Evil: 1\x00\u0416@x>", 998)
         assert "\n" not in out and "\r" not in out and "\x00" not in out
+
+
+def beat(**extra: object) -> dict[str, object]:
+    return {"type": "heartbeat", "at": datetime.now(UTC).isoformat(), **extra}
+
+
+def post_events(client, *events: dict[str, object]):  # type: ignore[no-untyped-def]
+    return client.post(
+        "/api/v1/gateway-agent/events",
+        json={"node_id": NODE, "events": list(events)},
+        headers=node_headers(),
+    )
+
+
+def codes(person: Person) -> dict[str, str]:
+    return {a["code"]: a["severity"] for a in person.get("/api/v1/gateway/alerts").json()["items"]}
+
+
+HEALTHY = {
+    "queue_messages": 3,
+    "pressure": "NORMAL",
+    "oldest_message_seconds": 5.0,
+    "exchange_ok": True,
+    "open_relay_safe": True,
+    "config_drift": False,
+    "collector_report_age": 10.0,
+    "shadow_pending_seconds": 0.0,
+}
+
+
+def certificate_event(usage: str, days: int, fingerprint: str = "a" * 64) -> dict[str, object]:
+    now = datetime.now(UTC)
+    return {
+        "type": "certificate",
+        "usage": usage,
+        "subject": f"CN={usage}",
+        "issuer": "CN=lab",
+        "not_before": (now - timedelta(days=300)).isoformat(),
+        "not_after": (now + timedelta(days=days)).isoformat(),
+        "fingerprint": fingerprint,
+    }
+
+
+class TestAlerts:
+    def fresh_directory(self, client, people) -> Person:  # type: ignore[no-untyped-def]
+        admin = as_(client, people, "admin")
+        admin.post("/api/v1/gateway/recipients/sync", sync_body())
+        return admin
+
+    def test_a_healthy_node_raises_nothing_above_info(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(client, beat(**HEALTHY))
+        assert [c for c, s in codes(admin).items() if s != "INFO"] == []
+
+    def test_no_nodes_at_all_is_an_alert_not_silence(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        assert "NO_NODES" in codes(as_(client, people, "viewer"))
+
+    def test_a_silent_node_is_critical_and_hides_its_stale_numbers(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        old = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+        post_events(client, {**beat(**HEALTHY), "at": old, "queue_messages": 9999})
+        found = codes(as_(client, people, "viewer"))
+        assert found["GATEWAY_NODE_DOWN"] == "CRITICAL"
+        assert "QUEUE_GROWTH" not in found, "по молчащему узлу устаревших тревог нет"
+
+    @pytest.mark.parametrize(
+        ("fields", "code", "severity"),
+        [
+            ({"queue_messages": 1500}, "QUEUE_GROWTH", "WARNING"),
+            ({"queue_messages": 6000}, "QUEUE_GROWTH", "CRITICAL"),
+            ({"oldest_message_seconds": 2400.0}, "OLDEST_MESSAGE_TOO_OLD", "WARNING"),
+            ({"oldest_message_seconds": 9000.0}, "OLDEST_MESSAGE_TOO_OLD", "CRITICAL"),
+            ({"exchange_ok": False}, "EXCHANGE_UNAVAILABLE", "CRITICAL"),
+            ({"pressure": "PRESSURE"}, "DISK_PRESSURE", "WARNING"),
+            ({"pressure": "CRITICAL"}, "DISK_PRESSURE", "CRITICAL"),
+            ({"config_drift": True}, "CONFIG_DRIFT", "CRITICAL"),
+            ({"open_relay_safe": False}, "OPEN_RELAY_SELFTEST_FAILED", "CRITICAL"),
+            ({"collector_report_age": None}, "SHADOW_COLLECTOR_UNAVAILABLE", "WARNING"),
+            ({"collector_report_age": 900.0}, "SHADOW_COLLECTOR_UNAVAILABLE", "WARNING"),
+            ({"shadow_pending_seconds": 1800.0}, "SHADOW_COLLECTOR_BACKLOG", "WARNING"),
+        ],
+    )
+    def test_each_condition_gives_its_own_alert(
+        self, client, people, fields, code: str, severity: str
+    ) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(client, beat(**{**HEALTHY, **fields}))
+        assert codes(admin)[code] == severity
+
+    def test_an_unchecked_probe_is_info_never_green_and_never_critical(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(client, beat(**{**HEALTHY, "exchange_ok": None, "open_relay_safe": None}))
+        found = codes(admin)
+        assert found["EXCHANGE_NOT_PROBED"] == "INFO"
+        assert found["OPEN_RELAY_NOT_PROBED"] == "INFO"
+        assert "EXCHANGE_UNAVAILABLE" not in found and "OPEN_RELAY_SELFTEST_FAILED" not in found
+
+    def test_the_failing_exchange_layer_is_named(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(
+            client,
+            beat(**{**HEALTHY, "exchange_ok": False}),
+            {
+                "type": "probe",
+                "probe": "exchange",
+                "target": "ex1:2526",
+                "ok": False,
+                "failed_layer": "TLS",
+                "detail": "expired",
+            },
+        )
+        alert = next(
+            a
+            for a in admin.get("/api/v1/gateway/alerts").json()["items"]
+            if a["code"] == "EXCHANGE_UNAVAILABLE"
+        )
+        assert "ex1:2526: TLS" in alert["detail"]
+
+    def test_an_alert_disappears_when_the_condition_does(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(client, beat(**{**HEALTHY, "queue_messages": 6000}))
+        assert "QUEUE_GROWTH" in codes(admin)
+        post_events(client, beat(**HEALTHY))
+        assert "QUEUE_GROWTH" not in codes(admin)
+
+    def test_stale_directory_and_certificates_raise_alerts(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = as_(client, people, "admin")
+        old = (datetime.now(UTC) - timedelta(hours=10)).isoformat()
+        admin.post("/api/v1/gateway/recipients/sync", sync_body(3, source_generated_at=old))
+        post_events(
+            client,
+            beat(**HEALTHY),
+            certificate_event("smtp-public", -3),
+            certificate_event("internal", 10, "b" * 64),
+        )
+        found = codes(admin)
+        assert found["RECIPIENT_MAP_STALE"] == "CRITICAL"
+        assert "TLS_CERT_EXPIRING" in found
+
+    def test_alerts_are_for_security_and_platform_roles_only(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        assert as_(client, people, "employee").get("/api/v1/gateway/alerts").status_code == 403
+        assert as_(client, people, "platform").get("/api/v1/gateway/alerts").status_code == 200
+
+    def test_counts_by_severity(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        admin = self.fresh_directory(client, people)
+        post_events(client, beat(**{**HEALTHY, "config_drift": True, "pressure": "PRESSURE"}))
+        counts = admin.get("/api/v1/gateway/alerts").json()["counts"]
+        assert counts["CRITICAL"] >= 1 and counts["WARNING"] >= 1
+
+
+class TestNodeReportsEnrichThePanel:
+    def test_probe_events_update_the_node_view(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(
+            client,
+            beat(**HEALTHY),
+            {
+                "type": "probe",
+                "probe": "exchange",
+                "target": "ex1:2526",
+                "ok": False,
+                "failed_layer": "TLS",
+                "detail": "x",
+            },
+        )
+        node = as_(client, people, "viewer").get("/api/v1/gateway/nodes").json()["items"][0]
+        assert node["probes"]["exchange:ex1:2526"]["failed_layer"] == "TLS"
+        assert node["exchange_ok"] is True  # сводка приходит в heartbeat, а детали — в событии
+
+    def test_certificate_events_become_tls_status_without_any_key_material(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(client, certificate_event("smtp-public", 100))
+        items = as_(client, people, "viewer").get("/api/v1/gateway/tls/status").json()["items"]
+        assert [i["usage"] for i in items] == ["smtp-public"]
+        assert "PRIVATE" not in json.dumps(items)
+
+    def test_the_same_certificate_twice_is_one_record(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(client, certificate_event("smtp-public", 100), certificate_event("smtp-public", 100))
+        assert len(as_(client, people, "viewer").get("/api/v1/gateway/tls/status").json()["items"]) == 1
+
+    @pytest.mark.parametrize("fingerprint", ["short", "Z" * 64, "../x", ""])
+    def test_malformed_certificate_events_are_ignored(self, client, people, fingerprint: str) -> None:  # type: ignore[no-untyped-def]
+        post_events(client, certificate_event("smtp-public", 100, fingerprint))
+        assert as_(client, people, "viewer").get("/api/v1/gateway/tls/status").json()["items"] == []
+
+    def test_a_drift_event_updates_the_node(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(client, beat(**HEALTHY), {"type": "drift", "drifting": True})
+        assert (
+            as_(client, people, "viewer").get("/api/v1/gateway/nodes").json()["items"][0]["config_drift"]
+            is True
+        )
+
+    def test_hostile_values_do_not_poison_the_numbers(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(
+            client,
+            beat(
+                queue_messages="много",
+                oldest_message_seconds=-5,
+                collector_report_age=True,
+                exchange_ok="yes",
+            ),
+        )
+        node = as_(client, people, "viewer").get("/api/v1/gateway/nodes").json()["items"][0]
+        assert node["oldest_message_seconds"] == 0
+        assert node["collector_report_age"] is None
+        assert node["exchange_ok"] is None
+
+    def test_the_probe_memory_is_bounded(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        post_events(
+            client,
+            beat(**HEALTHY),
+            *[
+                {
+                    "type": "probe",
+                    "probe": "exchange",
+                    "target": f"h{i}:25",
+                    "ok": True,
+                    "failed_layer": "",
+                    "detail": "",
+                }
+                for i in range(60)
+            ],
+        )
+        node = as_(client, people, "viewer").get("/api/v1/gateway/nodes").json()["items"][0]
+        assert len(node["probes"]) <= 20
+
+
+class TestFlush:
+    def node_id(self, client, people) -> str:  # type: ignore[no-untyped-def]
+        post_events(client, beat(**HEALTHY))
+        return as_(client, people, "admin").get("/api/v1/gateway/nodes").json()["items"][0]["id"]
+
+    def test_flush_is_a_one_shot_command_the_node_acknowledges(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        node_id = self.node_id(client, people)
+        admin = as_(client, people, "admin")  # после node_id(): вход заменяет токен CSRF общего клиента
+        url = f"/api/v1/gateway-agent/config?node_id={NODE}"
+        assert client.get(url, headers=node_headers()).json()["flush"] is False
+        assert admin.post(f"/api/v1/gateway/nodes/{node_id}/flush").json()["flush_requested"] is True
+        assert client.get(url, headers=node_headers()).json()["flush"] is True
+        post_events(client, {"type": "flush_done"})
+        assert client.get(url, headers=node_headers()).json()["flush"] is False
+
+    def test_who_may_flush(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        node_id = self.node_id(client, people)
+        for who, expected in (
+            ("employee", 403),
+            ("viewer", 403),
+            ("analyst", 403),
+            ("platform", 200),
+            ("admin", 200),
+        ):
+            assert (
+                as_(client, people, who).post(f"/api/v1/gateway/nodes/{node_id}/flush").status_code
+                == expected
+            ), who
+
+    def test_flush_is_audited(self, client, people, engine) -> None:  # type: ignore[no-untyped-def]
+        from msp_api.db.models import AuditEvent
+        from sqlalchemy import select
+        from sqlalchemy.orm import sessionmaker
+
+        node_id = self.node_id(client, people)
+        as_(client, people, "admin").post(f"/api/v1/gateway/nodes/{node_id}/flush")
+        with sessionmaker(bind=engine)() as session:
+            assert "transport.node_flush" in [e.action for e in session.execute(select(AuditEvent)).scalars()]
+
+    def test_unknown_node_is_404(self, client, people) -> None:  # type: ignore[no-untyped-def]
+        assert as_(client, people, "admin").post("/api/v1/gateway/nodes/nope/flush").status_code == 404

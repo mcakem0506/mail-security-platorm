@@ -1006,6 +1006,25 @@ export interface TransportNode {
   drain_requested: boolean;
   drain_requested_by: string;
   drain_requested_at: string | null;
+  flush_requested: boolean;
+  oldest_message_seconds: number;
+  /** null — не проверялось: это не «хорошо» и не «плохо». */
+  exchange_ok: boolean | null;
+  open_relay_safe: boolean | null;
+  config_drift: boolean | null;
+  collector_report_age: number | null;
+  shadow_pending_seconds: number | null;
+  probes: Record<string, { ok: boolean | null; failed_layer: string; state: string; detail: string; at: string }>;
+  last_apply: { outcome?: string; version?: string; stage?: string; at?: string } | null;
+}
+
+export interface TransportAlert {
+  code: string;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  title: string;
+  detail: string;
+  node_id: string;
+  node_name: string;
 }
 
 export interface TransportQueueSummary {
@@ -1106,5 +1125,9 @@ export const transportApi = {
     ),
   tls: () => request<{ items: TransportCertificate[] }>("/api/v1/gateway/tls/status"),
   drain: (id: string) => request<{ drain_requested: boolean }>(`/api/v1/gateway/nodes/${id}/drain`, { method: "POST" }),
+  alerts: () =>
+    request<{ items: TransportAlert[]; counts: Record<string, number> }>("/api/v1/gateway/alerts"),
+  flush: (id: string) =>
+    request<{ flush_requested: boolean }>(`/api/v1/gateway/nodes/${id}/flush`, { method: "POST" }),
   resume: (id: string) => request<{ drain_requested: boolean }>(`/api/v1/gateway/nodes/${id}/resume`, { method: "POST" }),
 };

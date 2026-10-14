@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -63,7 +64,19 @@ from ..db.models_transport import (
 logger = logging.getLogger(__name__)
 
 #: Типы событий, которые панель принимает от узла. Остальное отбрасывается и считается.
-ACCEPTED_EVENT_TYPES = frozenset({"heartbeat", "pressure", "recipient_freshness", "config_applied", "drift"})
+ACCEPTED_EVENT_TYPES = frozenset(
+    {
+        "heartbeat",
+        "pressure",
+        "recipient_freshness",
+        "config_applied",
+        "drift",
+        "probe",
+        "certificate",
+        "drain",
+        "flush_done",
+    }
+)
 MAX_EVENT_BYTES = 8192
 MAX_EVENTS_PER_BATCH = 500
 NOT_FOR_PRODUCTION = "MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER"
@@ -513,15 +526,96 @@ def ingest_events(
         )
         if kind == "heartbeat":
             node.last_heartbeat_at = max(filter(None, [node.last_heartbeat_at, occurred]))
+            node.oldest_message_seconds = _number(data.get("oldest_message_seconds"), 0.0)
+            node.exchange_ok = _tristate(data.get("exchange_ok"))
+            node.open_relay_safe = _tristate(data.get("open_relay_safe"))
+            node.config_drift = _tristate(data.get("config_drift"))
+            node.collector_report_age = _optional_number(data.get("collector_report_age"))
+            node.shadow_pending_seconds = _optional_number(data.get("shadow_pending_seconds"))
             node.config_version = str(data.get("config_version", ""))[:64]
-            node.queue_messages = int(data.get("queue_messages", 0) or 0)
+            node.queue_messages = int(_number(data.get("queue_messages"), 0.0))
             node.pressure_state = str(data.get("pressure", "UNKNOWN"))[:16]
-            node.unparsed_log_lines = int(data.get("unparsed_log_lines", 0) or 0)
+            node.unparsed_log_lines = int(_number(data.get("unparsed_log_lines"), 0.0))
         elif kind == "pressure":
             node.pressure_state = str(data.get("state", node.pressure_state))[:16]
+        elif kind == "probe":
+            _remember_probe(node, data, occurred)
+        elif kind == "drift":
+            node.config_drift = _tristate(data.get("drifting"))
+        elif kind == "certificate":
+            _remember_certificate(session, organization_id, node_id, data)
+        elif kind == "config_applied":
+            node.details = {
+                **node.details,
+                "last_apply": {k: data.get(k) for k in ("outcome", "version", "stage") if k in data}
+                | {"at": occurred.isoformat()},
+            }
+        elif kind == "flush_done":
+            node.flush_requested = False
         result.accepted += 1
     session.flush()
     return result
+
+
+def _tristate(value: object) -> bool | None:
+    """``True``/``False`` из события; всё остальное (в том числе ``None``) — «не известно»."""
+    return value if isinstance(value, bool) else None
+
+
+def _number(value: object, default: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    return float(value) if 0 <= value < 1e12 else default
+
+
+def _optional_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if 0 <= value < 1e12 else None
+
+
+def _remember_probe(node: TransportNode, data: dict[str, Any], occurred: datetime) -> None:
+    """Последний итог каждой пробы узла: ключ — вид пробы и цель. Число ключей ограничено."""
+    probes = dict(node.details.get("probes") or {})
+    key = f"{data.get('probe', '')}:{data.get('target', '')}"[:80]
+    probes[key] = {
+        "ok": _tristate(data.get("ok")),
+        "failed_layer": str(data.get("failed_layer", ""))[:16],
+        "state": str(data.get("state", ""))[:24],
+        "detail": str(data.get("detail", ""))[:200],
+        "at": occurred.isoformat(),
+    }
+    if len(probes) > 20:
+        for old in sorted(probes, key=lambda k: probes[k]["at"])[: len(probes) - 20]:
+            del probes[old]
+    node.details = {**node.details, "probes": probes}
+
+
+def _remember_certificate(session: Session, organization_id: str, node_id: str, data: dict[str, Any]) -> None:
+    usage, fingerprint = str(data.get("usage", "")), str(data.get("fingerprint", ""))
+    if not usage or not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+        return
+    record_certificate(
+        session,
+        organization_id=organization_id,
+        node_id=node_id,
+        usage=usage,
+        subject=str(data.get("subject", "")),
+        issuer=str(data.get("issuer", "")),
+        not_before=_parse_optional_time(data.get("not_before")),
+        not_after=_parse_optional_time(data.get("not_after")),
+        fingerprint=fingerprint,
+    )
+
+
+def _parse_optional_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _parse_time(value: object) -> datetime:
@@ -610,6 +704,7 @@ def queue_summary(session: Session, organization_id: str, settings: Settings) ->
         "nodes_down": sum(1 for s in states if s in {"DOWN", "UNKNOWN"}),
         "queue_messages": sum(n.queue_messages for n in nodes),
         "pressure": _worst_pressure(n.pressure_state for n in nodes),
+        "oldest_message_seconds": max((n.oldest_message_seconds for n in nodes), default=0.0),
         "unanalysed_copies": session.execute(
             select(func.count())
             .select_from(TransportMessage)

@@ -233,7 +233,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     import time as _time
 
     from .agent import http_sender, node_identity
-    from .panelsync import PanelError, default_apply, detect_drift, http_fetch, sync_once
+    from .panelsync import PanelError, default_apply, detect_drift, http_fetch, postfix_flush, sync_once
 
     url = args.panel_url or os.environ.get("MSP_PANEL_URL", "")
     token_file = args.token_file or os.environ.get("MSP_PANEL_TOKEN_FILE", "")
@@ -256,7 +256,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     apply = default_apply(store, healthcheck=make_healthcheck(25, None), reload_wait=1.0)
     while True:
         try:
-            result = sync_once(fetch, store, Path(STATE_DIR), apply, report)
+            result = sync_once(fetch, store, Path(STATE_DIR), apply, report, flusher=postfix_flush)
             drift = detect_drift(store)
             if drift:
                 report("drift", drift)

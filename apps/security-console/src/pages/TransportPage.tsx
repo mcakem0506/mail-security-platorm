@@ -4,6 +4,7 @@ import {
   transportApi,
   type CurrentUser,
   type TransportCertificate,
+  type TransportAlert,
   type TransportConfigVersion,
   type TransportMessage,
   type TransportNode,
@@ -120,7 +121,7 @@ export function TransportPage({ user }: { user: CurrentUser }) {
       </div>
       {tab === "overview" && <Overview />}
       {tab === "queue" && <QueueTab />}
-      {tab === "nodes" && <NodesTab canDrain={can("gateway:node:drain")} />}
+      {tab === "nodes" && <NodesTab canDrain={can("gateway:node:drain")} canFlush={can("gateway:queue:admin")} />}
       {tab === "routes" && <RoutesTab canRead={can("gateway:config:read")} />}
       {tab === "recipients" && <RecipientsTab canSync={can("gateway:recipients:sync")} />}
       {tab === "tls" && <TlsTab />}
@@ -163,15 +164,75 @@ function Problem({ error }: { error: string | null }) {
   ) : null;
 }
 
+const ALERT_CLASS: Record<string, string> = {
+  CRITICAL: "badge badge--malicious",
+  WARNING: "badge badge--suspicious",
+  INFO: "badge badge--unknown",
+};
+
+const ALERT_LABEL: Record<string, string> = {
+  CRITICAL: "критично",
+  WARNING: "внимание",
+  INFO: "к сведению",
+};
+
+/**
+ * Тревоги вычисляются из состояния узлов, а не хранятся: узел вернулся в норму — тревога исчезла
+ * сама. «К сведению» отделено от остальных намеренно: это не сбой, а непроверенное место
+ * (проба не настроена), и показывать его зелёным значило бы выдавать неизвестное за хорошее.
+ */
+function Alerts({ items }: { items: TransportAlert[] }) {
+  const loud = items.filter((a) => a.severity !== "INFO");
+  const info = items.filter((a) => a.severity === "INFO");
+  return (
+    <section className="card">
+      <h2>Тревоги</h2>
+      {loud.length === 0 && <p className="muted">Тревог нет.</p>}
+      {loud.length > 0 && (
+        <table className="table">
+          <tbody>
+            {loud.map((a, index) => (
+              <tr key={`${a.code}-${a.node_id}-${index}`}>
+                <td>
+                  <span className={ALERT_CLASS[a.severity] ?? "badge"}>{ALERT_LABEL[a.severity] ?? a.severity}</span>
+                </td>
+                <td>
+                  {a.title}
+                  {a.detail && <div className="muted small">{a.detail}</div>}
+                </td>
+                <td className="muted small">{a.node_name || a.node_id.slice(0, 8)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {info.length > 0 && (
+        <details>
+          <summary className="muted small">Не проверяется ({info.length})</summary>
+          <ul>
+            {info.map((a, index) => (
+              <li key={`${a.code}-${a.node_id}-${index}`} className="muted small">
+                {a.title} {a.node_name && `— ${a.node_name}`}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function Overview() {
   const summary = useLoad<TransportQueueSummary>(() => transportApi.queueSummary());
+  const alerts = useLoad<{ items: TransportAlert[] }>(() => transportApi.alerts());
   const recipients = useLoad<TransportRecipientsStatus>(() => transportApi.recipientsStatus());
   const tls = useLoad<{ items: TransportCertificate[] }>(() => transportApi.tls());
   const s = summary.data;
   const problemCerts = (tls.data?.items ?? []).filter((c) => c.state === "EXPIRED" || c.state === "EXPIRING");
   return (
     <>
-      <Problem error={summary.error || recipients.error || tls.error} />
+      <Problem error={summary.error || recipients.error || tls.error || alerts.error} />
+      {alerts.data && <Alerts items={alerts.data.items} />}
       {s && (
         <section className="card">
           <h2>Состояние</h2>
@@ -293,7 +354,7 @@ function QueueTab() {
   );
 }
 
-function NodesTab({ canDrain }: { canDrain: boolean }) {
+function NodesTab({ canDrain, canFlush }: { canDrain: boolean; canFlush: boolean }) {
   const nodes = useLoad(() => transportApi.nodes());
   const [message, setMessage] = useState<string | null>(null);
 
@@ -309,6 +370,17 @@ function NodesTab({ canDrain }: { canDrain: boolean }) {
           ? "Команда слива отправлена. Узел исполнит её при ближайшем опросе панели."
           : "Команда возврата в работу отправлена.",
       );
+      nodes.reload();
+    } catch (e) {
+      setMessage(errorText(e));
+    }
+  };
+
+  const flush = async (node: TransportNode) => {
+    if (!window.confirm(`Повторить доставку отложенной почты на узле «${node.name}»? Письма не удаляются и не меняются.`)) return;
+    try {
+      await transportApi.flush(node.id);
+      setMessage("Команда отправлена. Узел исполнит её при ближайшем опросе панели.");
       nodes.reload();
     } catch (e) {
       setMessage(errorText(e));
@@ -332,6 +404,7 @@ function NodesTab({ canDrain }: { canDrain: boolean }) {
               <th>Конфигурация</th>
               <th>Очередь</th>
               <th>Давление</th>
+              <th>Проверки</th>
               <th></th>
             </tr>
           </thead>
@@ -355,7 +428,30 @@ function NodesTab({ canDrain }: { canDrain: boolean }) {
                 </td>
                 <td>{n.state === "UP" || n.state === "DRAINING" ? n.queue_messages : "—"}</td>
                 <td>{PRESSURE_LABEL[n.pressure] || n.pressure}</td>
+                <td className="small">
+                  <div>Exchange: {tri(n.exchange_ok)}</div>
+                  <div>Открытый релей: {n.open_relay_safe === null ? "не проверялось" : n.open_relay_safe ? "закрыт" : "ОТКРЫТ"}</div>
+                  <div>Конфигурация: {n.config_drift === null ? "не проверялось" : n.config_drift ? "ИЗМЕНЕНА вручную" : "как назначено"}</div>
+                  <div>
+                    Сборщик копий:{" "}
+                    {n.collector_report_age === null
+                      ? "не отчитывается"
+                      : `отчёт ${Math.round(n.collector_report_age)} с назад`}
+                  </div>
+                  {Object.entries(n.probes).map(([key, probe]) =>
+                    probe.ok === false ? (
+                      <div key={key} className="muted">
+                        {key.replace("exchange:", "")}: сбой на уровне {probe.failed_layer || "?"}
+                      </div>
+                    ) : null,
+                  )}
+                </td>
                 <td>
+                  {canFlush && (
+                    <button className="button button--tiny" onClick={() => void flush(n)} disabled={n.flush_requested}>
+                      {n.flush_requested ? "Повтор запрошен" : "Повторить доставку"}
+                    </button>
+                  )}
                   {canDrain &&
                     (n.drain_requested ? (
                       <button className="button button--tiny" onClick={() => void act(n, false)}>
@@ -715,4 +811,10 @@ function ConfigTab(props: { canRead: boolean; canValidate: boolean; canActivate:
 /** Подпись состояния с запасным вариантом: неизвестное значение показывается как есть, а не роняет страницу. */
 function look(map: Record<string, { label: string; cls: string }>, key: string): { label: string; cls: string } {
   return map[key] ?? { label: key, cls: "badge badge--unknown" };
+}
+
+/** Тройное состояние проверки: неизвестное не выдаётся ни за «хорошо», ни за «плохо». */
+function tri(value: boolean | null): string {
+  if (value === null) return "не проверялось";
+  return value ? "доступен" : "НЕДОСТУПЕН";
 }
