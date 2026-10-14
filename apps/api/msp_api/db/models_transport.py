@@ -82,10 +82,22 @@ class TransportNode(Base, IdMixin, TimestampMixin):
     queue_messages: Mapped[int] = mapped_column(Integer, default=0)
     pressure_state: Mapped[str] = mapped_column(String(16), default="UNKNOWN")
     unparsed_log_lines: Mapped[int] = mapped_column(Integer, default=0)
+    #: Самый старый в очереди, секунд. Ноль — очередь пуста или данных ещё нет (см. last_heartbeat_at).
+    oldest_message_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    #: Сводка последних проб и сторожей узла. ``None`` — не проверялось: это не «хорошо».
+    exchange_ok: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    open_relay_safe: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    config_drift: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    collector_report_age: Mapped[float | None] = mapped_column(Float, default=None)
+    shadow_pending_seconds: Mapped[float | None] = mapped_column(Float, default=None)
     #: Оператор просит слить узел. Узел исполняет команду при следующем опросе панели.
     drain_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     drain_requested_by: Mapped[str] = mapped_column(String(320), default="")
     drain_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    #: Разовая команда «повторить доставку отложенной почты» (postqueue -f). Узел подтверждает событием.
+    flush_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    flush_requested_by: Mapped[str] = mapped_column(String(320), default="")
+    flush_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     details: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
 

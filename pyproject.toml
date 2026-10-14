@@ -53,6 +53,7 @@ sandbox = [
   "numpy>=1.26",
 ]
 dev = [
+  "aiosmtpd>=1.4",  # настоящий SMTP-сервер с TLS для проверок шлюза
   "pytest>=8",
   "pytest-cov>=5",
   "hypothesis>=6.100",

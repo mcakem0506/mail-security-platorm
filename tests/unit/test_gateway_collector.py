@@ -281,6 +281,13 @@ class TestCollecting:
         sink.fail = True
         assert collector.run_once().oldest_pending_seconds == 600
 
+    def test_a_delivered_copy_is_not_pending_any_more(self, tmp_path: Path) -> None:
+        """Возраст «ожидающей» копии — это то, что осталось после прохода, а не то, что только что ушло."""
+        name = journal_copy(tmp_path, mime())
+        os.utime(tmp_path / "new" / name, (1000, 1000))
+        collector, _ = self.make(tmp_path, clock=lambda: 1600.0)
+        assert collector.run_once().oldest_pending_seconds == 0
+
     def test_retention_prunes_old_done_and_bad(self, tmp_path: Path) -> None:
         journal_copy(tmp_path, mime())
         raw_file(tmp_path, b"junk", name="0000-bad-aaaaaaaa.msj")

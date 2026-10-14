@@ -132,7 +132,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 def cmd_agent(args: argparse.Namespace) -> int:
     """Наблюдающий агент: работает без прав на изменение Postfix (только чтение журнала и очереди)."""
-    from .agent import Agent, Thresholds, http_sender, run_forever, serve_metrics
+    from .agent import Agent, Thresholds, http_sender, parse_probe_env, run_forever, serve_metrics
+    from .panelsync import drift_state
 
     state = Path(STATE_DIR)
     store = ConfigStore(CONFIG_ROOT, state_dir=STATE_DIR)
@@ -149,6 +150,11 @@ def cmd_agent(args: argparse.Namespace) -> int:
         role=args.role,
         thresholds=Thresholds(),
         config_reader=config,
+        probes=parse_probe_env(dict(os.environ)),
+        collector_status=Path(os.environ["MSP_COLLECTOR_STATUS"])
+        if os.environ.get("MSP_COLLECTOR_STATUS")
+        else None,
+        drift_reader=lambda: drift_state(store),
     )
     serve_metrics(agent, args.listen, args.port)
     sender = None
@@ -179,7 +185,13 @@ def cmd_collector(args: argparse.Namespace) -> int:
             Path(token_file).read_text(encoding="utf-8").strip(),
             node_id=node_identity(Path(args.identity_dir)),
         )
-    collector = Collector(Path(args.journal), sink, retention_days=args.retention_days)
+    status = os.environ.get("MSP_COLLECTOR_STATUS")
+    collector = Collector(
+        Path(args.journal),
+        sink,
+        retention_days=args.retention_days,
+        status_file=Path(status) if status else None,
+    )
     if args.once:
         stats = collector.run_once()
         print(

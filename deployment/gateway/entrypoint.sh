@@ -43,6 +43,12 @@ touch /var/log/msp/postfix.log
 chown root:mspagent /var/log/msp/postfix.log
 chmod 0640 /var/log/msp/postfix.log
 
+# Отчёт сборщика теневых копий лежит вне журнала: журнал закрыт для всех, кроме сборщика, а
+# агент наблюдения обязан видеть состояние сборщика, не видя самих писем (там только счётчики).
+mkdir -p "$ROOT/status"
+chown mspjournal:mspjournal "$ROOT/status"
+chmod 0755 "$ROOT/status"
+
 # Постоянный идентификатор узла: общий для агента, сборщика и синхронизации, читается всеми,
 # создаётся один раз и переживает пересоздание контейнера (лежит в томе).
 python3 -c "from pathlib import Path; from msp_gateway.agent import node_identity; node_identity(Path('$ROOT'))"

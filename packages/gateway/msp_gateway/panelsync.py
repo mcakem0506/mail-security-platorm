@@ -164,6 +164,14 @@ def detect_drift(store: ConfigStore) -> dict[str, object] | None:
     return {"expected": active[:64], "found": disk[:64]}
 
 
+def drift_state(store: ConfigStore) -> bool | None:
+    """``True`` — расхождение, ``False`` — нет, ``None`` — сравнить не с чем (конфигурации ещё нет)."""
+    active, disk = store.active_checksum(), store.drift_checksum()
+    if active is None or disk is None:
+        return None
+    return active != disk
+
+
 def default_apply(store: ConfigStore, **kwargs: Any) -> Apply:
     def run(files: dict[str, bytes], manifest: dict[str, Any]) -> ApplyResult:
         return apply_bundle(files, manifest, store, **kwargs)

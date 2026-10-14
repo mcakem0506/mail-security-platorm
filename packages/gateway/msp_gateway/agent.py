@@ -31,8 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .apply import Runner, subprocess_runner
+from .certs import CertificateError, CertificateInfo, read_certificate
 from .logparser import LogParser
 from .metrics import Metrics, age_seconds, parse_postqueue_json
+from .probes import ProbeState, exchange_probe, open_relay_probe
 from .state import (
     PressureState,
     RecipientFreshness,
@@ -228,6 +230,69 @@ def read_recipient_generated_at(state_dir: Path) -> datetime | None:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
+@dataclass(frozen=True)
+class ProbeConfig:
+    """Что и как проверять (ТЗ 1.1 §47, §48). Пусто — проверка не выполняется и не изображается."""
+
+    #: Цели Exchange: (адрес, порт, имя для проверки сертификата).
+    exchange_targets: tuple[tuple[str, int, str], ...] = ()
+    ca_file: str | None = None
+    probe_recipient: str = ""
+    require_tls: bool = True
+    #: Собственный публичный слушатель для самопроверки открытого релея.
+    relay_host: str = "127.0.0.1"
+    relay_port: int | None = None
+    #: Сертификаты узла: (назначение, путь к файлу сертификата). Ключи сюда не передаются.
+    certificates: tuple[tuple[str, str], ...] = ()
+    interval: float = 60.0
+    timeout: float = 5.0
+
+
+def parse_probe_env(env: dict[str, str]) -> ProbeConfig:
+    """Настройки проб из окружения. Ошибка в настройке — исключение, а не молчаливое «проб нет».
+
+    * ``MSP_PROBE_EXCHANGE``  — ``адрес:порт[:имя_в_сертификате]`` через запятую;
+    * ``MSP_PROBE_CA``        — файл центра сертификации для проверки цепочки;
+    * ``MSP_PROBE_RECIPIENT`` — назначенный получатель пробы доставки;
+    * ``MSP_PROBE_REQUIRE_TLS`` — ``0``, чтобы не требовать TLS (по умолчанию требуется);
+    * ``MSP_PROBE_SELFTEST``  — ``1`` включает самопроверку открытого релея на ``MSP_PROBE_RELAY_PORT``;
+    * ``MSP_CERT_FILES``      — ``назначение=путь`` через запятую (только сертификаты, не ключи).
+    """
+    targets: list[tuple[str, int, str]] = []
+    for item in filter(None, (x.strip() for x in env.get("MSP_PROBE_EXCHANGE", "").split(","))):
+        parts = item.split(":")
+        if (
+            len(parts) not in (2, 3)
+            or not parts[0]
+            or not parts[1].isdigit()
+            or not 0 < int(parts[1]) < 65536
+        ):
+            raise ValueError("MSP_PROBE_EXCHANGE: ожидалось адрес:порт[:имя]")
+        targets.append((parts[0], int(parts[1]), parts[2] if len(parts) == 3 else parts[0]))
+    certificates: list[tuple[str, str]] = []
+    for item in filter(None, (x.strip() for x in env.get("MSP_CERT_FILES", "").split(","))):
+        usage, separator, path = item.partition("=")
+        if not separator or not usage or not path or not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", usage):
+            raise ValueError("MSP_CERT_FILES: ожидалось назначение=путь")
+        certificates.append((usage, path))
+    relay_port = None
+    if env.get("MSP_PROBE_SELFTEST") == "1":
+        raw_port = env.get("MSP_PROBE_RELAY_PORT", "25")
+        if not raw_port.isdigit() or not 0 < int(raw_port) < 65536:
+            raise ValueError("MSP_PROBE_RELAY_PORT: ожидался порт")
+        relay_port = int(raw_port)
+    return ProbeConfig(
+        exchange_targets=tuple(targets),
+        ca_file=env.get("MSP_PROBE_CA") or None,
+        probe_recipient=env.get("MSP_PROBE_RECIPIENT", ""),
+        require_tls=env.get("MSP_PROBE_REQUIRE_TLS", "1") != "0",
+        relay_host=env.get("MSP_PROBE_RELAY_HOST", "127.0.0.1"),
+        relay_port=relay_port,
+        certificates=tuple(certificates),
+        interval=float(env.get("MSP_PROBE_INTERVAL", "60")),
+    )
+
+
 class Agent:
     def __init__(
         self,
@@ -243,8 +308,18 @@ class Agent:
         disk_reader: Callable[[], int] | None = None,
         config_reader: Callable[[], tuple[str, str]] | None = None,
         manage_gate: bool = False,
+        probes: ProbeConfig | None = None,
+        collector_status: Path | None = None,
+        drift_reader: Callable[[], bool | None] | None = None,
     ) -> None:
         self.state_dir = state_dir
+        self.probes = probes or ProbeConfig()
+        self.collector_status = collector_status
+        self._drift_reader = drift_reader
+        self._last_probe: float = 0.0
+        self._probe_state: dict[str, str] = {}
+        self._drifting: bool | None = None
+        self._certificates_sent: float = 0.0
         self.runner = runner
         self.queue_snapshot = queue_snapshot
         self.thresholds = thresholds or Thresholds()
@@ -304,7 +379,124 @@ class Agent:
             self._freshness = freshness
 
         self.metrics.config_version, self.metrics.config_checksum = self._config_reader()
+        self._check_drift()
+        self._read_collector(now)
+        self._maybe_probe(now)
         self.last_collect = time.monotonic()
+
+    # ------------------------------------------------------------------ дрейф, сборщик, пробы
+    def _check_drift(self) -> None:
+        """Расхождение файлов конфигурации с принятым описанием (ТЗ §40)."""
+        if self._drift_reader is None:
+            return
+        try:
+            drifting = self._drift_reader()
+        except OSError:
+            drifting = None
+        self.metrics.config_drift = None if drifting is None else int(drifting)
+        if drifting is not None and drifting != self._drifting:
+            if drifting or self._drifting is not None:
+                self.event("drift", drifting=drifting)
+            self._drifting = drifting
+
+    def _read_collector(self, now: datetime) -> None:
+        """Отчёт сборщика теневых копий. Нет отчёта — «не известно», а не «всё хорошо»."""
+        if self.collector_status is None:
+            return
+        try:
+            data = json.loads(self.collector_status.read_text(encoding="utf-8"))
+            updated = float(data["updated_at"])
+            pending = float(data.get("oldest_pending_seconds", 0.0))
+        except (OSError, ValueError, KeyError, TypeError):
+            self.metrics.collector_report_age = None
+            self.metrics.shadow_pending_seconds = None
+            return
+        self.metrics.collector_report_age = max(0.0, now.timestamp() - updated)
+        self.metrics.shadow_pending_seconds = max(0.0, pending)
+
+    def _maybe_probe(self, now: datetime) -> None:
+        cfg = self.probes
+        if not (cfg.exchange_targets or cfg.relay_port or cfg.certificates):
+            return
+        if self._last_probe and time.monotonic() - self._last_probe < cfg.interval:
+            return
+        self._last_probe = time.monotonic()
+        for host, port, server_hostname in cfg.exchange_targets:
+            self._probe_exchange(host, port, server_hostname)
+        if cfg.relay_port:
+            self._probe_open_relay(cfg.relay_host, cfg.relay_port)
+        self._read_certificates(now)
+
+    def _probe_exchange(self, host: str, port: int, server_hostname: str) -> None:
+        cfg = self.probes
+        target = f"{host}:{port}"
+        result = exchange_probe(
+            host,
+            port,
+            ca_file=cfg.ca_file,
+            server_hostname=server_hostname or host,
+            require_tls=cfg.require_tls,
+            probe_recipient=cfg.probe_recipient,
+            timeout=cfg.timeout,
+        )
+        for layer in result.layers:
+            if layer.state == "SKIPPED":
+                self.metrics.exchange_layers.pop((target, layer.layer), None)
+            else:
+                self.metrics.exchange_layers[(target, layer.layer)] = 1 if layer.state == "OK" else 0
+        key = f"exchange:{target}"
+        state = result.failed_layer or "OK"
+        if self._probe_state.get(key) != state:
+            detail = next((layer.detail for layer in result.layers if layer.state == "FAILED"), "")
+            if self._probe_state.get(key) is not None or state != "OK":
+                self.event(
+                    "probe",
+                    probe="exchange",
+                    target=target,
+                    ok=state == "OK",
+                    failed_layer=result.failed_layer,
+                    detail=detail,
+                )
+            self._probe_state[key] = state
+
+    def _probe_open_relay(self, host: str, port: int) -> None:
+        outcome = open_relay_probe(host, port, timeout=self.probes.timeout)
+        if outcome.state is ProbeState.UNREACHABLE:
+            self.metrics.open_relay_safe = None  # не проверено — не «безопасно»
+            state = "UNREACHABLE"
+        else:
+            safe = outcome.is_safe_for_relay_test
+            self.metrics.open_relay_safe = 1 if safe else 0
+            state = "SAFE" if safe else "OPEN_RELAY"
+        if self._probe_state.get("open_relay") != state:
+            if self._probe_state.get("open_relay") is not None or state != "SAFE":
+                # «Недоступно» — не провал и не успех: ok=None, чтобы панель не подняла тревогу
+                # о релее по факту, что слушатель просто ещё не поднялся.
+                ok = None if state == "UNREACHABLE" else state == "SAFE"
+                self.event("probe", probe="open_relay", ok=ok, state=state)
+            self._probe_state["open_relay"] = state
+
+    def _read_certificates(self, now: datetime) -> None:
+        infos: list[CertificateInfo] = []
+        for usage, path in self.probes.certificates:
+            try:
+                info = read_certificate(usage, Path(path))
+            except CertificateError:
+                self.metrics.certificate_expiry.pop(usage, None)
+                continue
+            infos.append(info)
+            self.metrics.certificate_expiry[usage] = info.seconds_left(now)
+        # В панель сведения уходят раз в шесть часов и при смене отпечатка: срок меняется только с
+        # заменой сертификата, а панель сама считает остаток дней от даты окончания.
+        fingerprints = ",".join(sorted(i.fingerprint for i in infos))
+        if infos and (
+            fingerprints != self._probe_state.get("certificates")
+            or time.monotonic() - self._certificates_sent > 6 * 3600
+        ):
+            for info in infos:
+                self.event("certificate", **info.as_event())
+            self._probe_state["certificates"] = fingerprints
+            self._certificates_sent = time.monotonic()
 
     def _queue_lines(self) -> list[str] | None:
         """Очередь: из снимка, который кладёт root-цикл контейнера, либо напрямую у Postfix.
@@ -354,7 +546,19 @@ class Agent:
             pressure=self.metrics.pressure.value,
             unparsed_log_lines=self.parser.stats.unparsed,
             log_overflow_bytes=self.tailer.overflow_bytes,
+            oldest_message_seconds=self.metrics.queue.oldest_seconds,
+            exchange_ok=self._exchange_summary(),
+            open_relay_safe=self.metrics.open_relay_safe,
+            collector_report_age=self.metrics.collector_report_age,
+            shadow_pending_seconds=self.metrics.shadow_pending_seconds,
+            config_drift=self.metrics.config_drift,
         )
+
+    def _exchange_summary(self) -> bool | None:
+        """Все ли выполненные уровни проб Exchange проходят; ``None`` — не проверялось."""
+        if not self.metrics.exchange_layers:
+            return None
+        return all(value == 1 for value in self.metrics.exchange_layers.values())
 
 
 def make_handler(agent: Agent, *, stale_after: float = 120.0) -> type[BaseHTTPRequestHandler]:

@@ -12,7 +12,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends debconf \
  && echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections \
  && apt-get install -y --no-install-recommends \
-      postfix postfix-pcre python3 ca-certificates procps util-linux \
+      postfix postfix-pcre python3 ca-certificates procps util-linux openssl \
  && rm -rf /var/lib/apt/lists/*
 
 # Пользователь, от имени которого Postfix запускает писателя журнала. Не postfix: писатель

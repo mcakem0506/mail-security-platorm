@@ -290,11 +290,14 @@ class Collector:
         retention_days: float = 7.0,
         batch: int = 200,
         clock: Callable[[], float] = time.time,
+        status_file: Path | None = None,
     ) -> None:
         self.new = journal / "new"
         self.done = journal / "done"
         self.bad = journal / "bad"
-        self.status_file = journal / "collector.status.json"
+        #: Отчёт лежит вне журнала: каталог журнала закрыт для всех, кроме сборщика, а агент
+        #: наблюдения обязан видеть состояние сборщика, не видя самих писем.
+        self.status_file = status_file or journal / "collector.status.json"
         self.sink = sink
         self.retention = retention_days * 86400
         self.batch = batch
@@ -312,12 +315,7 @@ class Collector:
         for directory in (self.done, self.bad):
             directory.mkdir(parents=True, exist_ok=True)
         now = self.clock()
-        oldest = 0.0
         for path in self._pending():
-            try:
-                oldest = max(oldest, now - path.stat().st_mtime)
-            except OSError:
-                continue
             try:
                 record = read_copy(path)
             except CopyError as error:
@@ -335,10 +333,22 @@ class Collector:
             os.replace(path, target)
             self.stats.collected += 1
             self.stats.last_success = now
-        self.stats.oldest_pending_seconds = oldest
+        self.stats.oldest_pending_seconds = self._oldest_pending(now)
         self._prune(now)
         self._write_status()
         return self.stats
+
+    def _oldest_pending(self, now: float) -> float:
+        """Возраст самой старой копии, которая всё ещё ждёт отправки (после прохода, а не до него)."""
+        oldest = 0.0
+        try:
+            names = [p for p in self.new.iterdir() if p.suffix == ".msj"]
+        except OSError:
+            return 0.0
+        for path in names:
+            with contextlib.suppress(OSError):
+                oldest = max(oldest, now - path.stat().st_mtime)
+        return oldest
 
     def _quarantine(self, path: Path, reason: str) -> None:
         self.stats.quarantined += 1

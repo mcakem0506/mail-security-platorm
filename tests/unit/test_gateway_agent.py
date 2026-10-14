@@ -292,6 +292,12 @@ class TestAgent:
             "pressure",
             "unparsed_log_lines",
             "log_overflow_bytes",
+            "oldest_message_seconds",
+            "exchange_ok",
+            "open_relay_safe",
+            "collector_report_age",
+            "shadow_pending_seconds",
+            "config_drift",
         }
 
 

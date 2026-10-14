@@ -121,6 +121,17 @@ class Metrics:
         self.config_checksum = ""
         self.node_role = ""
         self.node_up = 1
+        #: Пробы Exchange по уровням: (цель, уровень) -> 1 прошла, 0 упала. Нет записи — не проверялась.
+        self.exchange_layers: dict[tuple[str, str], int] = {}
+        #: Самопроверка открытого релея: 1 — отказ (хорошо), 0 — принял бы чужое письмо, None — не проверено.
+        self.open_relay_safe: int | None = None
+        #: Сборщик теневых копий: возраст его отчёта и самой старой копии в ожидании.
+        self.collector_report_age: float | None = None
+        self.shadow_pending_seconds: float | None = None
+        #: Сроки сертификатов: назначение -> секунд до окончания (отрицательное — истёк).
+        self.certificate_expiry: dict[str, float] = {}
+        #: Дрейф конфигурации: 1 — файлы расходятся с принятым описанием; None — не проверено.
+        self.config_drift: int | None = None
 
     # ------------------------------------------------------------------ события
     def observe(self, event: LogEvent) -> None:
@@ -242,6 +253,33 @@ class Metrics:
             out.append(f"msp_gateway_config_info{_labels(info)} 1")
             head("msp_gateway_node_up", "gauge", "Агент узла работает")
             out.append(f"msp_gateway_node_up {self.node_up}")
+
+            head("msp_gateway_exchange_probe_ok", "gauge", "Проба Exchange по уровням (1 прошла, 0 упала)")
+            for (target, layer), ok in sorted(self.exchange_layers.items()):
+                labels = _labels({"target": target, "layer": layer})
+                out.append(f"msp_gateway_exchange_probe_ok{labels} {ok}")
+            head(
+                "msp_gateway_open_relay_selftest_ok",
+                "gauge",
+                "Самопроверка открытого релея (1 отказ, 0 принял)",
+            )
+            if self.open_relay_safe is not None:
+                out.append(f"msp_gateway_open_relay_selftest_ok {self.open_relay_safe}")
+            head("msp_gateway_shadow_collector_report_age_seconds", "gauge", "Возраст отчёта сборщика копий")
+            if self.collector_report_age is not None:
+                out.append(
+                    f"msp_gateway_shadow_collector_report_age_seconds {_fmt(self.collector_report_age)}"
+                )
+            head("msp_gateway_shadow_pending_seconds", "gauge", "Возраст самой старой копии в ожидании")
+            if self.shadow_pending_seconds is not None:
+                out.append(f"msp_gateway_shadow_pending_seconds {_fmt(self.shadow_pending_seconds)}")
+            head("msp_gateway_certificate_expiry_seconds", "gauge", "Секунд до окончания сертификата")
+            for usage, seconds in sorted(self.certificate_expiry.items()):
+                labels = _labels({"usage": usage})
+                out.append(f"msp_gateway_certificate_expiry_seconds{labels} {_fmt(seconds)}")
+            head("msp_gateway_config_drift", "gauge", "Файлы конфигурации расходятся с принятым описанием")
+            if self.config_drift is not None:
+                out.append(f"msp_gateway_config_drift {self.config_drift}")
             return "\n".join(out) + "\n"
 
 

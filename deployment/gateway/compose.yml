@@ -30,6 +30,16 @@ services:
     # доступ к сокету Docker не используются.
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL, NET_BIND_SERVICE]
+    environment:
+      # Пробы агента (ТЗ 1.1 §47, §48): уровни Exchange, самопроверка открытого релея, сертификаты.
+      MSP_PROBE_EXCHANGE: fake-exchange:2526:fake-exchange,fake-exchange-2:2526:fake-exchange-2
+      MSP_PROBE_CA: /run/secrets/gateway/ca.crt
+      MSP_PROBE_RECIPIENT: ivan@corp.example
+      MSP_PROBE_SELFTEST: "1"
+      MSP_PROBE_RELAY_PORT: "25"
+      MSP_PROBE_INTERVAL: "15"
+      MSP_CERT_FILES: smtp-public=/run/secrets/gateway/tls.crt
+      MSP_COLLECTOR_STATUS: /var/lib/msp/status/collector.json
     security_opt: ["no-new-privileges:true"]
     networks:
       gwnet:
