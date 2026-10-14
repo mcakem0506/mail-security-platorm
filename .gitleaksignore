@@ -10,3 +10,8 @@
 # маркеры переименованы так, чтобы на секреты не походить, и новых находок это не даёт.
 de76377c481af8191f506c48d84b61171c6ffc15:tests/security/test_real_flow_logging.py:generic-api-key:34
 de76377c481af8191f506c48d84b61171c6ffc15:tests/security/test_real_flow_logging.py:generic-api-key:35
+
+# MSP 1.1: тест архива с паролем. Находка — имя вложения "secret.7z" рядом со строкой "pw" в
+# вызове сборщика образца; это синтетический тестовый архив, не учётные данные. Отпечаток называет
+# коммит, файл, правило и строку.
+4f94ab049af3ce4d1e3e6493d3e57d90f4decf2a:tests/unit/test_attachment_pipeline.py:generic-api-key:71

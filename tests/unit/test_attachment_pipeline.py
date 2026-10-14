@@ -68,7 +68,7 @@ class TestSevenZipAndRarInTheMessage:
         assert any("только по оглавлению" in item for item in result.facts.missing_evidence)
 
     def test_an_encrypted_archive_is_named_not_clean(self, context, ruleset) -> None:  # type: ignore[no-untyped-def]
-        raw = mail(("secret.7z", "x-7z-compressed", make.make_7z({"a.txt": b"x"}, password="pw")))
+        raw = mail(("locked.7z", "x-7z-compressed", make.make_7z({"a.txt": b"x"}, password="pw")))
         parsed, result = facts(raw, context, ruleset)
         assert parsed.attachments[0].meta.encrypted is True
         assert result.facts.get("limit_archive_encrypted_unscannable")
