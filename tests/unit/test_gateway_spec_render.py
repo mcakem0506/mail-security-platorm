@@ -396,3 +396,11 @@ class TestSecondLayerOfInjectionDefence:
         )
         render(make_spec())
         assert calls
+
+
+def test_the_manifest_carries_the_backpressure_thresholds() -> None:
+    """Агент судит о давлении по порогам действующей конфигурации, поэтому они обязаны в ней быть."""
+    from msp_gateway.spec import Backpressure
+
+    config = render(spec())
+    assert config.manifest["backpressure"] == Backpressure().model_dump()

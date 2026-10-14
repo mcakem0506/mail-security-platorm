@@ -249,10 +249,88 @@ class TestAgent:
         assert 'msp_gateway_pressure_state{state="DRAINING"} 1' in agent.metrics.render()
 
     def test_queue_growth_alone_raises_pressure(self, tmp_path: Path) -> None:
-        lines = [queue_line(NOW.timestamp()) for _ in range(1200)]
+        lines = [queue_line(NOW.timestamp()) for _ in range(5200)]
         agent = make_agent(tmp_path, FakeQueue(lines), disk_reader=lambda: 50 * GB, thresholds=Thresholds())
         agent.collect_once(NOW)
         assert 'msp_gateway_pressure_state{state="PRESSURE"} 1' in agent.metrics.render()
+
+    def test_default_thresholds_equal_the_topology_defaults(self) -> None:
+        """Пока конфигурации нет, узел судит о давлении так же, как описание топологии по умолчанию."""
+        from msp_gateway.spec import Backpressure
+
+        spec, node = Backpressure(), Thresholds()
+        assert node.disk_pressure_free_bytes == spec.disk_pressure_free_bytes
+        assert node.disk_critical_free_bytes == spec.disk_critical_free_bytes
+        assert node.queue_pressure_messages == spec.queue_pressure_messages
+        assert node.queue_critical_messages == spec.queue_critical_messages
+
+
+class TestThresholdsFromTheActiveConfiguration:
+    def write(self, directory: Path, backpressure: object) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "manifest.json").write_text(json.dumps({"backpressure": backpressure}), encoding="utf-8")
+
+    def test_the_manifest_values_are_used(self, tmp_path: Path) -> None:
+        from msp_gateway.agent import thresholds_from_manifest
+
+        self.write(
+            tmp_path,
+            {
+                "disk_pressure_free_bytes": 10 * GB,
+                "disk_critical_free_bytes": 3 * GB,
+                "queue_pressure_messages": 100,
+                "queue_critical_messages": 200,
+            },
+        )
+        found = thresholds_from_manifest(tmp_path)
+        assert (found.queue_pressure_messages, found.queue_critical_messages) == (100, 200)
+        assert found.disk_critical_free_bytes == 3 * GB
+
+    def test_a_new_configuration_changes_the_judgement_without_restarting_the_agent(
+        self, tmp_path: Path
+    ) -> None:
+        config = tmp_path / "config"
+        lines = [queue_line(NOW.timestamp()) for _ in range(150)]
+        agent = make_agent(tmp_path, FakeQueue(lines), disk_reader=lambda: 50 * GB, config_dir=config)
+        agent.collect_once(NOW)
+        assert 'msp_gateway_pressure_state{state="NORMAL"} 1' in agent.metrics.render()
+        self.write(
+            config,
+            {
+                "disk_pressure_free_bytes": 2 * GB,
+                "disk_critical_free_bytes": GB,
+                "queue_pressure_messages": 100,
+                "queue_critical_messages": 1000,
+            },
+        )
+        agent.collect_once(NOW)
+        assert 'msp_gateway_pressure_state{state="PRESSURE"} 1' in agent.metrics.render()
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            None,
+            "text",
+            [],
+            {"queue_pressure_messages": "много"},
+            {"queue_pressure_messages": -5},
+            {"queue_pressure_messages": True},
+            {"queue_pressure_messages": 100, "queue_critical_messages": 50},
+            {"disk_pressure_free_bytes": 1, "disk_critical_free_bytes": 5},
+        ],
+    )
+    def test_nonsense_keeps_the_previous_thresholds(self, tmp_path: Path, bad: object) -> None:
+        from msp_gateway.agent import thresholds_from_manifest
+
+        self.write(tmp_path, bad)
+        assert thresholds_from_manifest(tmp_path) == Thresholds()
+
+    def test_a_missing_or_broken_manifest_keeps_the_previous_thresholds(self, tmp_path: Path) -> None:
+        from msp_gateway.agent import thresholds_from_manifest
+
+        assert thresholds_from_manifest(tmp_path / "absent") == Thresholds()
+        tmp_path.joinpath("manifest.json").write_text("{bad", encoding="utf-8")
+        assert thresholds_from_manifest(tmp_path) == Thresholds()
 
     def test_recipient_age_and_gate(self, tmp_path: Path) -> None:
         agent = make_agent(tmp_path, disk_reader=lambda: 50 * GB, manage_gate=True)

@@ -98,7 +98,7 @@ class Permission(StrEnum):
     VIEW_GATEWAY_QUEUE = "gateway:queue:read"
     #: Слив узла останавливает приём почты на нём: действие администратора, не аналитика.
     DRAIN_GATEWAY_NODE = "gateway:node:drain"
-    SYNC_GATEWAY_RECIPIENTS = "gateway:recipients:sync"
+    SYNC_GATEWAY_RECIPIENTS = "gateway:recipient:sync"
     VIEW_GATEWAY_TLS = "gateway:tls:read"
     #: Повторить доставку отложенной почты. Удаление писем из очереди через панель не предусмотрено
     #: (только ручной разбор на узле): оно необратимо и в 1.1 не автоматизируется.

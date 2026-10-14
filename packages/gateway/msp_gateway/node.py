@@ -155,6 +155,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
         if os.environ.get("MSP_COLLECTOR_STATUS")
         else None,
         drift_reader=lambda: drift_state(store),
+        config_dir=Path(CONFIG_ROOT) / "active",
     )
     serve_metrics(agent, args.listen, args.port)
     sender = None

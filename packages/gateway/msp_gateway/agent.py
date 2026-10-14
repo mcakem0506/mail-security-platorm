@@ -212,12 +212,49 @@ def http_sender(
 
 @dataclass(frozen=True)
 class Thresholds:
-    disk_pressure_free_bytes: int = 5 * 1024**3
-    disk_critical_free_bytes: int = 1 * 1024**3
-    queue_pressure_messages: int = 1000
-    queue_critical_messages: int = 5000
+    #: Значения по умолчанию совпадают с ``spec.Backpressure``: пока действующей конфигурации нет,
+    #: узел судит о давлении так же, как описание топологии по умолчанию.
+    disk_pressure_free_bytes: int = 2 * 1024**3
+    disk_critical_free_bytes: int = 512 * 1024**2
+    queue_pressure_messages: int = 5_000
+    queue_critical_messages: int = 20_000
     recipients_fresh_seconds: float = 3600.0
     recipients_grace_seconds: float = 7200.0
+
+
+def thresholds_from_manifest(config_dir: Path, fallback: Thresholds | None = None) -> Thresholds:
+    """Пороги давления из манифеста действующей конфигурации; при любой неполадке — прежние.
+
+    Манифест читается при каждом проходе, поэтому новая конфигурация меняет пороги без перезапуска
+    агента. Некорректные значения (не числа, отрицательные, критический порог не ниже порога
+    давления) не принимаются: узел остаётся при прежних, а не с порогом, который всегда сработает.
+    """
+    base = fallback or Thresholds()
+    try:
+        data = json.loads((config_dir / "manifest.json").read_text(encoding="utf-8")).get("backpressure")
+    except (OSError, ValueError, AttributeError):
+        return base
+    if not isinstance(data, dict):
+        return base
+
+    def number(key: str, current: int) -> int:
+        value = data.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else current
+
+    disk_pressure = number("disk_pressure_free_bytes", base.disk_pressure_free_bytes)
+    disk_critical = number("disk_critical_free_bytes", base.disk_critical_free_bytes)
+    queue_pressure = number("queue_pressure_messages", base.queue_pressure_messages)
+    queue_critical = number("queue_critical_messages", base.queue_critical_messages)
+    if disk_critical >= disk_pressure or queue_critical <= queue_pressure:
+        return base
+    return Thresholds(
+        disk_pressure_free_bytes=disk_pressure,
+        disk_critical_free_bytes=disk_critical,
+        queue_pressure_messages=queue_pressure,
+        queue_critical_messages=queue_critical,
+        recipients_fresh_seconds=base.recipients_fresh_seconds,
+        recipients_grace_seconds=base.recipients_grace_seconds,
+    )
 
 
 def read_recipient_generated_at(state_dir: Path) -> datetime | None:
@@ -311,7 +348,9 @@ class Agent:
         probes: ProbeConfig | None = None,
         collector_status: Path | None = None,
         drift_reader: Callable[[], bool | None] | None = None,
+        config_dir: Path | None = None,
     ) -> None:
+        self.config_dir = config_dir
         self.state_dir = state_dir
         self.probes = probes or ProbeConfig()
         self.collector_status = collector_status
@@ -360,6 +399,8 @@ class Agent:
         except OSError:
             self.metrics.disk_free_bytes = None
 
+        if self.config_dir is not None:
+            self.thresholds = thresholds_from_manifest(self.config_dir, self.thresholds)
         t = self.thresholds
         free = self.metrics.disk_free_bytes
         self._update_pressure(free, self.metrics.queue.messages)

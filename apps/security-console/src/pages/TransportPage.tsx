@@ -123,7 +123,7 @@ export function TransportPage({ user }: { user: CurrentUser }) {
       {tab === "queue" && <QueueTab />}
       {tab === "nodes" && <NodesTab canDrain={can("gateway:node:drain")} canFlush={can("gateway:queue:admin")} />}
       {tab === "routes" && <RoutesTab canRead={can("gateway:config:read")} />}
-      {tab === "recipients" && <RecipientsTab canSync={can("gateway:recipients:sync")} />}
+      {tab === "recipients" && <RecipientsTab canSync={can("gateway:recipient:sync")} />}
       {tab === "tls" && <TlsTab />}
       {tab === "config" && (
         <ConfigTab

@@ -361,6 +361,9 @@ def render(
         "hash_maps": ["relay_domains", "owned_domains", "transport", "relay_recipients"],
         # Свежесть справочника: время формирования выгрузки, а не время применения пакета.
         "recipients": recipients_meta,
+        # Пороги давления (ТЗ §25) едут вместе с конфигурацией: агент берёт их отсюда, а не из
+        # собственных значений по умолчанию, иначе «давление» узла и «давление» в описании расходились бы.
+        "backpressure": spec.backpressure.model_dump(),
         "files": sorted(files),
         "deployment": "MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER"
         if spec.mode is not DeploymentMode.COMPANION_ONLY
