@@ -35,6 +35,7 @@ NODE_MODULES = (
     "logparser",
     "metrics",
     "agent",
+    "collector",
 )
 
 
@@ -71,7 +72,8 @@ class TestTheNodeNeedsOnlyTheStandardLibrary:
             "import sys; sys.modules['pydantic'] = None; sys.modules['yaml'] = None; "
             "import msp_gateway.node, msp_gateway.journal_writer, msp_gateway.probes, "
             "msp_gateway.apply, msp_gateway.validation, msp_gateway.bundle, msp_gateway.state, "
-            "msp_gateway.logparser, msp_gateway.metrics, msp_gateway.agent; print('ok')"
+            "msp_gateway.logparser, msp_gateway.metrics, msp_gateway.agent, "
+            "msp_gateway.collector; print('ok')"
         )
         completed = subprocess.run(  # nosec B603 - фиксированная команда
             [sys.executable, "-c", code],
@@ -314,7 +316,7 @@ class TestProbes:
 class TestCommandLine:
     """Парсер аргументов собирается на каждом запуске контейнера; ошибка в нём роняет узел."""
 
-    @pytest.mark.parametrize("command", ["apply x", "status", "agent", "drain on"])
+    @pytest.mark.parametrize("command", ["apply x", "status", "agent", "drain on", "collector"])
     def test_every_command_parses(self, command: str) -> None:
         from msp_gateway import node
 

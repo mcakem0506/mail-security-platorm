@@ -149,6 +149,32 @@ def cmd_agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_collector(args: argparse.Namespace) -> int:
+    """Сборщик теневых копий. Запускается от владельца журнала, не от root и не от агента."""
+    from .collector import Collector, DirectorySink, HttpSink, run_forever
+
+    if args.sink_dir:
+        sink = DirectorySink(Path(args.sink_dir))
+    else:
+        url = args.url or os.environ.get("MSP_INGEST_URL", "")
+        token_file = args.token_file or os.environ.get("MSP_INGEST_TOKEN_FILE", "")
+        if not url or not token_file:
+            print("collector: нужен --sink-dir либо --url и --token-file", file=sys.stderr)
+            return 2
+        sink = HttpSink(url, Path(token_file).read_text(encoding="utf-8").strip())
+    collector = Collector(Path(args.journal), sink, retention_days=args.retention_days)
+    if args.once:
+        stats = collector.run_once()
+        print(
+            json.dumps(
+                {"collected": stats.collected, "failed": stats.failed, "quarantined": stats.quarantined}
+            )
+        )
+        return 0
+    run_forever(collector, interval=args.interval)
+    return 0
+
+
 def cmd_drain(args: argparse.Namespace) -> int:
     """Включить или выключить слив. Запускается от root: нужен ``postfix reload``."""
     from .state import is_draining, set_drain
@@ -180,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--port", type=int, default=9100)
     agent.add_argument("--interval", type=float, default=5.0)
     agent.set_defaults(func=cmd_agent)
+    collector = sub.add_parser("collector")
+    collector.add_argument("--journal", default=os.environ.get("MSP_JOURNAL_DIR", "/var/lib/msp/journal"))
+    collector.add_argument("--sink-dir", default="")
+    collector.add_argument("--url", default="")
+    collector.add_argument("--token-file", default="")
+    collector.add_argument("--retention-days", type=float, default=7.0)
+    collector.add_argument("--interval", type=float, default=5.0)
+    collector.add_argument("--once", action="store_true")
+    collector.set_defaults(func=cmd_collector)
     drain = sub.add_parser("drain")
     drain.add_argument("mode", choices=["on", "off", "status"])
     drain.set_defaults(func=cmd_drain)
