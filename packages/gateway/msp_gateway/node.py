@@ -16,10 +16,18 @@ import json
 import os
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .apply import ConfigStore, Outcome, apply_bundle
 from .probes import ProbeResult, ProbeState, banner_probe, open_relay_probe
+from .state import (
+    RecipientFreshness,
+    classify_freshness,
+    gate_is_closed,
+    set_recipient_gate,
+    write_recipient_meta,
+)
 
 CONFIG_ROOT = os.environ.get("MSP_CONFIG_ROOT", "/var/lib/msp/config")
 STATE_DIR = os.environ.get("MSP_STATE_DIR", "/var/lib/msp/state")
@@ -90,6 +98,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if not args.no_health:
         health = make_healthcheck(args.inbound_port, args.internal_port)
     result = apply_bundle(files, manifest, store, healthcheck=health, reload_wait=args.reload_wait)
+    if result.outcome is Outcome.ACTIVE:
+        write_recipient_meta(manifest.get("recipients"), Path(STATE_DIR))
     print(
         json.dumps(
             {
@@ -175,6 +185,30 @@ def cmd_collector(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gate_refresh(_args: argparse.Namespace) -> int:
+    """Пересчитать свежесть справочника и при необходимости закрыть или открыть приём получателей.
+
+    Запускается от root периодически: смена состояния требует ``postfix reload``.
+    """
+    from .agent import read_recipient_generated_at
+    from .metrics import age_seconds
+
+    state = Path(STATE_DIR)
+    age = age_seconds(read_recipient_generated_at(state), datetime.now(UTC))
+    freshness = classify_freshness(
+        age_seconds=age,
+        fresh_seconds=float(os.environ.get("MSP_RECIPIENTS_FRESH_SECONDS", "3600")),
+        grace_seconds=float(os.environ.get("MSP_RECIPIENTS_GRACE_SECONDS", "7200")),
+    )
+    want_closed = freshness is RecipientFreshness.STALE_HARD
+    if want_closed != gate_is_closed(state):
+        set_recipient_gate(freshness, state_dir=state)
+    print(
+        json.dumps({"freshness": freshness.value, "age_seconds": age, "gate_closed": gate_is_closed(state)})
+    )
+    return 0
+
+
 def cmd_drain(args: argparse.Namespace) -> int:
     """Включить или выключить слив. Запускается от root: нужен ``postfix reload``."""
     from .state import is_draining, set_drain
@@ -215,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
     collector.add_argument("--interval", type=float, default=5.0)
     collector.add_argument("--once", action="store_true")
     collector.set_defaults(func=cmd_collector)
+    gate = sub.add_parser("gate-refresh")
+    gate.set_defaults(func=cmd_gate_refresh)
     drain = sub.add_parser("drain")
     drain.add_argument("mode", choices=["on", "off", "status"])
     drain.set_defaults(func=cmd_drain)

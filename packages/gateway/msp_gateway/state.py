@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess  # nosec B404 - вызывает фиксированные команды Postfix
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -73,6 +75,37 @@ def is_draining(state_dir: Path = STATE_DIR) -> bool:
         return bool((state_dir / "drain.pcre").read_text(encoding="utf-8").strip())
     except OSError:
         return False
+
+
+def gate_is_closed(state_dir: Path = STATE_DIR) -> bool:
+    try:
+        return bool((state_dir / "recipient_gate.pcre").read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
+def write_recipient_meta(meta: object, state_dir: Path = STATE_DIR) -> bool:
+    """Записать метаданные свежести справочника из манифеста применённого пакета.
+
+    Принимаются только известные поля с проверкой типов: манифест подписан контрольной суммой,
+    но запись в каталог состояния всё равно не должна зависеть от того, что в нём оказалось.
+    """
+    if not isinstance(meta, dict) or not isinstance(meta.get("generated_at"), str):
+        return False
+    try:
+        datetime.fromisoformat(meta["generated_at"])
+    except ValueError:
+        return False
+    clean: dict[str, object] = {"generated_at": meta["generated_at"]}
+    count = meta.get("recipient_count")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        clean["recipient_count"] = count
+    for key in ("checksum", "source", "source_snapshot_at"):
+        if isinstance(meta.get(key), str):
+            clean[key] = str(meta[key])[:200]
+    state_dir.mkdir(parents=True, exist_ok=True)
+    _write_atomically(state_dir / "recipients.meta.json", json.dumps(clean, sort_keys=True))
+    return True
 
 
 def set_recipient_gate(

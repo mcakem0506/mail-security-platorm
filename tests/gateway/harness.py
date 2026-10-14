@@ -334,9 +334,15 @@ class Stack:
             path.chmod(0o644)  # внутри контейнера читает пользователь, не владелец тома
 
     def write_bundle(
-        self, directory: Path, spec: GatewaySpec, recipients: list[Recipient], *, version: int
+        self,
+        directory: Path,
+        spec: GatewaySpec,
+        recipients: list[Recipient],
+        *,
+        version: int,
+        recipients_meta: dict[str, object] | None = None,
     ) -> Path:
-        config = render(spec, recipients, version=version)
+        config = render(spec, recipients, version=version, recipients_meta=recipients_meta)
         directory.mkdir(parents=True, exist_ok=True)
         for name, content in config.files.items():
             (directory / name).write_bytes(content)
@@ -347,7 +353,13 @@ class Stack:
         shutil.rmtree(self.workdir / "bootstrap", ignore_errors=True)
         self.write_bundle(self.workdir / "bootstrap", spec, recipients, version=1)
 
-    def apply(self, spec: GatewaySpec, recipients: list[Recipient] | None = None) -> dict[str, object]:
+    def apply(
+        self,
+        spec: GatewaySpec,
+        recipients: list[Recipient] | None = None,
+        *,
+        recipients_meta: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         """Применить новый пакет на работающем узле — тем же путём, каким это делает агент."""
         self._bundle_counter += 1
         version = self._bundle_counter + 1
@@ -357,6 +369,7 @@ class Stack:
             spec,
             recipients if recipients is not None else LAB_RECIPIENTS,
             version=version,
+            recipients_meta=recipients_meta,
         )
         ports = f"--internal-port {spec.internal.port}" if spec.internal.enabled else ""
         result = self.exec(

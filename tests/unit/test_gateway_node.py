@@ -36,6 +36,7 @@ NODE_MODULES = (
     "metrics",
     "agent",
     "collector",
+    "recipients",
 )
 
 

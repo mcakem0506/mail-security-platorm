@@ -24,6 +24,7 @@ from .bundle import (
     bundle_checksum,
     check_main_cf,
 )
+from .recipients import RecipientEntry, map_text
 from .spec import (
     DeploymentMode,
     Direction,
@@ -328,17 +329,14 @@ def render_transport(spec: GatewaySpec) -> str:
 
 
 def render_relay_recipients(recipients: list[Recipient]) -> str:
-    keys: set[str] = set()
-    for item in recipients:
-        keys.add(item.address)
-        keys.update(item.aliases)
-    return "".join(f"{key} OK\n" for key in sorted(keys))
+    return map_text(RecipientEntry(item.address, aliases=item.aliases) for item in recipients)
 
 
 def render(
     spec: GatewaySpec,
     recipients: list[Recipient] | None = None,
     *,
+    recipients_meta: dict[str, object] | None = None,
     version: int = 0,
     config_dir: str = "/var/lib/msp/config/active",
     state_dir: str = DEFAULT_STATE_DIR,
@@ -361,6 +359,8 @@ def render(
         "checksum": checksum,
         "mode": spec.mode.value,
         "hash_maps": ["relay_domains", "owned_domains", "transport", "relay_recipients"],
+        # Свежесть справочника: время формирования выгрузки, а не время применения пакета.
+        "recipients": recipients_meta,
         "files": sorted(files),
         "deployment": "MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER"
         if spec.mode is not DeploymentMode.COMPANION_ONLY

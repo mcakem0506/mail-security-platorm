@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from msp_gateway.state import (
     DRAIN_RULE,
@@ -124,3 +126,49 @@ class TestRecipientGate:
         set_drain(True, state_dir=tmp_path, reload=False)
         set_recipient_gate(RecipientFreshness.FRESH, state_dir=tmp_path, reload=False)
         assert is_draining(tmp_path) is True
+
+
+class TestRecipientMeta:
+    GOOD: ClassVar[dict[str, object]] = {
+        "generated_at": "2026-10-14T10:00:00+00:00",
+        "recipient_count": 5,
+        "checksum": "ab",
+        "source": "csv",
+    }
+
+    def test_valid_meta_is_written_with_known_fields_only(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        import json
+
+        from msp_gateway.state import write_recipient_meta
+
+        assert write_recipient_meta({**self.GOOD, "evil": "../../x"}, tmp_path) is True
+        written = json.loads((tmp_path / "recipients.meta.json").read_text(encoding="utf-8"))
+        assert written["recipient_count"] == 5
+        assert "evil" not in written
+
+    @pytest.mark.parametrize(
+        "bad",
+        [None, "text", [], {}, {"generated_at": 5}, {"generated_at": "вчера"}, {"recipient_count": 1}],
+    )
+    def test_invalid_meta_is_not_written(self, tmp_path, bad) -> None:  # type: ignore[no-untyped-def]
+        from msp_gateway.state import write_recipient_meta
+
+        assert write_recipient_meta(bad, tmp_path) is False
+        assert not (tmp_path / "recipients.meta.json").exists()
+
+    def test_hostile_counts_and_lengths_are_dropped(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        import json
+
+        from msp_gateway.state import write_recipient_meta
+
+        write_recipient_meta({**self.GOOD, "recipient_count": True, "checksum": "x" * 5000}, tmp_path)
+        written = json.loads((tmp_path / "recipients.meta.json").read_text(encoding="utf-8"))
+        assert "recipient_count" not in written
+        assert len(written["checksum"]) == 200
+
+    def test_gate_state_is_readable(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        from msp_gateway.state import gate_is_closed
+
+        assert gate_is_closed(tmp_path) is False
+        set_recipient_gate(RecipientFreshness.STALE_HARD, state_dir=tmp_path, reload=False)
+        assert gate_is_closed(tmp_path) is True

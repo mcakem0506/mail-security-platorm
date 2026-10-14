@@ -18,7 +18,7 @@ from msp_gateway.bundle import (
     check_master_cf,
     verify_bundle,
 )
-from msp_gateway.render import render
+from msp_gateway.render import Recipient, render
 from msp_gateway.spec import GatewaySpec, InternalListener, Outbound, OutboundMode, RelayDomain, Route, Target
 
 
@@ -42,8 +42,21 @@ class TestWhatTheGeneratorProducesPassesTheNodeCheck:
         check_master_cf(render(spec()).files["master.cf"].decode())
 
     def test_a_whole_bundle_verifies(self) -> None:
-        config = render(spec())
+        config = render(spec(), [Recipient("ivan@corp.example")])
         assert verify_bundle(config.files, config.manifest) == config.checksum
+
+    def test_a_bundle_with_domains_but_no_recipients_is_refused(self) -> None:
+        """Пустой справочник при настроенных доменах отверг бы всю почту: узел такое не применяет."""
+        config = render(spec())
+        with pytest.raises(BundleError, match="справочник"):
+            verify_bundle(config.files, config.manifest)
+
+    def test_the_emptiness_check_cannot_be_bypassed_by_recomputing_the_checksum(self) -> None:
+        config = render(spec(), [Recipient("ivan@corp.example")])
+        files = {**config.files, "relay_recipients": b"  "}
+        manifest = {**config.manifest, "checksum": bundle_checksum(files)}
+        with pytest.raises(BundleError, match="справочник"):
+            verify_bundle(files, manifest)
 
 
 class TestMainCf:

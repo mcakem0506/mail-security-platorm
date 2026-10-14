@@ -63,7 +63,22 @@ def verify_bundle(files: dict[str, bytes], manifest: dict[str, object]) -> str:
         check_main_cf(files["main.cf"].decode("utf-8", errors="replace"))
     if "master.cf" in files:
         check_master_cf(files["master.cf"].decode("utf-8", errors="replace"))
+    _check_recipients_not_empty(files)
     return actual
+
+
+def _check_recipients_not_empty(files: dict[str, bytes]) -> None:
+    """Пакет с доменами для приёма и пустым справочником отверг бы всю почту (ТЗ §16).
+
+    Панель такое обновление не выпускает, но узел не обязан верить панели: пустая карта на
+    работающем узле — это отказ в обслуживании, а не «справочник ещё не загружен».
+    """
+    domains = files.get("relay_domains")
+    recipients = files.get("relay_recipients")
+    if domains is None or recipients is None:
+        return
+    if domains.strip() and not recipients.strip():
+        raise BundleError("справочник получателей пуст при настроенных доменах приёма")
 
 
 def version_id(manifest: dict[str, object]) -> str:
