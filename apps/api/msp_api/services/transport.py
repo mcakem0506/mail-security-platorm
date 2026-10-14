@@ -45,6 +45,7 @@ from msp_gateway.spec import GatewaySpec
 from msp_gateway.state import RecipientFreshness, classify_freshness
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import Settings
@@ -474,8 +475,17 @@ def get_or_create_node(
             name=f"node-{node_id[:8]}",
             role=TransportNodeRole(role) if role in TransportNodeRole.__members__ else TransportNodeRole.LAB,
         )
-        session.add(node)
-        session.flush()
+        # Узел обращается к панели из нескольких процессов сразу (агент, синхронизация, сборщик),
+        # и первые запросы приходят одновременно: проигравший гонку берёт уже созданную запись.
+        try:
+            with session.begin_nested():
+                session.add(node)
+        except IntegrityError:
+            node = session.execute(
+                select(TransportNode).where(
+                    TransportNode.organization_id == organization_id, TransportNode.node_id == node_id
+                )
+            ).scalar_one()
     return node
 
 

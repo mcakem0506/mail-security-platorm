@@ -247,6 +247,7 @@ def list_messages(
     actor: QueueReader,
     direction: Literal["INBOUND", "OUTBOUND", "UNKNOWN"] | None = None,
     state: TransportMessageState | None = None,
+    internet_message_id: Annotated[str | None, Query(max_length=998)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
@@ -255,9 +256,11 @@ def list_messages(
         query = query.where(TransportMessage.direction == direction)
     if state:
         query = query.where(TransportMessage.state == state)
+    if internet_message_id:
+        query = query.where(TransportMessage.internet_message_id == internet_message_id)
     total = session.execute(select(func.count()).select_from(query.subquery())).scalar_one()
     rows = session.execute(
-        query.order_by(TransportMessage.created_at.desc()).limit(limit).offset(offset)
+        query.order_by(TransportMessage.created_at.desc(), TransportMessage.id).limit(limit).offset(offset)
     ).scalars()
     return {"total": total, "items": [_message_out(m) for m in rows]}
 
@@ -558,9 +561,20 @@ def _shadow_key(content_sha256: str, direction: str, message_id: str, fingerprin
     ).hexdigest()
 
 
+async def raw_body(request: Request) -> bytes:
+    """Тело запроса как есть. Читается отдельной зависимостью, чтобы сам обработчик был обычной
+    функцией и работал в пуле потоков: запись в базу и хранилище не должна стоять в цикле событий,
+    иначе один медленный приём копии задерживает все остальные запросы панели, в том числе сигналы
+    других узлов."""
+    return await request.body()
+
+
+RawBody = Annotated[bytes, Depends(raw_body)]
+
+
 @agent_router.post("/shadow")
-async def agent_shadow(
-    request: Request,
+def agent_shadow(
+    raw: RawBody,
     session: DbSession,
     settings: AppSettings,
     _auth: NodeAuth,
@@ -574,7 +588,6 @@ async def agent_shadow(
 ) -> dict[str, Any]:
     """Принять копию письма от узла. Повтор с тем же ключом не создаёт второго анализа."""
     org = _organization(session)
-    raw = await request.body()
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "пустое письмо")
     if len(raw) > settings.limit_message_size:

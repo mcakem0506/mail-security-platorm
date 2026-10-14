@@ -264,8 +264,11 @@ def make_message(message_id: str, sender: str, recipient: str, *, body: str = "�
 
 
 class Stack:
-    def __init__(self, workdir: Path) -> None:
+    def __init__(self, workdir: Path, *, panel_port: int | None = None, panel_token: str = "") -> None:
         self.workdir = workdir
+        #: Порт панели на хосте; если задан, узел и сборщик получают её адрес и токен.
+        self.panel_port = panel_port
+        self.panel_token = panel_token
         self.project = f"gwt{uuid.uuid4().hex[:8]}"
         self.ports = {
             "GW_PORT_IN": _free_port(),
@@ -288,13 +291,32 @@ class Stack:
             "COMPOSE_PROJECT_NAME": self.project,
             "GW_TEST_DIR": str(self.workdir),
             **{k: str(v) for k, v in self.ports.items()},
+            **(self.panel_env() if self.panel_port else {}),
+        }
+
+    def panel_env(self) -> dict[str, str]:
+        base = f"http://host.docker.internal:{self.panel_port}/api/v1/gateway-agent"
+        return {
+            "GW_PANEL_URL": base,
+            "GW_INGEST_URL": f"{base}/shadow",
+            "GW_PANEL_TOKEN_FILE": "/run/secrets/gateway/panel.token",
+            "GW_SYNC_INTERVAL": "3",
         }
 
     def compose(
         self, *args: str, check: bool = True, timeout: float = 600.0
     ) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(  # nosec B603 - фиксированная команда docker compose
-            ["docker", "compose", "-f", str(COMPOSE), "--profile", "gateway-test", *args],
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(COMPOSE),
+                "--profile",
+                "gateway-test",
+                *(["--profile", "gateway-panel"] if self.panel_port else []),
+                *args,
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -323,6 +345,11 @@ class Stack:
     # --- сертификаты и пакеты --------------------------------------------------------------
     def issue_certificates(self, *, gateway_days: int = 30, exchange_days: int = 30) -> None:
         secrets = self.workdir / "secrets"
+        if self.panel_port:
+            (secrets / "gateway").mkdir(parents=True, exist_ok=True)
+            token = secrets / "gateway" / "panel.token"
+            token.write_text(self.panel_token, encoding="utf-8")
+            token.chmod(0o644)  # читают root (синхронизация) и владелец журнала (сборщик)
         self.authority.issue(
             secrets / "gateway", "tls", ["gw.lab.example", "gateway-postfix", "localhost"], days=gateway_days
         )

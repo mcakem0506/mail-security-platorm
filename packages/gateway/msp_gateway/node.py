@@ -158,10 +158,17 @@ def cmd_agent(args: argparse.Namespace) -> int:
     )
     serve_metrics(agent, args.listen, args.port)
     sender = None
-    url = os.environ.get("MSP_CONTROL_URL", "")
-    token_file = os.environ.get("MSP_CONTROL_TOKEN_FILE", "")
-    if url and token_file:
-        sender = http_sender(url, Path(token_file).read_text(encoding="utf-8").strip(), agent.node_id)
+    # Один адрес и один токен на агента, синхронизацию и сборщик: так их нельзя настроить на разные
+    # панели. События уходят на /events того же адреса, откуда узел забирает конфигурацию.
+    panel = os.environ.get("MSP_PANEL_URL", "").rstrip("/")
+    token_file = os.environ.get("MSP_PANEL_TOKEN_FILE", "")
+    if panel and token_file:
+        try:
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as error:
+            print(f"agent: токен панели не читается: {type(error).__name__}", file=sys.stderr)
+        else:
+            sender = http_sender(f"{panel}/events", token, agent.node_id)
     run_forever(agent, interval=args.interval, sender=sender)
     return 0
 

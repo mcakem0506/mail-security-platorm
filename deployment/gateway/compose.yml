@@ -40,6 +40,12 @@ services:
       MSP_PROBE_INTERVAL: "15"
       MSP_CERT_FILES: smtp-public=/run/secrets/gateway/tls.crt
       MSP_COLLECTOR_STATUS: /var/lib/msp/status/collector.json
+      # Связь с панелью (ТЗ 1.1 §37): по умолчанию выключена, узел работает автономно.
+      MSP_PANEL_URL: ${GW_PANEL_URL:-}
+      MSP_PANEL_TOKEN_FILE: ${GW_PANEL_TOKEN_FILE:-}
+      MSP_SYNC_INTERVAL: "${GW_SYNC_INTERVAL:-30}"
+    # Адрес хоста внутри контейнера: панель в проверках запускается на стороне разработчика.
+    extra_hosts: ["host.docker.internal:host-gateway"]
     security_opt: ["no-new-privileges:true"]
     networks:
       gwnet:
@@ -54,6 +60,50 @@ services:
       - ${GW_TEST_DIR:?укажите каталог стенда}/bootstrap:/bootstrap:ro
       - ${GW_TEST_DIR}/bundles:/bundles:ro
       - ${GW_TEST_DIR}/secrets/gateway:/run/secrets/gateway:ro
+
+  # Сборщик теневых копий (ТЗ 1.1 §34, §67): отдельный контейнер, отдельный процесс, права
+  # владельца журнала и больше ничего. Его остановка или сбой не касаются доставки. Включается
+  # профилем gateway-panel вместе с панелью: без адреса приёмника ему нечего делать.
+  gateway-shadow-collector:
+    image: msp-gateway:test
+    profiles: [gateway-panel]
+    restart: "no"
+    depends_on:
+      gateway-postfix: {condition: service_healthy}
+    user: "10002:10002"
+    entrypoint:
+      - python3
+      - -m
+      - msp_gateway.node
+      - collector
+      - --interval
+      - "2"
+    environment:
+      MSP_INGEST_URL: ${GW_INGEST_URL:-}
+      MSP_INGEST_TOKEN_FILE: ${GW_PANEL_TOKEN_FILE:-}
+      MSP_COLLECTOR_STATUS: /var/lib/msp/status/collector.json
+      MSP_JOURNAL_DIR: /var/lib/msp/journal
+      MSP_IDENTITY_DIR: /var/lib/msp
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    # Проверка здоровья образа относится к Postfix; у сборщика своя: свежий отчёт о проходе.
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import os,sys,time; sys.exit(0 if time.time()-os.stat('/var/lib/msp/status/collector.json').st_mtime < 60 else 1)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.40
+    volumes:
+      - gw-var:/var/lib/msp
+      - ${GW_TEST_DIR:?укажите каталог стенда}/secrets/gateway:/run/secrets/gateway:ro
 
   fake-exchange:
     <<: *tools
