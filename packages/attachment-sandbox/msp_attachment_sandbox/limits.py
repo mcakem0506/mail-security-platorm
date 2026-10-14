@@ -65,7 +65,7 @@ def apply_limits(
             applied[name] = "unsupported"
             continue
         try:
-            resource.setrlimit(constant, (value, value))
+            resource.setrlimit(constant, (value, value))  # type: ignore[attr-defined]
             applied[name] = value
         except (ValueError, OSError) as error:
             applied[name] = f"failed: {type(error).__name__}"

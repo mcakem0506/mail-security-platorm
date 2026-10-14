@@ -175,8 +175,9 @@ def cmd_agent(args: argparse.Namespace) -> int:
 
 def cmd_collector(args: argparse.Namespace) -> int:
     """Сборщик теневых копий. Запускается от владельца журнала, не от root и не от агента."""
-    from .collector import Collector, DirectorySink, HttpSink, run_forever
+    from .collector import Collector, DirectorySink, HttpSink, Sink, run_forever
 
+    sink: Sink
     if args.sink_dir:
         sink = DirectorySink(Path(args.sink_dir))
     else:

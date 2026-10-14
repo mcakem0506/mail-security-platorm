@@ -264,7 +264,7 @@ def exchange_probe(
             context = probe_tls_context(ca_file)
             # Имя в сертификате проверяется по server_hostname, а не по адресу: Exchange за
             # балансировщиком отвечает по IP, а сертификат выдан на имя.
-            client._host = server_hostname or host
+            client._host = server_hostname or host  # type: ignore[attr-defined]
             client.starttls(context=context)
             client.ehlo(helo)
             results.append(LayerResult("TLS", "OK", "", time.monotonic() - started))

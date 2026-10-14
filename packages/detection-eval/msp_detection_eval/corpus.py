@@ -1774,7 +1774,7 @@ class GoldenCorpusBuilder:
         """
         from msp_attachment_sandbox import samples
 
-        bad_sender = {
+        bad_sender: dict[str, Any] = {
             "auth": "spf=fail; dkim=none; dmarc=fail",
             "source_host": "mx.vendor-unknown.example",
         }
