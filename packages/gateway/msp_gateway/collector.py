@@ -223,31 +223,45 @@ class DirectorySink:
         meta.write_text(json.dumps(record.as_dict(), sort_keys=True), encoding="utf-8")
 
 
+def _header_safe(value: str, limit: int) -> str:
+    """Значение для HTTP-заголовка: только печатный ASCII, без переводов строк и управляющих символов."""
+    return "".join(ch if 32 <= ord(ch) < 127 else "?" for ch in value)[:limit]
+
+
 class HttpSink:
-    """Передача панели управления. Тело — письмо как есть, метаданные — в заголовке.
+    """Передача панели управления. Тело — письмо как есть, метаданные — в заголовках.
 
     Токен хранится только в памяти процесса и не попадает ни в адрес, ни в сообщения об ошибках.
     """
 
-    def __init__(self, url: str, token: str, *, timeout: float = 30.0) -> None:
+    def __init__(self, url: str, token: str, *, node_id: str = "", timeout: float = 30.0) -> None:
         if not url.startswith(("https://", "http://")):
             raise ValueError("адрес приёмника должен быть http(s)")
         self.url = url
         self._token = token
+        self.node_id = node_id
         self.timeout = timeout
 
+    def headers(self, record: CopyRecord) -> dict[str, str]:
+        """Заголовки запроса; вынесены, чтобы контракт с панелью проверялся тестом, а не глазами."""
+        return {
+            "Content-Type": "message/rfc822",
+            "Authorization": f"Bearer {self._token}",
+            "X-MSP-Idempotency-Key": record.key,
+            "X-MSP-Node-Id": self.node_id,
+            "X-MSP-Direction": record.direction,
+            "X-MSP-Message-Id": _header_safe(record.message_id, 998),
+            "X-MSP-Queue-Id": _header_safe(record.queue_id, 40),
+            "X-MSP-Envelope-Fingerprint": record.envelope_fingerprint,
+            "X-MSP-Client-Address": _header_safe(record.client_address, 64),
+        }
+
     def deliver(self, record: CopyRecord, raw: bytes) -> None:
-        meta = base64.b64encode(json.dumps(record.as_dict(), sort_keys=True).encode()).decode()
         request = urllib.request.Request(  # noqa: S310 - схема проверена в конструкторе
             self.url,
             data=raw,
             method="POST",
-            headers={
-                "Content-Type": "message/rfc822",
-                "Authorization": f"Bearer {self._token}",
-                "X-MSP-Idempotency-Key": record.key,
-                "X-MSP-Meta": meta,
-            },
+            headers=self.headers(record),
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310  # nosec B310
             if response.status >= 300:

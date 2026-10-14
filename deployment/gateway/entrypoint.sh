@@ -43,8 +43,28 @@ touch /var/log/msp/postfix.log
 chown root:mspagent /var/log/msp/postfix.log
 chmod 0640 /var/log/msp/postfix.log
 
+# Постоянный идентификатор узла: общий для агента, сборщика и синхронизации, читается всеми,
+# создаётся один раз и переживает пересоздание контейнера (лежит в томе).
+python3 -c "from pathlib import Path; from msp_gateway.agent import node_identity; node_identity(Path('$ROOT'))"
+chmod 0644 "$ROOT/node_id"
+
 # Агент наблюдения: читает журнал и очередь, отдаёт метрики. Работает без прав на изменение
 # Postfix; если он упадёт, почта продолжит ходить (пропадёт только наблюдаемость).
+# Связь с панелью управления (ТЗ 1.1 §37). Выключена по умолчанию: без адреса панели узел
+# работает автономно на последней применённой конфигурации. Применение требует root
+# (postmap, postfix reload); проверка пакета и откат выполняются теми же функциями, что и при
+# ручном применении, поэтому панель может предложить конфигурацию, но не обойти проверку узла.
+if [ -n "${MSP_PANEL_URL:-}" ] && [ -n "${MSP_PANEL_TOKEN_FILE:-}" ]; then
+  python3 -m msp_gateway.node sync --interval "${MSP_SYNC_INTERVAL:-30}" &
+fi
+
+# Сборщик теневых копий (ТЗ 1.1 §34). Отдельный процесс владельца журнала: его сбой не может
+# ни задержать, ни отклонить, ни потерять почту.
+if [ -n "${MSP_INGEST_URL:-}" ] && [ -n "${MSP_INGEST_TOKEN_FILE:-}" ]; then
+  setpriv --reuid=mspjournal --regid=mspjournal --clear-groups \
+    python3 -m msp_gateway.node collector --interval "${MSP_COLLECT_INTERVAL:-5}" &
+fi
+
 # Закрытие приёма при безнадёжно устаревшем справочнике (ТЗ §16). Требует postfix reload, поэтому
 # выполняет root; включается явно, потому что без справочника в боевом режиме узел принимал бы всех.
 if [ "${MSP_RECIPIENT_GATE:-0}" = "1" ]; then

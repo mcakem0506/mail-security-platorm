@@ -236,6 +236,7 @@ class Agent:
         log_path: Path,
         role: str,
         data_dir: Path | None = None,
+        identity_dir: Path | None = None,
         queue_snapshot: Path | None = None,
         runner: Runner = subprocess_runner,
         thresholds: Thresholds | None = None,
@@ -255,7 +256,8 @@ class Agent:
         # Postfix: агент не вправе писать в каталог, который читает Postfix.
         self.data_dir = data_dir or state_dir
         self.outbox = Outbox(self.data_dir / "outbox.jsonl")
-        self.node_id = node_identity(self.data_dir)
+        # Идентификатор лежит в общем каталоге (его читают и сборщик, и синхронизация); создаёт его root.
+        self.node_id = node_identity(identity_dir or self.data_dir)
         self._disk_reader = disk_reader or (lambda: read_disk().free_bytes)
         self._config_reader = config_reader or (lambda: ("", ""))
         self._manage_gate = manage_gate

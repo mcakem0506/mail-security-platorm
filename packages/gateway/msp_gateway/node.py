@@ -143,6 +143,7 @@ def cmd_agent(args: argparse.Namespace) -> int:
     agent = Agent(
         state_dir=state,
         data_dir=Path(args.data_dir),
+        identity_dir=Path(args.identity_dir),
         queue_snapshot=Path(args.queue_snapshot) if args.queue_snapshot else None,
         log_path=Path(args.log),
         role=args.role,
@@ -171,7 +172,13 @@ def cmd_collector(args: argparse.Namespace) -> int:
         if not url or not token_file:
             print("collector: нужен --sink-dir либо --url и --token-file", file=sys.stderr)
             return 2
-        sink = HttpSink(url, Path(token_file).read_text(encoding="utf-8").strip())
+        from .agent import node_identity
+
+        sink = HttpSink(
+            url,
+            Path(token_file).read_text(encoding="utf-8").strip(),
+            node_id=node_identity(Path(args.identity_dir)),
+        )
     collector = Collector(Path(args.journal), sink, retention_days=args.retention_days)
     if args.once:
         stats = collector.run_once()
@@ -209,6 +216,46 @@ def cmd_gate_refresh(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Забрать у панели назначенную конфигурацию и команду слива. Запускается от root."""
+    import time as _time
+
+    from .agent import http_sender, node_identity
+    from .panelsync import PanelError, default_apply, detect_drift, http_fetch, sync_once
+
+    url = args.panel_url or os.environ.get("MSP_PANEL_URL", "")
+    token_file = args.token_file or os.environ.get("MSP_PANEL_TOKEN_FILE", "")
+    if not url or not token_file:
+        print("sync: нужны --panel-url и --token-file", file=sys.stderr)
+        return 2
+    token = Path(token_file).read_text(encoding="utf-8").strip()
+    node_id = node_identity(Path(args.identity_dir))
+    send = http_sender(f"{url.rstrip('/')}/events", token, node_id)
+
+    def report(kind: str, data: dict[str, object]) -> None:
+        event = {"type": kind, "at": datetime.now(UTC).isoformat(), "node_id": node_id, **data}
+        try:
+            send([event])
+        except Exception as error:  # noqa: BLE001 - отчёт не обязан удаваться: итог виден и в журнале узла
+            print(f"sync: отчёт не доставлен: {type(error).__name__}", file=sys.stderr)
+
+    store = ConfigStore(CONFIG_ROOT, state_dir=STATE_DIR)
+    fetch = http_fetch(url, token, node_id)
+    apply = default_apply(store, healthcheck=make_healthcheck(25, None), reload_wait=1.0)
+    while True:
+        try:
+            result = sync_once(fetch, store, Path(STATE_DIR), apply, report)
+            drift = detect_drift(store)
+            if drift:
+                report("drift", drift)
+            print(json.dumps({"applied": result.applied, "outcome": result.outcome, "detail": result.detail}))
+        except PanelError as error:
+            print(f"sync: {error}", file=sys.stderr)
+        if args.once:
+            return 0
+        _time.sleep(args.interval)
+
+
 def cmd_drain(args: argparse.Namespace) -> int:
     """Включить или выключить слив. Запускается от root: нужен ``postfix reload``."""
     from .state import is_draining, set_drain
@@ -234,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     agent = sub.add_parser("agent")
     agent.add_argument("--log", default="/var/log/msp/postfix.log")
     agent.add_argument("--role", default="LAB")
+    agent.add_argument("--identity-dir", default=os.environ.get("MSP_IDENTITY_DIR", "/var/lib/msp"))
     agent.add_argument("--queue-snapshot", default="")
     agent.add_argument("--data-dir", default=os.environ.get("MSP_AGENT_DIR", "/var/lib/msp/agent"))
     agent.add_argument("--listen", default="0.0.0.0")  # noqa: S104 - порт доступен только во внутренней сети узла
@@ -243,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     collector = sub.add_parser("collector")
     collector.add_argument("--journal", default=os.environ.get("MSP_JOURNAL_DIR", "/var/lib/msp/journal"))
     collector.add_argument("--sink-dir", default="")
+    collector.add_argument("--identity-dir", default=os.environ.get("MSP_IDENTITY_DIR", "/var/lib/msp"))
     collector.add_argument("--url", default="")
     collector.add_argument("--token-file", default="")
     collector.add_argument("--retention-days", type=float, default=7.0)
@@ -251,6 +300,13 @@ def main(argv: list[str] | None = None) -> int:
     collector.set_defaults(func=cmd_collector)
     gate = sub.add_parser("gate-refresh")
     gate.set_defaults(func=cmd_gate_refresh)
+    sync = sub.add_parser("sync")
+    sync.add_argument("--panel-url", default="")
+    sync.add_argument("--token-file", default="")
+    sync.add_argument("--identity-dir", default=os.environ.get("MSP_IDENTITY_DIR", "/var/lib/msp"))
+    sync.add_argument("--interval", type=float, default=30.0)
+    sync.add_argument("--once", action="store_true")
+    sync.set_defaults(func=cmd_sync)
     drain = sub.add_parser("drain")
     drain.add_argument("mode", choices=["on", "off", "status"])
     drain.set_defaults(func=cmd_drain)

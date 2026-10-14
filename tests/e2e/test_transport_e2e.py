@@ -595,3 +595,39 @@ class TestTls:
             "fine": "OK",
         }
         assert "private" not in json.dumps(items).lower()
+
+
+class TestCollectorContract:
+    def test_what_the_collector_sends_is_what_the_panel_accepts(self, client, people, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """Договор между узлом и панелью: заголовки берутся из самого HttpSink, а не пишутся руками."""
+        import io
+
+        from msp_gateway import journal_writer
+        from msp_gateway.collector import HttpSink, message_bytes, read_copy
+
+        name = journal_writer.write_copy(
+            io.BytesIO(RAW),
+            queue_id="ABCDEF12345",
+            recipient="journal-in@journal.msp.invalid",
+            sender="a@partner.example",
+            client_address="10.0.0.1",
+            client_helo="helo.example",
+            size=str(len(RAW)),
+            directory=str(tmp_path),
+        )
+        path = tmp_path / "new" / str(name)
+        record = read_copy(path)
+        headers = HttpSink("http://panel.invalid/x", TOKEN, node_id=NODE).headers(record)
+        headers.pop("Content-Type")
+        response = client.post("/api/v1/gateway-agent/shadow", content=message_bytes(path), headers=headers)
+        assert response.status_code == 200, response.text
+        item = as_(client, people, "viewer").get("/api/v1/gateway/messages").json()["items"][0]
+        assert item["internet_message_id"] == "<m1@lab.example>"
+        assert item["direction"] == "INBOUND"
+        assert item["queue_id"] == "ABCDEF12345"
+
+    def test_hostile_message_ids_cannot_break_the_headers(self) -> None:
+        from msp_gateway.collector import _header_safe
+
+        out = _header_safe("<a\r\nX-Evil: 1\x00\u0416@x>", 998)
+        assert "\n" not in out and "\r" not in out and "\x00" not in out

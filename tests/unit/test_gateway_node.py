@@ -37,6 +37,7 @@ NODE_MODULES = (
     "agent",
     "collector",
     "recipients",
+    "panelsync",
 )
 
 
@@ -74,7 +75,7 @@ class TestTheNodeNeedsOnlyTheStandardLibrary:
             "import msp_gateway.node, msp_gateway.journal_writer, msp_gateway.probes, "
             "msp_gateway.apply, msp_gateway.validation, msp_gateway.bundle, msp_gateway.state, "
             "msp_gateway.logparser, msp_gateway.metrics, msp_gateway.agent, "
-            "msp_gateway.collector; print('ok')"
+            "msp_gateway.collector, msp_gateway.panelsync; print('ok')"
         )
         completed = subprocess.run(  # nosec B603 - фиксированная команда
             [sys.executable, "-c", code],

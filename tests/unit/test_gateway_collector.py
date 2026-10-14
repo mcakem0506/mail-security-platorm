@@ -343,9 +343,9 @@ class TestSinks:
         try:
             raw = mime()
             record = read_copy(tmp_path / "new" / journal_copy(tmp_path, raw))
-            HttpSink(f"http://127.0.0.1:{server.server_address[1]}/ingest", "secret-token").deliver(
-                record, raw
-            )
+            HttpSink(
+                f"http://127.0.0.1:{server.server_address[1]}/ingest", "secret-token", node_id="n" * 32
+            ).deliver(record, raw)
         finally:
             server.shutdown()
             server.server_close()
@@ -354,8 +354,9 @@ class TestSinks:
         assert headers["authorization"] == "Bearer secret-token"  # type: ignore[index]
         assert "secret-token" not in str(seen["path"])
         assert seen["body"] == raw
-        meta = json.loads(base64.b64decode(headers["x-msp-meta"]))  # type: ignore[index]
-        assert meta["idempotency_key"] == record.key
+        assert headers["x-msp-direction"] == "INBOUND"  # type: ignore[index]
+        assert headers["x-msp-node-id"] == "n" * 32  # type: ignore[index]
+        assert headers["x-msp-message-id"] == "<a1@lab.example>"  # type: ignore[index]
 
     def test_server_error_is_a_failure_and_does_not_leak_the_token(self, tmp_path: Path) -> None:
         class Handler(BaseHTTPRequestHandler):
