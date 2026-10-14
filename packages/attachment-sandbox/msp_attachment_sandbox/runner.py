@@ -91,16 +91,24 @@ def run_remote(spool: Path, module: str, job: dict[str, Any], *, timeout: float)
     except OSError as error:
         return SandboxResult("UNAVAILABLE", detail=f"очередь песочницы недоступна: {type(error).__name__}")
     deadline = started + timeout + 5.0  # запас на передачу через каталог
+    unreadable = 0
     try:
         while time.monotonic() < deadline:
             if result_file.exists():
                 try:
                     payload = json.loads(result_file.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
-                    return SandboxResult("PROTOCOL_ERROR", detail="результат песочницы не читается")
-                finally:
-                    with contextlib.suppress(OSError):
-                        result_file.unlink()
+                    # Файл могли подменять в этот момент (на Windows чтение и замена не атомарны
+                    # друг относительно друга). Несколько попыток, и только потом отказ.
+                    unreadable += 1
+                    if unreadable >= 5:
+                        with contextlib.suppress(OSError):
+                            result_file.unlink()
+                        return SandboxResult("PROTOCOL_ERROR", detail="результат песочницы не читается")
+                    time.sleep(0.1)
+                    continue
+                with contextlib.suppress(OSError):
+                    result_file.unlink()
                 if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
                     return SandboxResult("PROTOCOL_ERROR", detail="неожиданная структура результата")
                 return SandboxResult(
