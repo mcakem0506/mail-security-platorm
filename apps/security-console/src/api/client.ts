@@ -988,3 +988,123 @@ export const api = {
   markNotificationRead: (id: string) =>
     request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
 };
+
+// ---------------------------------------------------------------------------------------------
+// Транспорт почты (ТЗ 1.1 §42, §43)
+// ---------------------------------------------------------------------------------------------
+export interface TransportNode {
+  id: string;
+  node_id: string;
+  name: string;
+  role: string;
+  state: "UP" | "DOWN" | "DRAINING" | "UNKNOWN";
+  last_heartbeat_at: string | null;
+  config_version: string;
+  queue_messages: number;
+  pressure: string;
+  unparsed_log_lines: number;
+  drain_requested: boolean;
+  drain_requested_by: string;
+  drain_requested_at: string | null;
+}
+
+export interface TransportQueueSummary {
+  nodes_total: number;
+  nodes_up: number;
+  nodes_down: number;
+  queue_messages: number;
+  pressure: string;
+  unanalysed_copies: number;
+  deployment_note: string;
+}
+
+export interface TransportMessage {
+  id: string;
+  node_id: string;
+  direction: string;
+  queue_id: string;
+  internet_message_id: string;
+  content_sha256: string;
+  size_bytes: number;
+  state: string;
+  analysis_job_id: string | null;
+  duplicate_count: number;
+  collected_at: string;
+}
+
+export interface TransportConfigVersion {
+  version: number;
+  status: string;
+  checksum: string;
+  created_by: string;
+  created_at: string;
+  activated_by: string;
+  activated_at: string | null;
+  note: string;
+  errors: string[];
+  ok?: boolean;
+}
+
+export interface TransportRoutes {
+  version: number | null;
+  routes: { name: string; tls: string; targets: { host: string; port: number; priority: number }[] }[];
+  relay_domains: { domain: string; route: string }[];
+}
+
+export interface TransportRecipientsStatus {
+  freshness: "FRESH" | "STALE_GRACE" | "STALE_HARD";
+  age_seconds: number | null;
+  generated_at: string | null;
+  recipient_count: number;
+  closed: boolean;
+  last_sync: {
+    status: string;
+    reason: string;
+    recipient_count: number;
+    previous_count: number;
+    rejected_count: number;
+    conflict_count: number;
+    started_at: string;
+  } | null;
+}
+
+export interface TransportCertificate {
+  node_id: string;
+  usage: string;
+  subject: string;
+  issuer: string;
+  not_after: string | null;
+  days_left: number | null;
+  state: "OK" | "EXPIRING" | "EXPIRED" | "UNKNOWN";
+  fingerprint: string;
+}
+
+export const transportApi = {
+  nodes: () => request<{ items: TransportNode[]; deployment_note: string }>("/api/v1/gateway/nodes"),
+  queueSummary: () => request<TransportQueueSummary>("/api/v1/gateway/queue/summary"),
+  messages: (params: { direction?: string; limit?: number; offset?: number } = {}) =>
+    request<{ total: number; items: TransportMessage[] }>(`/api/v1/gateway/messages${query(params)}`),
+  routes: () => request<TransportRoutes>("/api/v1/gateway/routes"),
+  versions: () => request<{ items: TransportConfigVersion[] }>("/api/v1/gateway/config/versions"),
+  validateConfig: (spec: Record<string, unknown>, note: string) =>
+    request<TransportConfigVersion>("/api/v1/gateway/config/validate", {
+      method: "POST",
+      body: JSON.stringify({ spec, note }),
+    }),
+  activateConfig: (version: number) =>
+    request<TransportConfigVersion>("/api/v1/gateway/config/activate", {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  rollbackConfig: (version: number) =>
+    request<TransportConfigVersion>(`/api/v1/gateway/config/${version}/rollback`, { method: "POST" }),
+  recipientsStatus: () => request<TransportRecipientsStatus>("/api/v1/gateway/recipients/status"),
+  syncRecipients: (body: { format: "csv" | "json"; content: string; source: string; confirm_shrink: boolean }) =>
+    request<{ status: string; recipient_count: number; rejected_count: number; conflict_count: number; activated_version: number | null }>(
+      "/api/v1/gateway/recipients/sync",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  tls: () => request<{ items: TransportCertificate[] }>("/api/v1/gateway/tls/status"),
+  drain: (id: string) => request<{ drain_requested: boolean }>(`/api/v1/gateway/nodes/${id}/drain`, { method: "POST" }),
+  resume: (id: string) => request<{ drain_requested: boolean }>(`/api/v1/gateway/nodes/${id}/resume`, { method: "POST" }),
+};
