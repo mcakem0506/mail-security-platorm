@@ -20,6 +20,8 @@ import yaml
 
 ALERTS = pathlib.Path("infrastructure/monitoring/alerts.yml")
 OBSERVABILITY = pathlib.Path("apps/api/msp_api/observability.py")
+#: Метрики узла шлюза отдаёт его агент, а не API: имена объявлены в другом модуле.
+GATEWAY_METRICS = pathlib.Path("packages/gateway/msp_gateway/metrics.py")
 
 #: Метрики, которые отдаёт не платформа. ``up`` — служебная метрика самого Prometheus,
 #: остальные приходят из экспортеров инфраструктуры.
@@ -124,6 +126,14 @@ def _exported_metrics() -> set[str]:
         if kind == "Counter" and not name.endswith("_total"):
             names.add(f"{name}_total")
         if kind in ("Histogram", "Summary"):
+            names.update({f"{name}_bucket", f"{name}_sum", f"{name}_count"})
+    gateway = GATEWAY_METRICS.read_text(encoding="utf-8")
+    for name in re.findall(r"head\(\s*\"(msp_gateway_[a-z_]+)\"", gateway):
+        names.add(name)
+    for name in re.findall(r"counter\(\s*\"(msp_gateway_[a-z_]+)\"", gateway):
+        names.add(name)
+    for name in list(names):
+        if name == "msp_gateway_delivery_delay_seconds":
             names.update({f"{name}_bucket", f"{name}_sum", f"{name}_count"})
     return names
 
