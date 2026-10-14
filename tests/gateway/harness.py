@@ -471,6 +471,31 @@ class Stack:
         """Убить процессы Postfix без остановки: так узел падает от OOM-killer или потери питания."""
         docker("kill", "--signal", "KILL", self.gateway, check=False)
 
+    def reissue_exchange_certificate(
+        self,
+        *,
+        authority: Authority | None = None,
+        dns_names: list[str] | None = None,
+        days: int = 30,
+    ) -> None:
+        """Заменить сертификат двойников Exchange и перезапустить их (проверки TLS, §52).
+
+        Файлы лежат на хосте и смонтированы только для чтения; двойники читают их при запуске,
+        поэтому без перезапуска замена не вступит в силу.
+        """
+        (authority or self.authority).issue(
+            self.workdir / "secrets" / "exchange",
+            "exchange",
+            dns_names or ["fake-exchange", "fake-exchange-2"],
+            days=days,
+            valid_from_days_ago=max(1, 5 - days) if days < 0 else 1,
+        )
+        for path in (self.workdir / "secrets" / "exchange").glob("*.key"):
+            path.chmod(0o644)
+        for service, control in (("fake-exchange", self.exchange1), ("fake-exchange-2", self.exchange2)):
+            docker("restart", "-t", "2", self.container(service), timeout=60)
+            control.wait_up()
+
     def restart(self) -> None:
         docker("restart", "-t", "10", self.gateway, timeout=120)
         self.wait_listening(self.ports["GW_PORT_IN"])

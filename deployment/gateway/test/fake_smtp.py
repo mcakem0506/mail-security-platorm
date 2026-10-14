@@ -45,6 +45,19 @@ STATE: dict[str, object] = {
 }
 
 
+CRLF = bytes([13, 10])
+LF = bytes([10])
+
+
+def _body(raw: bytes) -> bytes:
+    """Тело письма без заголовков: заголовки Postfix дописывает (Received), тело должно дойти как есть."""
+    for separator in (CRLF * 2, LF * 2):
+        index = raw.find(separator)
+        if index != -1:
+            return raw[index + len(separator) :]
+    return b""
+
+
 def _record(envelope, session) -> dict[str, object]:  # type: ignore[no-untyped-def]
     raw = envelope.original_content or envelope.content or b""
     message = message_from_bytes(raw)
@@ -54,6 +67,7 @@ def _record(envelope, session) -> dict[str, object]:  # type: ignore[no-untyped-
         "rcpt_tos": list(envelope.rcpt_tos),
         "size": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),
+        "body_sha256": hashlib.sha256(_body(raw)).hexdigest(),
         "received_at": time.time(),
         "tls": bool(session.ssl),
         "peer": session.peer[0] if session.peer else "",
