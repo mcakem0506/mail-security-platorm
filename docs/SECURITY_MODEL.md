@@ -424,3 +424,10 @@ Basic-аутентификация передаёт пароль служебн�
 нет `imread`), а не по поведению: отсутствие сетевого обращения в одном прогоне ничего не
 доказывает.
 
+## Дополнения этапа MSP 1.1
+
+Граница шлюза, разделение процессов узла, песочница вложений и перечень угроз транспорта вынесены в
+[GATEWAY_SECURITY_MODEL.md](GATEWAY_SECURITY_MODEL.md). Новые права: `gateway:read`, `gateway:queue:read`,
+`gateway:queue:admin`, `gateway:node:drain`, `gateway:recipient:sync`, `gateway:tls:read`,
+`gateway:config:read`, `gateway:config:validate`, `gateway:config:activate`, `gateway:config:rollback`.
+Любое действие оператора шлюза пишется в аудит (`transport.*`).

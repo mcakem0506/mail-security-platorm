@@ -353,7 +353,7 @@ class TestTheScriptAndTheServiceAgree:
         import gateway_readiness as script
 
         gaps = {gap["gap_id"]: gap for gap in script.read_gap_registry() or []}
-        assert gaps["GAP-004"]["status"] == "ACCEPTED"
+        assert gaps["GAP-004"]["status"] == "VALIDATION"  # MSP 1.1: пробел переведён на проверку
 
     def test_the_script_reads_compensating_controls_and_reasons(self) -> None:
         """ТЗ §20 требует этих двух полей, и в документе они записаны прозой, а не таблицей."""

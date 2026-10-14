@@ -40,7 +40,10 @@ class RawSmtp:
         lines: list[str] = []
         while True:
             while b"\n" not in self.buffer:
-                chunk = self.sock.recv(4096)
+                try:
+                    chunk = self.sock.recv(4096)
+                except ConnectionError:
+                    chunk = b""  # сервер оборвал сессию: для клиента это конец, как EOF
                 if not chunk:
                     return "\n".join(lines) or "EOF"
                 self.buffer += chunk
@@ -51,7 +54,10 @@ class RawSmtp:
                 return "\n".join(lines)
 
     def say(self, data: bytes | str) -> str:
-        self.sock.sendall(data.encode() if isinstance(data, str) else data)
+        try:
+            self.sock.sendall(data.encode() if isinstance(data, str) else data)
+        except ConnectionError:
+            return "EOF"
         return self.reply()
 
     def hello(self) -> None:

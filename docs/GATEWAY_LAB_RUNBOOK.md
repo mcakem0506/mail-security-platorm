@@ -99,10 +99,10 @@ from pathlib import Path
 from tests.gateway.harness import Stack, lab_spec, LAB_RECIPIENTS
 
 stack = Stack(Path("/tmp/gw-lab"))
-stack.up(lab_spec(), LAB_RECIPIENTS)     # выпускает сертификаты, собирает образы, поднимает стенд
-print(stack.ports)                       # свободные loopback-порты: 25, 2525, метрики, управление двойниками
+stack.up(lab_spec(), LAB_RECIPIENTS)  # выпускает сертификаты, собирает образы, поднимает стенд
+print(stack.ports)  # свободные loopback-порты: 25, 2525, метрики, управление двойниками
 ...
-stack.down()                             # снести стенд вместе с томами
+stack.down()  # снести стенд вместе с томами
 ```
 
 Отправка письма с хоста: SMTP на `127.0.0.1:<GW_PORT_IN>`. Метрики: `http://127.0.0.1:<GW_PORT_METRICS>/metrics`.
