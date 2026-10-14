@@ -305,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     agent.add_argument("--identity-dir", default=os.environ.get("MSP_IDENTITY_DIR", "/var/lib/msp"))
     agent.add_argument("--queue-snapshot", default="")
     agent.add_argument("--data-dir", default=os.environ.get("MSP_AGENT_DIR", "/var/lib/msp/agent"))
-    agent.add_argument("--listen", default="0.0.0.0")  # noqa: S104 - порт доступен только во внутренней сети узла
+    agent.add_argument("--listen", default="0.0.0.0")  # noqa: S104 # nosec B104 - порт доступен только во внутренней сети узла
     agent.add_argument("--port", type=int, default=9100)
     agent.add_argument("--interval", type=float, default=5.0)
     agent.set_defaults(func=cmd_agent)

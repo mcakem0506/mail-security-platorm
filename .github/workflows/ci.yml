@@ -357,7 +357,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # Fuzzing, the performance budget and regex safety run as their own job: they are slower
       # than the rest and a timeout here must be readable as "robustness", not as a flaky test
       # somewhere in the suite (ТЗ 1.0.3 §43–§47).
@@ -373,7 +373,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
 
       # Rules are data, and the data has to be checkable: every condition must name a fact the
       # engine can produce, every ACTIVE rule must have an owner, and nothing in a rule file may
@@ -415,7 +415,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # The dataset validates itself: ids unique, expectations present, no case claiming a gap
       # that is not registered. A corpus that silently lost its assertions would make every
       # later metric meaningless while still reporting a number.
@@ -443,7 +443,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # A short fuzz run on every change; the long one is scheduled separately. The point of the
       # smoke run is that a parser change that crashes on malformed input fails here rather than
       # on the first malformed message in production.
@@ -459,7 +459,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       - name: Local analysis budget
         run: pytest -q tests/security/test_parser_robustness.py -k Performance
       # The corpus run reports P50/P95/P99. A regression here means every analyst waits longer,
@@ -686,7 +686,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
 
       # GAP-001 закрыт сигналом, который сам по себе ничего не весит и срабатывает только при
       # независимом подтверждении. Два вида ошибки здесь стоят по-разному и поэтому проверяются
