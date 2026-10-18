@@ -10,7 +10,12 @@ import pytest
 def node_with(db, organization, rspamd: dict | None):  # type: ignore[no-untyped-def]
     from msp_api.db.models_transport import TransportNode
 
-    node = TransportNode(organization_id=organization.id, node_id="b" * 32, name="gw-1", details={"rspamd": rspamd} if rspamd else {})
+    node = TransportNode(
+        organization_id=organization.id,
+        node_id="b" * 32,
+        name="gw-1",
+        details={"rspamd": rspamd} if rspamd else {},
+    )
     node.last_heartbeat_at = datetime.now(UTC)
     db.add(node)
     db.commit()
@@ -24,7 +29,13 @@ def codes(db, organization, settings) -> dict[str, str]:  # type: ignore[no-unty
 
 
 def fresh(**state: object) -> dict:
-    return {"up": True, "redis_up": True, "drift": "IN_SYNC", "reported_at": datetime.now(UTC).isoformat(), **state}
+    return {
+        "up": True,
+        "redis_up": True,
+        "drift": "IN_SYNC",
+        "reported_at": datetime.now(UTC).isoformat(),
+        **state,
+    }
 
 
 def test_a_node_without_a_scanner_gets_no_scanner_alerts(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
@@ -37,7 +48,9 @@ def test_a_healthy_scanner_raises_nothing(db, organization, settings) -> None:  
     assert codes(db, organization, settings) == {}
 
 
-def test_a_silent_scanner_is_down_but_mail_is_still_flowing_so_it_is_a_warning(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
+def test_a_silent_scanner_is_down_but_mail_is_still_flowing_so_it_is_a_warning(
+    db, organization, settings
+) -> None:  # type: ignore[no-untyped-def]
     old = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     node_with(db, organization, fresh(reported_at=old))
     assert codes(db, organization, settings) == {"RSPAMD_DOWN": "WARNING"}
@@ -69,7 +82,11 @@ def test_scan_error_spike(db, organization, settings) -> None:  # type: ignore[n
 
 
 def test_missing_signing_key_and_failed_apply(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
-    node_with(db, organization, fresh(dkim_missing_keys=["corp.example:s1"], last_apply={"outcome": "REJECTED", "detail": "x"}))
+    node_with(
+        db,
+        organization,
+        fresh(dkim_missing_keys=["corp.example:s1"], last_apply={"outcome": "REJECTED", "detail": "x"}),
+    )
     found = codes(db, organization, settings)
     assert "DKIM_KEY_MISSING_ON_NODE" in found and "RSPAMD_CONFIG_NOT_APPLIED" in found
 
@@ -80,7 +97,10 @@ def test_a_dns_error_wave_is_named_as_missing_evidence_not_as_failures(db, organ
     for i in range(30):
         db.add(
             SpamScan(
-                organization_id=organization.id, node_id="b" * 32, queue_id=f"Q{i}", internet_message_id=f"m{i}@x.example",
+                organization_id=organization.id,
+                node_id="b" * 32,
+                queue_id=f"Q{i}",
+                internet_message_id=f"m{i}@x.example",
                 auth={"incomplete_reasons": ["SPF_TEMPERROR"], "dmarc": {"result": "TEMPERROR"}},
             )
         )
@@ -92,7 +112,12 @@ def test_a_dns_error_wave_is_named_as_missing_evidence_not_as_failures(db, organ
 def test_a_stuck_key_and_a_failed_key_are_lifecycle_alerts(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
     from msp_api.db.models_antispam import DkimKeyRecord, DkimKeyStatus
 
-    old = DkimKeyRecord(organization_id=organization.id, domain="corp.example", selector="s1", status=DkimKeyStatus.DNS_PENDING)
+    old = DkimKeyRecord(
+        organization_id=organization.id,
+        domain="corp.example",
+        selector="s1",
+        status=DkimKeyStatus.DNS_PENDING,
+    )
     db.add(old)
     db.flush()
     old.created_at = datetime.now(UTC) - timedelta(days=2)
@@ -103,21 +128,30 @@ def test_a_stuck_key_and_a_failed_key_are_lifecycle_alerts(db, organization, set
 def test_auth_conflict_and_reject_fp_spikes(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
     from msp_api.db.models_antispam import AuthConflictRecord, SpamReview, SpamScan
 
-    scan = SpamScan(organization_id=organization.id, node_id="b" * 32, queue_id="Q", internet_message_id="m@x.example")
+    scan = SpamScan(
+        organization_id=organization.id, node_id="b" * 32, queue_id="Q", internet_message_id="m@x.example"
+    )
     db.add(scan)
     db.flush()
     for _ in range(25):
         db.add(AuthConflictRecord(organization_id=organization.id, scan_id=scan.id, kind="SPF_MISMATCH"))
     for i in range(12):
         s = SpamScan(
-            organization_id=organization.id, node_id="b" * 32, queue_id=f"R{i}", internet_message_id=f"r{i}@x.example",
-            suggested_action="REJECT", spam_class="HIGH_CONFIDENCE_SPAM",
+            organization_id=organization.id,
+            node_id="b" * 32,
+            queue_id=f"R{i}",
+            internet_message_id=f"r{i}@x.example",
+            suggested_action="REJECT",
+            spam_class="HIGH_CONFIDENCE_SPAM",
         )
         db.add(s)
         db.flush()
         db.add(
             SpamReview(
-                organization_id=organization.id, scan_id=s.id, verdict="HAM" if i < 4 else "SPAM", selection="SUGGESTED_REJECT"
+                organization_id=organization.id,
+                scan_id=s.id,
+                verdict="HAM" if i < 4 else "SPAM",
+                selection="SUGGESTED_REJECT",
             )
         )
     db.commit()

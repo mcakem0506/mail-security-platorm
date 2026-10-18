@@ -33,6 +33,31 @@ from .symbols import (
     SPF_SYMBOLS,
 )
 
+#: Все имена метрик, которые отдаёт узел. Проверка алертов сверяется с этим списком: правило,
+#: ссылающееся на метрику, которой нет, не срабатывает никогда.
+METRIC_NAMES = (
+    "msp_rspamd_up",
+    "msp_rspamd_redis_up",
+    "msp_rspamd_scan_total",
+    "msp_rspamd_scan_duration_seconds",
+    "msp_rspamd_scan_duration_seconds_bucket",
+    "msp_rspamd_scan_duration_seconds_sum",
+    "msp_rspamd_scan_duration_seconds_count",
+    "msp_rspamd_scan_errors_total",
+    "msp_rspamd_suggested_actions_total",
+    "msp_spf_results_total",
+    "msp_dkim_results_total",
+    "msp_dmarc_results_total",
+    "msp_arc_results_total",
+    "msp_rbl_queries_total",
+    "msp_rbl_listed_total",
+    "msp_rbl_errors_total",
+    "msp_spam_fp_total",
+    "msp_spam_fn_total",
+    "msp_dkim_sign_total",
+    "msp_dkim_sign_failures_total",
+)
+
 BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
 ACTIONS = ("no action", "greylist", "add header", "rewrite subject", "soft reject", "reject")
 _LABEL_SAFE = {a: a.replace(" ", "_") for a in ACTIONS}

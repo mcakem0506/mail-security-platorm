@@ -244,8 +244,10 @@ def provider_definition(record: ReputationProviderRecord) -> ReputationProvider:
             "license_approved": True,
             "approved_by": record.approved_by or None,
             "approved_at": record.approved_at,
-            "usage_scope": record.usage_scope,
+            # Для внутренней и лабораторной зоны внешней лицензии нет: область применения называется явно.
+            "usage_scope": record.usage_scope or "внутренняя или лабораторная зона организации",
             "expires_at": record.expires_at,
+            "second_approver": record.requested_by or None,
         }
     else:
         data["approval"] = {"license_approved": False}

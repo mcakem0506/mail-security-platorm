@@ -62,6 +62,8 @@ def node_config(**overrides: object) -> RspamdNodeConfig:
         "thresholds": Thresholds(),
         "local_networks": (TRUSTED_NETWORK,),
         "hyperscan": False,
+        # Сети, которым узел вправе давать подпись, определяет узел; домены и ключи назначает панель.
+        "dkim_signing": DkimSigning(enabled=False, sign_networks=(TRUSTED_NETWORK,)),
     }
     base.update(overrides)
     return RspamdNodeConfig(**base)  # type: ignore[arg-type]
@@ -88,6 +90,9 @@ class Dns:
 
     def reset(self) -> None:
         self._send("POST", "/reset", {})
+
+    def get_records(self) -> dict[str, dict[str, object]]:
+        return dict(self._send("GET", "/records"))  # type: ignore[call-overload]
 
     def queries(self) -> list[dict[str, object]]:
         return list(self._send("GET", "/queries"))  # type: ignore[call-overload]

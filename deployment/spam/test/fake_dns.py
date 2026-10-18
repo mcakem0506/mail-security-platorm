@@ -10,6 +10,7 @@ CI не зависит от настоящих DNSBL и чужих зон: вс�
     PUT  /records   тело — JSON ``{"имя": {"TXT": [...], "A": [...], "MX": [[10, "хост"]], ...}}``
     PUT  /faults    тело — JSON ``{"servfail": ["суффикс", ...], "timeout": [...], "delay": секунды}``
     GET  /queries   журнал запросов (имя, тип) — для проверки, что секрет не ушёл в запрос
+    GET  /records   текущие записи
     POST /reset     очистить всё
 """
 
@@ -194,6 +195,9 @@ class Control(BaseHTTPRequestHandler):
         if self.path == "/queries":
             with LOCK:
                 self._send(list(STATE["log"]))  # type: ignore[call-overload]
+        elif self.path == "/records":
+            with LOCK:
+                self._send(dict(STATE["records"]))  # type: ignore[call-overload]
         else:
             self._send({"ok": True})
 
