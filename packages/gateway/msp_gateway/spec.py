@@ -360,6 +360,30 @@ class Shadow(StrictModel):
         return validation.absolute_path(value, "shadow.journal_directory")
 
 
+class Milter(StrictModel):
+    """Подключение сканера Rspamd через Milter (ТЗ 1.2 §3, §4, §5).
+
+    Направление письма определяется слушателем, а не заголовком From: у публичного порта
+    собственный сокет сканера, у внутреннего — другой. Действие по умолчанию при недоступности
+    сканера зафиксировано как ``accept`` и не настраивается: на этапе 1.2 сбой анализа не имеет
+    права остановить транспорт (``milter_default_action=tempfail`` превратил бы падение Rspamd
+    в отказ приёма всей почты).
+    """
+
+    enabled: bool = False
+    #: Сокеты в форме ``inet:host:port``. Хост и порт проверяются как имя и порт, не как строка.
+    inbound_socket: str = "inet:rspamd:11332"
+    outbound_socket: str = "inet:rspamd:11333"
+    connect_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    command_timeout_seconds: int = Field(default=15, ge=1, le=120)
+    content_timeout_seconds: int = Field(default=60, ge=1, le=600)
+
+    @field_validator("inbound_socket", "outbound_socket")
+    @classmethod
+    def _socket(cls, value: str, info) -> str:  # type: ignore[no-untyped-def]
+        return validation.milter_socket(value, f"milter.{info.field_name}")
+
+
 # ---------------------------------------------------------------------------------------------
 # Целиком
 # ---------------------------------------------------------------------------------------------
@@ -378,6 +402,7 @@ class GatewaySpec(StrictModel):
     tls: TlsFiles = TlsFiles()
     outbound: Outbound = Outbound()
     shadow: Shadow = Shadow()
+    milter: Milter = Milter()
     #: Предел числа пересылок (Received). Защита от петли, не зависящая от заголовков,
     #: которые можно подделать (ТЗ §29).
     hopcount_limit: int = Field(default=20, ge=5, le=50)

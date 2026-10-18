@@ -214,6 +214,11 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
             "  -o smtpd_recipient_restrictions=msp_in_recipient,permit",
             "  -o smtpd_data_restrictions=reject_unauth_pipelining",
         ]
+        if spec.milter.enabled:
+            out += [
+                f"  -o smtpd_milters={spec.milter.inbound_socket}",
+                "  -o milter_macro_daemon_name=msp-inbound",
+            ]
 
     if spec.internal.enabled:
         relay = (
@@ -235,6 +240,11 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
             "  -o smtpd_recipient_restrictions=msp_out_recipient",
             "  -o smtpd_data_restrictions=reject_unauth_pipelining",
         ]
+        if spec.milter.enabled:
+            out += [
+                f"  -o smtpd_milters={spec.milter.outbound_socket}",
+                "  -o milter_macro_daemon_name=msp-outbound",
+            ]
 
     out += _standard_services()
 

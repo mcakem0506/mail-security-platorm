@@ -168,3 +168,20 @@ def absolute_path(value: str, field: str) -> str:
     if ".." in value.split("/"):
         raise _reject(field, "путь не должен содержать «..»")
     return value
+
+
+def milter_socket(value: str, field: str) -> str:
+    """``inet:хост:порт`` или ``unix:/абсолютный/путь`` — больше никаких форм Milter."""
+    if not isinstance(value, str) or not value:
+        raise _reject(field, "ожидалась строка")
+    if value.startswith("unix:"):
+        path = value[len("unix:") :]
+        if not re.fullmatch(r"/[A-Za-z0-9._/\-]{1,200}", path) or ".." in path:
+            raise _reject(field, "путь сокета не принят")
+        return value
+    match = re.fullmatch(r"inet:([A-Za-z0-9.\-]{1,253}):([0-9]{1,5})", value)
+    if match is None:
+        raise _reject(field, "ожидалось inet:хост:порт или unix:/путь")
+    hostname(match.group(1), field)
+    port(int(match.group(2)), field)
+    return value

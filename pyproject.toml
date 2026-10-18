@@ -54,6 +54,7 @@ sandbox = [
 ]
 dev = [
   "aiosmtpd>=1.4",  # настоящий SMTP-сервер с TLS для проверок шлюза
+  "dkimpy>=1.1",  # независимая подпись DKIM для проверок (ТЗ 1.2 §38)
   "cryptography>=42",  # выпуск лабораторных сертификатов для стенда шлюза
   "pytest>=8",
   "pytest-cov>=5",
@@ -72,6 +73,7 @@ where = [
   "packages/shared-contracts",
   "packages/gateway",
   "packages/attachment-sandbox",
+  "packages/antispam",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",

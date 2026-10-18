@@ -16,6 +16,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from . import validation
+
 
 class BundleError(ValueError):
     """Пакет повреждён или не соответствует своему описанию."""
@@ -159,6 +161,11 @@ MAIN_CF_PARAMETERS = frozenset(
         "msp_in_recipient",
         "msp_out_client",
         "msp_out_recipient",
+        "milter_protocol",
+        "milter_default_action",
+        "milter_connect_timeout",
+        "milter_command_timeout",
+        "milter_content_timeout",
     }
 )
 
@@ -204,6 +211,8 @@ MASTER_CF_OPTIONS = frozenset(
         "smtp_tls_verify_cert_match",
         "smtp_tls_mandatory_protocols",
         "smtp_fallback_relay",
+        "smtpd_milters",
+        "milter_macro_daemon_name",
     }
 )
 
@@ -259,9 +268,18 @@ def check_master_cf(text: str) -> None:
 
 
 def _check_option(option: str, number: int) -> None:
-    name = option.partition("=")[0]
+    name, _, value = option.partition("=")
     if name not in MASTER_CF_OPTIONS:
         raise BundleError(f"master.cf:{number}: параметр -o вне белого списка")
+    if name == "smtpd_milters":
+        # Сокет сканера — единственное значение с адресом: другая форма (список, макросы,
+        # несколько сокетов) отвергается, а не нормализуется.
+        try:
+            validation.milter_socket(value, "smtpd_milters")
+        except validation.ConfigValueError as error:
+            raise BundleError(f"master.cf:{number}: сокет Milter не принят") from error
+    if name == "milter_macro_daemon_name" and value not in ("msp-inbound", "msp-outbound"):
+        raise BundleError(f"master.cf:{number}: имя направления Milter вне белого списка")
 
 
 def _check_master_continuation(service: str, line: str, number: int) -> None:
