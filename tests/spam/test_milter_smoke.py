@@ -12,7 +12,9 @@ def test_inbound_mail_is_scanned_and_delivered(clean_spam) -> None:  # type: ign
     assert result.get("ok"), result
     assert spam.delivered(mid) is not None, spam.rspamd_log()
     scan = spam.scan_for(mid)
-    names = set(scan["symbols"]) if isinstance(scan["symbols"], dict) else {s["name"] for s in scan["symbols"]}
+    names = (
+        set(scan["symbols"]) if isinstance(scan["symbols"], dict) else {s["name"] for s in scan["symbols"]}
+    )
     assert "MSP_DIRECTION_INBOUND" in names, sorted(names)
 
 
@@ -21,6 +23,8 @@ def test_outbound_mail_gets_the_outbound_direction(clean_spam) -> None:  # type:
     mid, result = spam.send_outbound()
     assert result.get("ok"), result
     scan = spam.scan_for(mid)
-    names = set(scan["symbols"]) if isinstance(scan["symbols"], dict) else {s["name"] for s in scan["symbols"]}
+    names = (
+        set(scan["symbols"]) if isinstance(scan["symbols"], dict) else {s["name"] for s in scan["symbols"]}
+    )
     assert "MSP_DIRECTION_OUTBOUND" in names, sorted(names)
     assert SENDER_IP and build_message("x", "a@b.example")

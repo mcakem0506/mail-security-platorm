@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
@@ -22,8 +23,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .providers import ReputationProvider
 from .model import QueryType
+from .providers import ReputationProvider
 
 SCHEMA_VERSION = 1
 
@@ -151,7 +152,7 @@ class RspamdNodeConfig(_Strict):
     #: Куда сканер присылает результаты: TCP-приёмник MSP на узле.
     exporter_host: str = "127.0.0.1"
     exporter_port: int = Field(default=11380, ge=1, le=65535)
-    controller_password_file: str = "/run/secrets/rspamd/controller.inc"
+    controller_password_file: str = "/run/secrets/rspamd/controller.inc"  # noqa: S105
     providers: tuple[ReputationProvider, ...] = ()
     dkim_signing: DkimSigning = DkimSigning()
     bayes: BayesSettings = BayesSettings()
@@ -271,10 +272,7 @@ def _render_options_override(cfg: RspamdNodeConfig) -> str:
     """Список «своих» сетей заменяется, а не дополняется: слияние сохранило бы частные сети по
     умолчанию, и сканер молча пропускал бы проверки для любого отправителя из них."""
     local = ["127.0.0.0/8", "::1", *cfg.local_networks]
-    return (
-        "# Сгенерировано MSP.\n"
-        "local_addrs = [" + ", ".join(_q(n) for n in local) + "];\n"
-    )
+    return "# Сгенерировано MSP.\nlocal_addrs = [" + ", ".join(_q(n) for n in local) + "];\n"
 
 
 def _render_proxy(direction: str) -> str:
@@ -307,9 +305,7 @@ def _render_settings(cfg: RspamdNodeConfig) -> str:
 def _render_actions(cfg: RspamdNodeConfig) -> str:
     t = cfg.thresholds
     # Пороги дают предложение. Действие MTA на этапе 1.2 — только наблюдение (§6).
-    return (
-        f"reject = {t.reject};\nadd_header = {t.add_header};\ngreylist = {t.greylist};\n"
-    )
+    return f"reject = {t.reject};\nadd_header = {t.add_header};\ngreylist = {t.greylist};\n"
 
 
 def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
@@ -322,8 +318,8 @@ def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
         "routines {\n"
         "    authentication-results {\n"
         '        header = "Authentication-Results";\n'
-        f"        remove = 0;\n"
-        f"        add_smtp_user = false;\n"
+        # Чужие Authentication-Results (вышестоящий шлюз) не удаляются: они нужны для сравнения (§25).
+        "        add_smtp_user = false;\n"
         "    }\n"
         "    x-rspamd-queue-id {\n"
         '        header = "X-MSP-Scan-ID";\n'
@@ -341,7 +337,7 @@ def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
         '        "X-Rspamd-Server" = 0;\n'
         "    }\n"
         "}\n"
-        f"authenticated_headers = [\"authentication-results\"];\n"
+        'authenticated_headers = ["authentication-results"];\n'
     )
 
 
@@ -367,8 +363,8 @@ def _render_metadata_exporter(cfg: RspamdNodeConfig) -> str:
 
 
 def _render_modules_off() -> dict[str, str]:
-    return {f"{name}.conf": "# Сгенерировано MSP: сторонний сервис выключен до проверки лицензии.\nenabled = false;\n"
-            for name in THIRD_PARTY_MODULES}
+    body = "# Сгенерировано MSP: сторонний сервис выключен до проверки лицензии.\nenabled = false;\n"
+    return {f"{name}.conf": body for name in THIRD_PARTY_MODULES}
 
 
 def _render_dmarc() -> str:
@@ -385,7 +381,9 @@ def _render_spf() -> str:
 
 
 def _render_dkim_verify() -> str:
-    return "# Сгенерировано MSP.\nsymbol_allow = \"R_DKIM_ALLOW\";\ntrusted_only = false;\nskip_multi = false;\n"
+    return (
+        '# Сгенерировано MSP.\nsymbol_allow = "R_DKIM_ALLOW";\ntrusted_only = false;\nskip_multi = false;\n'
+    )
 
 
 def _render_redis(cfg: RspamdNodeConfig) -> str:
@@ -499,7 +497,7 @@ def render(cfg: RspamdNodeConfig) -> RenderedRspamd:
         "local.d/worker-proxy-outbound.inc": _render_proxy("outbound"),
         "local.d/worker-controller.inc": (
             "# Контроллер слушает только 127.0.0.1; пароль — из хранилища секретов (§31).\n"
-            "secure_ip = \"127.0.0.1\";\n"
+            'secure_ip = "127.0.0.1";\n'
             f'.include(try=false) "{cfg.controller_password_file}"\n'
         ),
         "local.d/settings.conf": _render_settings(cfg),
@@ -515,11 +513,13 @@ def render(cfg: RspamdNodeConfig) -> RenderedRspamd:
         "local.d/multimap.conf": _render_multimap(cfg),
         "local.d/arc.conf": "allow_envfrom_empty = true;\nallow_hdrfrom_mismatch = true;\n",
         "local.d/hfilter.conf": "# Сгенерировано MSP.\nenabled = true;\n",
-        "local.d/logging.inc": "level = \"info\";\n",
+        "local.d/logging.inc": 'level = "info";\n',
     }
     for name, body in _render_modules_off().items():
         files[f"local.d/{name}"] = body
-    files["rspamd.local.lua"] = (Path(__file__).parent / "lua" / "rspamd.local.lua").read_text(encoding="utf-8")
+    files["rspamd.local.lua"] = (Path(__file__).parent / "lua" / "rspamd.local.lua").read_text(
+        encoding="utf-8"
+    )
     signing, selectors_map, keys_map = _render_dkim_signing(cfg)
     files["local.d/dkim_signing.conf"] = signing
     files["maps.d/dkim_selectors.map"] = selectors_map
@@ -568,8 +568,12 @@ class ReleaseStore:
             path = target / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(blob)
-        manifest = {"schema": SCHEMA_VERSION, "config_version": rendered.config_version, "checksum": rendered.checksum,
-                    "files": sorted(rendered.files)}
+        manifest = {
+            "schema": SCHEMA_VERSION,
+            "config_version": rendered.config_version,
+            "checksum": rendered.checksum,
+            "files": sorted(rendered.files),
+        }
         (target / self.manifest_name).write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
         return target
 
@@ -633,10 +637,9 @@ def apply_release(
         return ReleaseOutcome("ACTIVE", rendered.config_version)
     if previous:
         store.activate(previous)
-        try:
+        # Откат уже выполнен ссылкой; если перезагрузка не удалась, повторит оператор.
+        with contextlib.suppress(Exception):
             reload()
-        except Exception:  # noqa: BLE001, S110 - откат уже выполнен ссылкой, перезапуск повторит оператор
-            pass
     return ReleaseOutcome("ROLLED_BACK", rendered.config_version, detail or "проверка здоровья не пройдена")
 
 

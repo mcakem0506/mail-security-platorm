@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import pytest
 
-from tests.gateway.harness import docker_available
+from tests.gateway.harness import LAB_RECIPIENTS, docker_available
 
 from .harness import SpamStack, milter_spec
-from tests.gateway.harness import LAB_RECIPIENTS
 
 
 def pytest_collection_modifyitems(config, items):  # type: ignore[no-untyped-def]

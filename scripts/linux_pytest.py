@@ -26,7 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 #: Зависимости, которых хватает для тестов без базы данных. Для тестов с БД используйте CI.
-DEPENDENCIES = "pytest pydantic pyyaml cryptography prometheus-client"
+DEPENDENCIES = "pytest pydantic pyyaml cryptography prometheus-client hypothesis idna tldextract nh3"
 SANDBOX_DEPENDENCIES = "py7zr rarfile pypdfium2 opencv-python-headless numpy idna nh3 tldextract"
 
 
@@ -35,7 +35,7 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     dependencies = DEPENDENCIES
-    pythonpath = "packages/gateway:packages/shared-contracts:packages/mail-parser"
+    pythonpath = "packages/gateway:packages/antispam:packages/shared-contracts:packages/mail-parser"
     if "--sandbox" in argv:
         argv = [item for item in argv if item != "--sandbox"]
         dependencies = f"{DEPENDENCIES} {SANDBOX_DEPENDENCIES}"

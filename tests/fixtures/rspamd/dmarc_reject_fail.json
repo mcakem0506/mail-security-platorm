@@ -1,0 +1,244 @@
+{
+ "action": "add header",
+ "from": "a@example.test",
+ "fuzzy": [],
+ "header_date": [
+  "Mon, 12 Oct 2026 10:00:00 +0000"
+ ],
+ "header_from": [
+  "a@example.test"
+ ],
+ "header_subject": [
+  "Тест"
+ ],
+ "header_to": [
+  "ivan@corp.example"
+ ],
+ "ip": "10.77.0.151",
+ "message_id": "fx-dmarcrej@sender.example",
+ "qid": "D3CD41A07AE",
+ "rcpt": [
+  "ivan@corp.example"
+ ],
+ "rspamd_server": "dbe8684d15cb",
+ "scan_time": 5,
+ "score": 13,
+ "size": 267,
+ "subject": "Тест",
+ "symbols": [
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "DATE_IN_PAST",
+   "options": [
+    "155"
+   ],
+   "score": 1,
+   "weight": 1
+  },
+  {
+   "group": "hfilter",
+   "groups": [
+    "hfilter"
+   ],
+   "name": "HFILTER_HOSTNAME_UNKNOWN",
+   "score": 2.5,
+   "weight": 1
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "FROM_EQ_ENVFROM",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "TO_DN_NONE",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "TO_MATCH_ENVRCPT_ALL",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "mime_types",
+   "groups": [
+    "mime_types"
+   ],
+   "name": "MIME_GOOD",
+   "options": [
+    "text/plain"
+   ],
+   "score": -0.1,
+   "weight": 1
+  },
+  {
+   "group": "msp",
+   "groups": [
+    "msp"
+   ],
+   "name": "MSP_DIRECTION_INBOUND",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "policies",
+   "groups": [
+    "policies",
+    "dkim"
+   ],
+   "name": "R_DKIM_NA",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "RCVD_COUNT_ZERO",
+   "options": [
+    "0"
+   ],
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "policies",
+   "groups": [
+    "policies",
+    "spf"
+   ],
+   "name": "R_SPF_FAIL",
+   "options": [
+    "-all:c"
+   ],
+   "score": 1,
+   "weight": 1
+  },
+  {
+   "group": "hfilter",
+   "groups": [
+    "hfilter"
+   ],
+   "name": "RDNS_NONE",
+   "score": 2,
+   "weight": 1
+  },
+  {
+   "group": "ungrouped",
+   "groups": [],
+   "name": "SINGLE_SHORT_PART",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "ONCE_RECEIVED",
+   "score": 0.1,
+   "weight": 1
+  },
+  {
+   "group": "policies",
+   "groups": [
+    "policies",
+    "arc"
+   ],
+   "name": "ARC_NA",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "FROM_NO_DN",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "MISSING_XM_UA",
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "RCPT_COUNT_ONE",
+   "options": [
+    "1"
+   ],
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "mime_types",
+   "groups": [
+    "mime_types"
+   ],
+   "name": "MIME_TRACE",
+   "options": [
+    "0:+"
+   ],
+   "score": 0,
+   "weight": 0
+  },
+  {
+   "group": "composite",
+   "groups": [
+    "composite"
+   ],
+   "name": "VIOLATED_DIRECT_SPF",
+   "score": 3.5,
+   "weight": 1
+  },
+  {
+   "group": "headers",
+   "groups": [
+    "headers"
+   ],
+   "name": "SUBJECT_NEEDS_ENCODING",
+   "score": 1,
+   "weight": 1
+  },
+  {
+   "group": "policies",
+   "groups": [
+    "policies",
+    "dmarc"
+   ],
+   "name": "DMARC_POLICY_REJECT",
+   "options": [
+    "example.test : No valid SPF, No valid DKIM",
+    "reject"
+   ],
+   "score": 2,
+   "weight": 1
+  }
+ ],
+ "user": "unknown"
+}

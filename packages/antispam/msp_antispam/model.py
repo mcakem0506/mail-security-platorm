@@ -65,7 +65,7 @@ class SpamClass(StrEnum):
 
 
 class SpfResult(StrEnum):
-    PASS = "PASS"  # nosec - результат проверки, не пароль
+    PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
     SOFTFAIL = "SOFTFAIL"
     NEUTRAL = "NEUTRAL"
@@ -75,7 +75,7 @@ class SpfResult(StrEnum):
 
 
 class DkimResult(StrEnum):
-    PASS = "PASS"  # nosec
+    PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
     NONE = "NONE"
     TEMPERROR = "TEMPERROR"
@@ -83,7 +83,7 @@ class DkimResult(StrEnum):
 
 
 class DmarcResult(StrEnum):
-    PASS = "PASS"  # nosec
+    PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
     NONE = "NONE"
     TEMPERROR = "TEMPERROR"
@@ -91,7 +91,7 @@ class DmarcResult(StrEnum):
 
 
 class ArcResult(StrEnum):
-    PASS = "PASS"  # nosec
+    PASS = "PASS"  # noqa: S105
     FAIL = "FAIL"
     NONE = "NONE"
     UNKNOWN = "UNKNOWN"
@@ -217,7 +217,7 @@ class AuthEvidence(Strict):
 class PtrState(StrEnum):
     NONE = "NONE"
     PTR_PRESENT = "PTR_PRESENT"
-    FCRDNS_PASS = "FCrDNS_PASS"
+    FCRDNS_PASS = "FCrDNS_PASS"  # noqa: S105
     FCRDNS_FAIL = "FCrDNS_FAIL"
     TEMPERROR = "TEMPERROR"
 

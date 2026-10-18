@@ -100,7 +100,9 @@ class DkimKey:
     def generate(cls, domain: str, selector: str = "s1") -> DkimKey:
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         private = key.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
         )
         public = key.public_key().public_bytes(
             serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
@@ -115,8 +117,12 @@ class DkimKey:
     def dns_record(self) -> dict[str, list[str]]:
         return {"TXT": [f"v=DKIM1; k=rsa; p={self.public_b64}"]}
 
-    def sign(self, raw: bytes, headers: tuple[bytes, ...] = (b"from", b"to", b"subject", b"message-id", b"date")) -> bytes:
-        signature = dkim.sign(raw, self.selector.encode(), self.domain.encode(), self.private_pem, include_headers=list(headers))
+    def sign(
+        self, raw: bytes, headers: tuple[bytes, ...] = (b"from", b"to", b"subject", b"message-id", b"date")
+    ) -> bytes:
+        signature = dkim.sign(
+            raw, self.selector.encode(), self.domain.encode(), self.private_pem, include_headers=list(headers)
+        )
         return signature + raw
 
 
@@ -165,7 +171,10 @@ class SpamStack(Stack):
         secrets = self.workdir / "secrets" / "rspamd"
         secrets.mkdir(parents=True, exist_ok=True)
         # Пароль контроллера: хэш создаётся при развёртывании; для стенда — фиксированный.
-        (secrets / "controller.inc").write_text('password = "$2$xwtn6bkbz4dkdsxdjp3wjmyzmzpdepg5$tsd3tzcb65msjcjnzzhoh1h39ub8ykg8cs3dy6z6xhi1xpg5rtpb";\n', encoding="utf-8")
+        (secrets / "controller.inc").write_text(
+            'password = "$2$xwtn6bkbz4dkdsxdjp3wjmyzmzpdepg5$tsd3tzcb65msjcjnzzhoh1h39ub8ykg8cs3dy6z6xhi1xpg5rtpb";\n',
+            encoding="utf-8",
+        )
         for path in secrets.rglob("*"):
             path.chmod(0o644)
 
@@ -177,8 +186,16 @@ class SpamStack(Stack):
         """Выпустить новую конфигурацию сканера на работающем узле тем же путём, что и при запуске."""
         self.write_rspamd(cfg)
         result = docker(
-            "exec", self.rspamd_container, "python3", "-m", "msp_antispam.node", "apply", "--config",
-            "/bootstrap/rspamd.json", check=False, timeout=200,
+            "exec",
+            self.rspamd_container,
+            "python3",
+            "-m",
+            "msp_antispam.node",
+            "apply",
+            "--config",
+            "/bootstrap/rspamd.json",
+            check=False,
+            timeout=200,
         )
         try:
             return dict(json.loads(result.stdout.strip().splitlines()[-1]))
@@ -226,18 +243,31 @@ class SpamStack(Stack):
             return {"ok": False, "stage": "harness", "error": (result.stdout + result.stderr)[-500:]}
 
     def send_inbound(
-        self, message_id: str | None = None, *, ip: str = SENDER_IP, mail_from: str = "a@example.test",
-        helo: str = "mail.example.test", raw: bytes | None = None, rcpt: str = "ivan@corp.example",
+        self,
+        message_id: str | None = None,
+        *,
+        ip: str = SENDER_IP,
+        mail_from: str = "a@example.test",
+        helo: str = "mail.example.test",
+        raw: bytes | None = None,
+        rcpt: str = "ivan@corp.example",
         envelope_from: str | None = None,
     ) -> tuple[str, dict[str, object]]:
         mid = message_id or f"sp-{uuid.uuid4().hex[:10]}"
         body = raw if raw is not None else build_message(mid, mail_from, rcpt)
-        result = self.smtp_from(ip, mail_from if envelope_from is None else envelope_from, [rcpt], body, helo=helo)
+        result = self.smtp_from(
+            ip, mail_from if envelope_from is None else envelope_from, [rcpt], body, helo=helo
+        )
         return mid, result
 
     def send_outbound(
-        self, message_id: str | None = None, *, mail_from: str = "ivan@corp.example",
-        rcpt: str = "partner@elsewhere.example", raw: bytes | None = None, ip: str = TRUSTED_CLIENT_IP,
+        self,
+        message_id: str | None = None,
+        *,
+        mail_from: str = "ivan@corp.example",
+        rcpt: str = "partner@elsewhere.example",
+        raw: bytes | None = None,
+        ip: str = TRUSTED_CLIENT_IP,
         helo: str = "exchange.lab.example",
     ) -> tuple[str, dict[str, object]]:
         mid = message_id or f"so-{uuid.uuid4().hex[:10]}"
@@ -272,25 +302,25 @@ class SpamStack(Stack):
         return found
 
     def delivered(self, message_id: str, *, timeout: float = 90.0) -> dict[str, object] | None:
-        return self.exchange1.wait_for(f"<{message_id}@sender.example>", timeout=timeout) or self.exchange2.wait_for(
-            f"<{message_id}@sender.example>", timeout=1
-        )
+        return self.exchange1.wait_for(
+            f"<{message_id}@sender.example>", timeout=timeout
+        ) or self.exchange2.wait_for(f"<{message_id}@sender.example>", timeout=1)
 
     def rspamd_log(self, tail: int = 80) -> str:
         return docker("logs", "--tail", str(tail), self.rspamd_container, check=False).stdout
 
 
 __all__ = [
-    "DkimKey",
-    "DkimSigning",
-    "Dns",
     "OTHER_IP",
     "SENDER_IP",
-    "SigningDomain",
-    "SpamStack",
     "TRUSTED_CLIENT_IP",
     "TRUSTED_NETWORK",
     "UNTRUSTED_CLIENT_IP",
+    "DkimKey",
+    "DkimSigning",
+    "Dns",
+    "SigningDomain",
+    "SpamStack",
     "build_message",
     "milter_spec",
     "node_config",

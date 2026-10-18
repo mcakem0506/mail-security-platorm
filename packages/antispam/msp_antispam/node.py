@@ -101,7 +101,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
         # До первого запуска сканера проверять нечего: проверка здоровья имеет смысл после reload.
         healthcheck=healthcheck if started else (lambda: True),
     )
-    print(json.dumps({"outcome": outcome.outcome, "config_version": outcome.config_version, "detail": outcome.detail}))
+    print(
+        json.dumps(
+            {"outcome": outcome.outcome, "config_version": outcome.config_version, "detail": outcome.detail}
+        )
+    )
     return 0 if outcome.outcome == "ACTIVE" else 2
 
 
@@ -111,7 +115,9 @@ def cmd_status(_: argparse.Namespace) -> int:
     manifest = {}
     if version:
         with contextlib.suppress(OSError, ValueError):
-            manifest = json.loads((store.releases / version / store.manifest_name).read_text(encoding="utf-8"))
+            manifest = json.loads(
+                (store.releases / version / store.manifest_name).read_text(encoding="utf-8")
+            )
     print(
         json.dumps(
             {

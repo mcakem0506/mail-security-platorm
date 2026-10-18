@@ -1,0 +1,46 @@
+# Отображение символов Rspamd в сигналы MSP (ТЗ 1.2 §26). Версия правил едет с каждым анализом.
+#
+# Правило, а не порог: «оценка Rspamd > X => высокий риск» не используется. Символ превращается
+# в именованный сигнал, а вес сигнала определяют правила движка обнаружения (rules/spam).
+# Неизвестный символ сохраняется как свидетельство, но на риск MSP не влияет, пока его не
+# рассмотрели и не добавили сюда.
+#
+# risk_effect:
+#   INCREASE - сигнал повышает риск (через правило движка)
+#   NONE     - только свидетельство для аналитика, на риск не влияет
+version: "1"
+entries:
+  # --- SPF -------------------------------------------------------------------------------
+  - {symbol: R_SPF_FAIL, signal: AUTH_SPF_FAIL, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: R_SPF_SOFTFAIL, signal: AUTH_SPF_SOFTFAIL, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: R_SPF_PERMFAIL, signal: AUTH_SPF_PERMERROR, kind: AUTH, risk_effect: NONE}
+  - {symbol: R_SPF_DNSFAIL, signal: AUTH_SPF_TEMPERROR, kind: AUTH, risk_effect: NONE}
+  # --- DKIM ------------------------------------------------------------------------------
+  - {symbol: R_DKIM_REJECT, signal: AUTH_DKIM_FAIL, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: R_DKIM_PERMFAIL, signal: AUTH_DKIM_PERMERROR, kind: AUTH, risk_effect: NONE}
+  - {symbol: R_DKIM_TEMPFAIL, signal: AUTH_DKIM_TEMPERROR, kind: AUTH, risk_effect: NONE}
+  # --- DMARC -----------------------------------------------------------------------------
+  - {symbol: DMARC_POLICY_REJECT, signal: AUTH_DMARC_POLICY_REJECT, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: DMARC_POLICY_QUARANTINE, signal: AUTH_DMARC_POLICY_QUARANTINE, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: DMARC_POLICY_SOFTFAIL, signal: AUTH_DMARC_FAIL_MONITOR, kind: AUTH, risk_effect: INCREASE}
+  - {symbol: DMARC_DNSFAIL, signal: AUTH_DMARC_TEMPERROR, kind: AUTH, risk_effect: NONE}
+  - {symbol: DMARC_BAD_POLICY, signal: AUTH_DMARC_PERMERROR, kind: AUTH, risk_effect: NONE}
+  # --- ARC -------------------------------------------------------------------------------
+  - {symbol: ARC_REJECT, signal: AUTH_ARC_FAIL, kind: AUTH, risk_effect: NONE}
+  - {symbol: ARC_INVALID, signal: AUTH_ARC_FAIL, kind: AUTH, risk_effect: NONE}
+  - {symbol: ARC_ALLOW, signal: AUTH_ARC_PASS, kind: AUTH, risk_effect: NONE}
+  # --- HELO / PTR ------------------------------------------------------------------------
+  - {symbol: RDNS_NONE, signal: PTR_MISSING, kind: HELO, risk_effect: INCREASE}
+  - {symbol: RDNS_DNSFAIL, signal: PTR_TEMPERROR, kind: HELO, risk_effect: NONE}
+  - {symbol: HFILTER_HOSTNAME_UNKNOWN, signal: PTR_FCRDNS_FAIL, kind: HELO, risk_effect: INCREASE}
+  - {symbol: HFILTER_HELO_IP_A, signal: HELO_MISMATCH, kind: HELO, risk_effect: INCREASE}
+  - {symbol: HFILTER_HELO_NORES_A_OR_MX, signal: HELO_UNRESOLVABLE, kind: HELO, risk_effect: INCREASE}
+  # --- репутация (правила провайдеров, ТЗ 1.2 §14); префикс покрывает все типы запросов ----------
+  - {symbol: "MSP_RBL_*", signal: REPUTATION_LISTED, kind: REPUTATION, risk_effect: INCREASE}
+  # --- спам ------------------------------------------------------------------------------
+  - {symbol: BAYES_SPAM, signal: SPAM_BAYES, kind: SPAM, risk_effect: NONE}
+  - {symbol: GTUBE, signal: SPAM_GTUBE_SMOKE, kind: SPAM, risk_effect: NONE}
+  # --- служебные символы направления: свидетельство, на риск не влияют -----------------------
+  - {symbol: MSP_DIRECTION_INBOUND, signal: CONTEXT_DIRECTION, kind: CONTEXT, risk_effect: NONE}
+  - {symbol: MSP_DIRECTION_OUTBOUND, signal: CONTEXT_DIRECTION, kind: CONTEXT, risk_effect: NONE}
+  - {symbol: MSP_DIRECTION_INTERNAL_TEST, signal: CONTEXT_DIRECTION, kind: CONTEXT, risk_effect: NONE}
