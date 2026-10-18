@@ -23,8 +23,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .model import QueryType
 from .providers import ReputationProvider
+from .rbl_render import render_rbl
 
 SCHEMA_VERSION = 1
 
@@ -222,7 +222,6 @@ class RspamdNodeConfig(_Strict):
 #: Модули с обращением к сторонним сервисам. Выключены, пока не пройдут проверку лицензии и
 #: приватности (§14, §31): запрос уносит адрес клиента, домен отправителя или ссылки из письма.
 THIRD_PARTY_MODULES = (
-    "rbl",
     "surbl",
     "emails",
     "fuzzy_check",
@@ -427,46 +426,6 @@ def _render_dkim_signing(cfg: RspamdNodeConfig) -> tuple[str, str, str]:
     return conf, selectors, keymap
 
 
-def _render_multimap(cfg: RspamdNodeConfig) -> str:
-    """Провайдеры репутации как правила multimap типа dnsbl. Только одобренные и включённые."""
-    blocks: list[str] = []
-    for provider in cfg.providers:
-        if not provider.is_usable():
-            continue
-        if provider.zone_secret_file is not None:
-            # Имя зоны с секретом в выпуск не попадает: правило лежит в хранилище секретов узла.
-            blocks.append(f'.include(try=false) "{provider.zone_secret_file}"\n')
-            continue
-        for query in provider.query_types:
-            filter_name = _FILTERS.get(query)
-            if filter_name is None:
-                continue
-            symbol = f"MSP_RBL_{provider.id.upper()}_{query.value}"
-            zone = provider.zone_reference()
-            blocks.append(
-                f"{symbol} {{\n"
-                '    type = "dnsbl";\n'
-                f"    filter = {_q(filter_name)};\n"
-                f"    map = {_q(zone)};\n"
-                "    score = 0.0;\n"
-                '    description = "Совпадение со списком провайдера репутации";\n'
-                f"    group = {_q('msp_reputation')};\n"
-                "}\n"
-            )
-    return "\n".join(blocks) if blocks else "# Одобренных провайдеров репутации нет.\n"
-
-
-_FILTERS: dict[QueryType, str] = {
-    QueryType.CLIENT_IP: "ip",
-    QueryType.HELO: "helo",
-    QueryType.RDNS: "rdns",
-    QueryType.SENDER_DOMAIN: "from:domain",
-    QueryType.URL_HOST: "url:host",
-    QueryType.REPLY_TO_DOMAIN: "header:Reply-To:domain",
-    QueryType.DKIM_DOMAIN: "dkim",
-}
-
-
 def _render_statistic(cfg: RspamdNodeConfig) -> str:
     if not cfg.bayes.enabled:
         return (
@@ -514,7 +473,8 @@ def render(cfg: RspamdNodeConfig) -> RenderedRspamd:
         "local.d/redis.conf": _render_redis(cfg),
         "local.d/greylist.conf": _render_greylist(cfg),
         "local.d/statistic.conf": _render_statistic(cfg),
-        "local.d/multimap.conf": _render_multimap(cfg),
+        "override.d/rbl.conf": render_rbl(cfg),
+        "maps.d/empty.map": "",
         "local.d/arc.conf": "allow_envfrom_empty = true;\nallow_hdrfrom_mismatch = true;\n",
         "local.d/hfilter.conf": "# Сгенерировано MSP.\nenabled = true;\n",
         "local.d/logging.inc": 'level = "info";\n',

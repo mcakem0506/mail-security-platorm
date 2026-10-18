@@ -147,7 +147,7 @@ class TestSecretsAreNotRevealed:
                 )
             )
         )
-        text = rendered.files["local.d/multimap.conf"].decode()
+        text = rendered.files["override.d/rbl.conf"].decode()
         assert "/run/secrets/rspamd/rbl_priv.inc" in text
         assert "zones.example" not in text
 
@@ -185,12 +185,12 @@ class TestRenderedConfiguration:
             privacy_class=PrivacyClass.EXTERNAL_DNS,
             zone="zen.example.org",
         )
-        text = render(config(providers=(p,))).files["local.d/multimap.conf"].decode()
+        text = render(config(providers=(p,))).files["override.d/rbl.conf"].decode()
         assert "zen.example.org" not in text
 
     def test_approved_provider_query_types_are_enabled_one_by_one(self) -> None:
         p = provider(query_types=(QueryType.CLIENT_IP, QueryType.SENDER_DOMAIN))
-        text = render(config(providers=(p,))).files["local.d/multimap.conf"].decode()
+        text = render(config(providers=(p,))).files["override.d/rbl.conf"].decode()
         assert "MSP_RBL_LABZONE_CLIENT_IP" in text and "MSP_RBL_LABZONE_SENDER_DOMAIN" in text
         assert "MSP_RBL_LABZONE_HELO" not in text
 

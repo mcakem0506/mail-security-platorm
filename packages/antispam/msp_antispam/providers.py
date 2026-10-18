@@ -95,6 +95,9 @@ class ReputationProvider(BaseModel):
     #: Публичное имя зоны. Для зон с секретом не задаётся: имя лежит в хранилище секретов.
     zone: str | None = None
     zone_secret_file: str | None = None
+    #: Коды ответа, означающие «в списке». Остальные ответы (в том числе 127.255.255.x — ошибка
+    #: использования) листингом не считаются.
+    return_codes: tuple[str, ...] = ("127.0.0.2",)
     timeout_seconds: float = Field(default=2.0, ge=0.2, le=10)
     cache_ttl_seconds: int = Field(default=300, ge=0, le=86400)
 
@@ -114,6 +117,18 @@ class ReputationProvider(BaseModel):
         if not _ZONE.match(value):
             raise ValueError("zone: неверное имя")
         return value
+
+    @field_validator("return_codes")
+    @classmethod
+    def _codes_ok(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if not values:
+            raise ValueError("return_codes: нужен хотя бы один код")
+        for value in values:
+            if not re.fullmatch(r"127\.0\.[0-9]{1,3}\.[0-9]{1,3}", value) or any(
+                int(p) > 255 for p in value.split(".")
+            ):
+                raise ValueError("return_codes: допустимы адреса 127.0.x.y")
+        return values
 
     @field_validator("zone_secret_file")
     @classmethod

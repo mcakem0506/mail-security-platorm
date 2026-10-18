@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -72,6 +73,8 @@ def _record(envelope, session) -> dict[str, object]:  # type: ignore[no-untyped-
         "tls": bool(session.ssl),
         "peer": session.peer[0] if session.peer else "",
         "has_received_header": bool(message.get_all("Received")),
+        # Само письмо (до 256 КиБ): проверки подписи DKIM проверяют доставленные байты независимой программой.
+        "raw_b64": base64.b64encode(raw).decode("ascii") if len(raw) <= 256 * 1024 else "",
     }
 
 

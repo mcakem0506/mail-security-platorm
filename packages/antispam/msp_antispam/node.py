@@ -25,6 +25,7 @@ from .rspamd_config import (
     ReleaseStore,
     RspamdNodeConfig,
     apply_release,
+    render,
 )
 
 ROOT = Path(os.environ.get("MSP_RSPAMD_ROOT", "/var/lib/msp-rspamd"))
@@ -59,12 +60,52 @@ def configtest(staged: Path) -> tuple[bool, str]:
     return ok, output[-1] if output else ""
 
 
-def reload_rspamd() -> None:
+def rspamd_pid() -> int | None:
+    """PID главного процесса. В режиме без форка файла PID нет, поэтому процесс ищется по названию."""
     try:
-        pid = int(Path(PID_FILE).read_text(encoding="utf-8").strip())
+        return int(Path(PID_FILE).read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
+        pass
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            title = (entry / "cmdline").read_bytes().split(b"\x00")[0].decode("utf-8", "replace")
+        except OSError:
+            continue
+        if title.startswith("rspamd: main process"):
+            return int(entry.name)
+    return None
+
+
+def reload_rspamd() -> None:
+    pid = rspamd_pid()
+    if pid is None:
         return  # сканер ещё не запущен: он прочитает выпуск при старте
     os.kill(pid, 1)  # SIGHUP
+
+
+def config_id() -> str:
+    """Признак загруженной конфигурации: набор PID прокси-воркеров.
+
+    При SIGHUP сканер запускает новых воркеров с новой конфигурацией, поэтому смена набора PID —
+    надёжный признак перезагрузки. ``config_id`` из статистики контроллера для этого не годится:
+    он не обновляется при горячей перезагрузке.
+    """
+    pids: list[str] = []
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                title = (entry / "cmdline").read_bytes().split(b"\x00")[0].decode("utf-8", "replace")
+            except OSError:
+                continue
+            if title.startswith("rspamd: rspamd_proxy process"):
+                pids.append(entry.name)
+    except OSError:
+        return ""
+    return ",".join(sorted(pids))
 
 
 def tcp_alive(port: int) -> bool:
@@ -108,13 +149,30 @@ def cmd_apply(args: argparse.Namespace) -> int:
     cfg = RspamdNodeConfig.model_validate_json(Path(args.config).read_text(encoding="utf-8"))
     store = ReleaseStore(ROOT)
     started = tcp_alive(11332)
+    before = config_id() if started else ""
+    unchanged = ReleaseStore(ROOT).active_version() == render(cfg).config_version
+
+    def verified() -> bool:
+        # Перезагрузка считается выполненной, когда сканер отвечает И загрузил другую конфигурацию.
+        if not healthcheck():
+            return False
+        if not before or unchanged:
+            return True
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            current = config_id()
+            if current and current != before:
+                return True
+            time.sleep(1)
+        return False
+
     outcome = apply_release(
         store,
         cfg,
         configtest=configtest,
         reload=reload_rspamd,
         # До первого запуска сканера проверять нечего: проверка здоровья имеет смысл после reload.
-        healthcheck=healthcheck if started else (lambda: True),
+        healthcheck=verified if started else (lambda: True),
     )
     print(
         json.dumps(
