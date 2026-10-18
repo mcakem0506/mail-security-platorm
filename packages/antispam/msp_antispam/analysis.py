@@ -56,6 +56,7 @@ def analyze(
     secret_provider_ids: Iterable[str] = (),
     mapping: SymbolMapping | None = None,
     client_is_trusted: bool = False,
+    peername_lookup: bool = True,
     recipient_count: int = 0,
     known_bulk_domains: Iterable[str] = (),
 ) -> AntispamAnalysis:
@@ -88,6 +89,7 @@ def analyze(
         scan=evidence,
         protected_domains=protected_domains,
         client_is_trusted=client_is_trusted,
+        peername_lookup=peername_lookup,
     )
     names = [s.name for s in evidence.symbols]
     sender_domain = auth.dmarc.from_domain

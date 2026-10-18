@@ -61,6 +61,8 @@ class ParsedAuthResults:
 def parse_authentication_results(value: str) -> ParsedAuthResults | None:
     """Разобрать значение заголовка. ``None``, если authserv-id не распознан."""
     body = " ".join((value or "").split())
+    # Допускается значение вместе с именем поля: так заголовок выглядит в тексте письма.
+    body = re.sub(r"^authentication-results\s*:\s*", "", body, flags=re.IGNORECASE)
     if not body:
         return None
     head, _, tail = body.partition(";")

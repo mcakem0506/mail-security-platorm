@@ -403,11 +403,15 @@ class TestHelo:
         assert helo_evidence("a.example.test", rdns="a.example.test").ptr_state is PtrState.FCRDNS_PASS
         scan = parse_scan({"symbols": [{"name": "RDNS_DNSFAIL"}]})
         assert helo_evidence("a.example.test", rdns="unknown", scan=scan).ptr_state is PtrState.TEMPERROR
-        scan = parse_scan({"symbols": [{"name": "HFILTER_HOSTNAME_UNKNOWN"}]})
-        assert (
-            helo_evidence("a.example.test", rdns="a.example.test", scan=scan).ptr_state
-            is PtrState.FCRDNS_FAIL
-        )
+        # Сканер видел PTR (нет RDNS_NONE), а Postfix при включённом поиске написал «unknown»:
+        # прямая проверка не подтвердила адрес.
+        scan = parse_scan({"symbols": [{"name": "MIME_GOOD"}]})
+        assert helo_evidence("a.example.test", rdns="unknown", scan=scan).ptr_state is PtrState.FCRDNS_FAIL
+        # Если поиск имени в Postfix выключен, подтверждённость неизвестна, а не провалена.
+        no_lookup = helo_evidence("a.example.test", rdns="unknown", scan=scan, peername_lookup=False)
+        assert no_lookup.ptr_state is PtrState.PTR_PRESENT
+        gone = parse_scan({"symbols": [{"name": "RDNS_NONE"}]})
+        assert helo_evidence("a.example.test", rdns="unknown", scan=gone).ptr_state is PtrState.NONE
 
     def test_only_the_gateways_own_received_header_is_used(self) -> None:
         top = top_received(

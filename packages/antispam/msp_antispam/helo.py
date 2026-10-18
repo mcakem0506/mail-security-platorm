@@ -56,6 +56,7 @@ def helo_evidence(
     scan: RspamdEvidence | None = None,
     protected_domains: Iterable[str] = (),
     client_is_trusted: bool = False,
+    peername_lookup: bool = True,
 ) -> HeloEvidence:
     helo = (helo or "").strip()
     signals: list[HeloSignal] = []
@@ -80,17 +81,24 @@ def helo_evidence(
                 signals.append(HeloSignal.INTERNAL_ONLY_FROM_EXTERNAL)
 
     names = {s.name for s in scan.symbols} if scan else set()
+    known_rdns = bool(rdns) and rdns.lower() != "unknown"
+    scanner_saw_ptr = scan is not None and bool(names) and not names & {"RDNS_NONE", "RDNS_DNSFAIL"}
     if "RDNS_DNSFAIL" in names:
         state = PtrState.TEMPERROR
-    elif "HFILTER_HOSTNAME_UNKNOWN" in names and rdns and rdns.lower() != "unknown":
-        state = PtrState.FCRDNS_FAIL
-    elif rdns and rdns.lower() != "unknown":
-        # Postfix записал имя: прямая проверка совпала.
+    elif known_rdns:
+        # Postfix записал обратное имя только потому, что прямая проверка подтвердила тот же адрес.
         state = PtrState.FCRDNS_PASS
-    elif "RDNS_NONE" in names or not rdns or rdns.lower() == "unknown":
+    elif "RDNS_NONE" in names:
         state = PtrState.NONE
-    else:
+    elif scanner_saw_ptr and peername_lookup:
+        # PTR есть (сканер его нашёл), а Postfix при включённом поиске имени написал «unknown»:
+        # значит, прямая проверка не подтвердила адрес.
+        state = PtrState.FCRDNS_FAIL
+    elif scanner_saw_ptr:
+        # Поиск имени в Postfix выключен: подтверждённость прямой записью неизвестна.
         state = PtrState.PTR_PRESENT
+    else:
+        state = PtrState.NONE
     return HeloEvidence(
         helo=helo[:255],
         signals=signals,

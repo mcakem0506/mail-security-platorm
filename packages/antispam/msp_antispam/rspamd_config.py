@@ -330,14 +330,18 @@ def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
         "    }\n"
         "    remove-headers {\n"
         # Подделанные заголовки сканера из внешнего письма не должны стать доказательством (§7).
-        '        "X-Spamd-Result" = 0;\n'
-        '        "X-Spamd-Bar" = 0;\n'
-        '        "X-Spam-Status" = 0;\n'
-        '        "X-Spam" = 0;\n'
-        '        "X-Spam-Level" = 0;\n'
-        '        "X-Rspamd-Score" = 0;\n'
-        '        "X-Rspamd-Action" = 0;\n'
-        '        "X-Rspamd-Server" = 0;\n'
+        "        headers {\n"
+        '            "X-Spamd-Result" = 0;\n'
+        '            "X-Spamd-Bar" = 0;\n'
+        '            "X-Spam-Status" = 0;\n'
+        '            "X-Spam" = 0;\n'
+        '            "X-Spam-Flag" = 0;\n'
+        '            "X-Spam-Level" = 0;\n'
+        '            "X-Rspamd-Score" = 0;\n'
+        '            "X-Rspamd-Action" = 0;\n'
+        '            "X-Rspamd-Server" = 0;\n'
+        '            "X-Rspamd-Queue-Id" = 0;\n'
+        "        }\n"
         "    }\n"
         "}\n"
         'authenticated_headers = ["authentication-results"];\n'
