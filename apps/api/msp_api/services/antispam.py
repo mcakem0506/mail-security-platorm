@@ -58,6 +58,7 @@ from ..db.models_antispam import (
     SpamScan,
 )
 from ..db.models_transport import TransportMessage
+from ..observability import spam_classification_total, spam_fn_total, spam_fp_total
 from .storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -574,6 +575,7 @@ def ingest_scans(
             outcome.duplicate += 1
             continue
         outcome.accepted += 1
+        spam_classification_total.labels(row.spam_class, row.direction).inc()
         _record_conflicts(session, organization_id, row, analysis, headers, evidence)
         sender = domain_of(evidence.envelope_from)
         _update_reputation(
@@ -1448,6 +1450,10 @@ def record_review(
     )
     session.add(review)
     session.flush()
+    if verdict == "HAM" and scan.spam_class in ("SPAM", "HIGH_CONFIDENCE_SPAM"):
+        spam_fp_total.labels(selection).inc()
+    elif verdict == "SPAM" and selection == "LOW_SCORE_SAMPLE":
+        spam_fn_total.inc()
     # Решение человека — единственное место, где история репутации узнаёт исход (ТЗ 1.2 §17).
     _apply_outcome(session, organization_id, scan, verdict)
     return review

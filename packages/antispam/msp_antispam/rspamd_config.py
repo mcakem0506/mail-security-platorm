@@ -31,6 +31,11 @@ SCHEMA_VERSION = 1
 _HOST = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.\-]{0,251}[A-Za-z0-9])?$")
 _DOMAIN = _HOST
 _PATH = re.compile(r"^/[A-Za-z0-9._/\-]{1,200}$")
+
+
+def path_ok(value: str) -> bool:
+    """Абсолютный путь без выхода из каталога: «..» и «//» недопустимы."""
+    return bool(_PATH.match(value)) and ".." not in value.split("/") and "//" not in value
 _ID = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 _NETWORK = re.compile(r"^[0-9a-fA-F:.]+(/[0-9]{1,3})?$")
 
@@ -59,7 +64,7 @@ class RedisSettings(_Strict):
     @field_validator("password_file")
     @classmethod
     def _pw(cls, value: str | None) -> str | None:
-        if value is not None and not _PATH.match(value):
+        if value is not None and not path_ok(value):
             raise ConfigError("redis.password_file: неверный путь")
         return value
 
@@ -101,7 +106,7 @@ class SigningDomain(_Strict):
     @field_validator("private_key_file")
     @classmethod
     def _k(cls, value: str) -> str:
-        if not _PATH.match(value):
+        if not path_ok(value):
             raise ConfigError("signing.private_key_file: неверный путь")
         return value
 
@@ -200,7 +205,7 @@ class RspamdNodeConfig(_Strict):
     @field_validator("controller_password_file")
     @classmethod
     def _cp(cls, value: str) -> str:
-        if not _PATH.match(value):
+        if not path_ok(value):
             raise ConfigError("controller_password_file: неверный путь")
         return value
 

@@ -32,8 +32,13 @@ services:
       - rspamd-state:/var/lib/msp-rspamd
       - rspamd-data:/var/lib/rspamd
     environment:
-      MSP_PANEL_SPAM_URL: ${SPAM_PANEL_URL:-}
+      # Связь с панелью: по умолчанию выключена, узел работает автономно.
+      MSP_PANEL_URL: ${SPAM_PANEL_URL:-}
       MSP_PANEL_TOKEN_FILE: ${SPAM_PANEL_TOKEN_FILE:-}
+      MSP_NODE_ID: ${SPAM_NODE_ID:-00000000000000000000000000000001}
+      MSP_SYNC_INTERVAL: "${SPAM_SYNC_INTERVAL:-5}"
+    ports:
+      - "127.0.0.1:${SPAM_METRICS_PORT:-19101}:9101"
     extra_hosts: ["host.docker.internal:host-gateway"]
 
   rspamd-dns:

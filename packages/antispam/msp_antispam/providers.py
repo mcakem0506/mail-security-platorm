@@ -58,6 +58,11 @@ _ZONE = re.compile(r"^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 _PATH = re.compile(r"^/[A-Za-z0-9._/\-]{1,200}$")
 
 
+def path_ok(value: str) -> bool:
+    """Абсолютный путь без выхода из каталога: «..» и «//» недопустимы."""
+    return bool(_PATH.match(value)) and ".." not in value.split("/") and "//" not in value
+
+
 class LicenseApproval(BaseModel):
     """Одобрение условий лицензии. Без него провайдер не используется."""
 
@@ -133,7 +138,7 @@ class ReputationProvider(BaseModel):
     @field_validator("zone_secret_file")
     @classmethod
     def _secret_ok(cls, value: str | None) -> str | None:
-        if value is not None and not _PATH.match(value):
+        if value is not None and not path_ok(value):
             raise ValueError("zone_secret_file: неверный путь")
         return value
 

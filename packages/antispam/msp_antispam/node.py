@@ -19,9 +19,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .metrics import ScanMetrics
+from .overlay import merge
 from .rspamd_config import (
+    ConfigError,
     ReleaseStore,
     RspamdNodeConfig,
     apply_release,
@@ -30,6 +34,7 @@ from .rspamd_config import (
 
 ROOT = Path(os.environ.get("MSP_RSPAMD_ROOT", "/var/lib/msp-rspamd"))
 ENTRY_CONFIG = os.environ.get("MSP_RSPAMD_ENTRY", "/opt/msp-rspamd/rspamd.conf")
+BASE_CONFIG = os.environ.get("MSP_RSPAMD_BASE", "/bootstrap/rspamd.json")
 RSPAMADM = os.environ.get("MSP_RSPAMADM", "/usr/bin/rspamadm")
 CONTROLLER = os.environ.get("MSP_RSPAMD_CONTROLLER", "http://127.0.0.1:11334")
 PID_FILE = os.environ.get("MSP_RSPAMD_PID", "/run/rspamd/rspamd.pid")
@@ -219,10 +224,12 @@ class Receiver:
     самые старые отбрасываются и считаются).
     """
 
-    def __init__(self, directory: Path, panel_url: str | None, token: str | None) -> None:
+    def __init__(self, directory: Path, panel_url: str | None, token: str | None, node_id: str = "") -> None:
         self.directory = directory
         self.panel_url = panel_url
         self.token = token
+        self.node_id = node_id
+        self.metrics = ScanMetrics()
         self.dropped = 0
         self.received = 0
         self.sent = 0
@@ -242,15 +249,17 @@ class Receiver:
         except ValueError:
             return False
         if not isinstance(record, dict):
+            self.metrics.error()
             return False
         self.received += 1
+        self.metrics.observe(record)
         # Происхождение записи: версия выпуска и сканера, под которыми она получена (ТЗ 1.2 §27).
         record["_msp"] = {
             "received_at": time.time(),
             "config_version": self.config_version(),
             "rspamd_version": self.rspamd_version,
         }
-        name = f"{time.time_ns()}.json"
+        name = f"{time.time_ns()}-{self.received:08d}.json"
         (self.directory / name).write_text(json.dumps(record), encoding="utf-8")
         files = sorted(self.directory.glob("*.json"))
         for stale in files[: max(0, len(files) - OUTBOX_LIMIT)]:
@@ -268,7 +277,7 @@ class Receiver:
             except (OSError, ValueError):
                 path.unlink(missing_ok=True)
                 continue
-            body = json.dumps({"scans": [record]}).encode()
+            body = json.dumps({"node_id": self.node_id, "scans": [record]}).encode()
             request = urllib.request.Request(  # noqa: S310
                 self.panel_url,
                 data=body,
@@ -316,16 +325,158 @@ def serve_receiver(receiver: Receiver, host: str, port: int) -> None:
         threading.Thread(target=handle, args=(conn,), daemon=True).start()
 
 
+class _MetricsHandler(BaseHTTPRequestHandler):
+    receiver: Receiver
+
+    def do_GET(self) -> None:
+        if self.path != "/metrics":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.receiver.metrics.set_health(up=tcp_alive(11332) and tcp_alive(11333), redis_up=_redis_alive())
+        body = self.receiver.metrics.render().encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: object) -> None:
+        return
+
+
+def _redis_alive() -> bool:
+    try:
+        base = RspamdNodeConfig.model_validate_json(Path(BASE_CONFIG).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if base.redis is None:
+        return False
+    try:
+        with socket.create_connection((base.redis.host, base.redis.port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def serve_metrics(receiver: Receiver, host: str, port: int) -> None:
+    handler = type("Handler", (_MetricsHandler,), {"receiver": receiver})
+    ThreadingHTTPServer((host, port), handler).serve_forever()
+
+
 def cmd_collector(args: argparse.Namespace) -> int:
     token = None
     if args.token_file:
         with contextlib.suppress(OSError):
             token = Path(args.token_file).read_text(encoding="utf-8").strip()
-    receiver = Receiver(Path(args.outbox), args.panel_url or None, token)
+    receiver = Receiver(Path(args.outbox), args.panel_url or None, token, args.node_id)
     threading.Thread(target=serve_receiver, args=(receiver, args.listen, args.port), daemon=True).start()
+    threading.Thread(
+        target=serve_metrics, args=(receiver, args.metrics_host, args.metrics_port), daemon=True
+    ).start()
     while True:
         receiver.flush()
         time.sleep(args.interval)
+
+
+def _panel_request(url: str, token: str, *, body: dict | None = None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(  # noqa: S310
+        url,
+        data=data,
+        method="POST" if body is not None else "GET",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310  # nosec B310
+        return json.loads(response.read())
+
+
+def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
+    """Забрать назначение панели, свести с локальной конфигурацией, применить, сообщить итог."""
+    base = RspamdNodeConfig.model_validate_json(Path(BASE_CONFIG).read_text(encoding="utf-8"))
+    state: dict = {
+        "up": tcp_alive(11332) and tcp_alive(11333),
+        "redis_up": _redis_alive(),
+        "version": _rspamd_version(),
+    }
+    try:
+        overlay = _panel_request(f"{panel_url}/rspamd-config", token)
+        merged = merge(base, overlay)
+        cfg = merged.config
+        state["dkim_missing_keys"] = merged.missing_keys
+        store = ReleaseStore(ROOT)
+        version = render(cfg).config_version
+        if store.active_version() != version:
+            outcome = apply_release(
+                store,
+                cfg,
+                configtest=configtest,
+                reload=reload_rspamd,
+                healthcheck=healthcheck,
+            )
+            state["last_apply"] = {
+                "outcome": outcome.outcome,
+                "config_version": outcome.config_version,
+                "detail": outcome.detail,
+            }
+        else:
+            state["last_apply"] = last.get("last_apply") or {"outcome": "ACTIVE", "config_version": version}
+    except (OSError, ValueError, ConfigError, urllib.error.URLError) as exc:
+        # Панель недоступна или назначение не прошло проверку: узел остаётся на прежней версии и работает.
+        state["last_apply"] = {"outcome": "SYNC_FAILED", "detail": type(exc).__name__}
+    active = ReleaseStore(ROOT).active_version() or ""
+    state["config_version"] = active
+    state["config_checksum"] = _checksum(active)
+    with contextlib.suppress(OSError, ValueError, urllib.error.URLError):
+        _panel_request(f"{panel_url}/rspamd-status", token, body={"node_id": node_id, "state": state})
+    return state
+
+
+def _checksum(version: str) -> str:
+    if not version:
+        return ""
+    try:
+        manifest = json.loads((ROOT / "releases" / version / "MANIFEST.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return str(manifest.get("checksum", ""))
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    token = Path(args.token_file).read_text(encoding="utf-8").strip()
+    last: dict = {}
+    while True:
+        last = sync_once(args.panel_url, token, args.node_id, last)
+        if args.once:
+            print(json.dumps(last))
+            return 0
+        time.sleep(args.interval)
+
+
+def cmd_keygen(args: argparse.Namespace) -> int:
+    """Сгенерировать ключ подписи на узле: закрытая часть остаётся в хранилище секретов узла, наружу
+    выдаётся только запись для DNS. Рекомендуемый способ для рабочей установки."""
+    from .dkim_keys import generate
+
+    key, pem = generate(args.domain, args.selector, generated_by="node", secret_dir=args.secret_dir)
+    target = Path(key.private_key_ref)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(target, flags, 0o640)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(pem)
+    print(
+        json.dumps(
+            {
+                "domain": key.domain,
+                "selector": key.selector,
+                "dns_name": key.dns_name,
+                "public_record": key.public_record,
+                "private_key_ref": key.private_key_ref,
+            }
+        )
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -340,10 +491,27 @@ def main(argv: list[str] | None = None) -> int:
     collector.add_argument("--listen", default="127.0.0.1")  # nosec B104 - приёмник слушает только loopback
     collector.add_argument("--port", type=int, default=11380)
     collector.add_argument("--outbox", default="/var/lib/msp-rspamd/outbox")
-    collector.add_argument("--panel-url", default=os.environ.get("MSP_PANEL_SPAM_URL", ""))
+    collector.add_argument(
+        "--panel-url", default=os.environ.get("MSP_PANEL_SPAM_URL", "")
+    )  # .../gateway-agent/spam-scans
     collector.add_argument("--token-file", default=os.environ.get("MSP_PANEL_TOKEN_FILE", ""))
     collector.add_argument("--interval", type=float, default=2.0)
+    collector.add_argument("--node-id", default=os.environ.get("MSP_NODE_ID", ""))
+    collector.add_argument("--metrics-host", default="0.0.0.0")  # nosec B104 - порт доступен сети мониторинга узла  # noqa: S104
+    collector.add_argument("--metrics-port", type=int, default=9101)
     collector.set_defaults(func=cmd_collector)
+    sync = sub.add_parser("sync")
+    sync.add_argument("--panel-url", default=os.environ.get("MSP_PANEL_URL", ""))
+    sync.add_argument("--token-file", default=os.environ.get("MSP_PANEL_TOKEN_FILE", ""))
+    sync.add_argument("--node-id", default=os.environ.get("MSP_NODE_ID", ""))
+    sync.add_argument("--interval", type=float, default=30.0)
+    sync.add_argument("--once", action="store_true")
+    sync.set_defaults(func=cmd_sync)
+    keygen = sub.add_parser("keygen")
+    keygen.add_argument("--domain", required=True)
+    keygen.add_argument("--selector", required=True)
+    keygen.add_argument("--secret-dir", default="/run/secrets/rspamd/dkim")
+    keygen.set_defaults(func=cmd_keygen)
     args = parser.parse_args(argv)
     return int(args.func(args))
 

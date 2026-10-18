@@ -123,6 +123,18 @@ provider_rate_limit = Counter(
 )
 parser_errors = Counter("msp_parser_errors_total", "Parser errors", ["kind"], registry=REGISTRY)
 incidents_total = Counter("msp_incidents_total", "Incidents created", ["severity"], registry=REGISTRY)
+
+# Анти-спам (ТЗ 1.2 §36). Метки ограничены перечислениями: значения из письма в метки не попадают.
+spam_classification_total = Counter(
+    "msp_spam_classification_total",
+    "Spam classification of scanned messages",
+    ["spam_class", "direction"],
+    registry=REGISTRY,
+)
+spam_fp_total = Counter(
+    "msp_spam_fp_total", "Analyst-confirmed spam false positives", ["selection"], registry=REGISTRY
+)
+spam_fn_total = Counter("msp_spam_fn_total", "Analyst-confirmed spam false negatives", registry=REGISTRY)
 campaign_size = Histogram(
     "msp_campaign_size",
     "Messages per campaign at correlation time",
