@@ -38,6 +38,7 @@ from tests.gateway.harness import (
 SPAM_COMPOSE = REPO / "deployment" / "spam" / "compose.yml"
 DNS_IP = "10.77.0.51"
 REDIS_IP = "10.77.0.52"
+RSPAMD_IP = "10.77.0.50"
 
 #: Адреса «внешних серверов» в сети стенда. Не доверенная подсеть (10.77.0.64/26).
 SENDER_IP = "10.77.0.150"
@@ -45,10 +46,11 @@ OTHER_IP = "10.77.0.151"
 
 
 def milter_spec(**overrides: object):  # type: ignore[no-untyped-def]
-    return lab_spec(
-        milter=Milter(enabled=True, inbound_socket="inet:rspamd:11332", outbound_socket="inet:rspamd:11333"),
-        **overrides,
+    overrides.setdefault(
+        "milter",
+        Milter(enabled=True, inbound_socket=f"inet:{RSPAMD_IP}:11332", outbound_socket=f"inet:{RSPAMD_IP}:11333"),
     )
+    return lab_spec(**overrides)
 
 
 def node_config(**overrides: object) -> RspamdNodeConfig:
@@ -98,8 +100,8 @@ class DkimKey:
     public_b64: str
 
     @classmethod
-    def generate(cls, domain: str, selector: str = "s1") -> DkimKey:
-        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    def generate(cls, domain: str, selector: str = "s1", *, bits: int = 2048) -> DkimKey:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
         private = key.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.TraditionalOpenSSL,
@@ -119,10 +121,21 @@ class DkimKey:
         return {"TXT": [f"v=DKIM1; k=rsa; p={self.public_b64}"]}
 
     def sign(
-        self, raw: bytes, headers: tuple[bytes, ...] = (b"from", b"to", b"subject", b"message-id", b"date")
+        self,
+        raw: bytes,
+        headers: tuple[bytes, ...] = (b"from", b"to", b"subject", b"message-id", b"date"),
+        *,
+        algorithm: bytes = b"rsa-sha256",
+        domain: str | None = None,
+        selector: str | None = None,
     ) -> bytes:
         signature = dkim.sign(
-            raw, self.selector.encode(), self.domain.encode(), self.private_pem, include_headers=list(headers)
+            raw,
+            (selector or self.selector).encode(),
+            (domain or self.domain).encode(),
+            self.private_pem,
+            include_headers=list(headers),
+            signature_algorithm=algorithm,
         )
         return signature + raw
 
@@ -301,6 +314,27 @@ class SpamStack(Stack):
 
         self.wait_until(check, timeout=timeout, what=f"результат сканирования письма {message_id}")
         return found
+
+    def clear_scans(self) -> None:
+        docker("exec", self.rspamd_container, "sh", "-c", "rm -f /var/lib/msp-rspamd/outbox/*.json", check=False)
+
+    def analysis(self, message_id: str, *, timeout: float = 90.0, policy=None, **kwargs):  # type: ignore[no-untyped-def]
+        """Результат сканирования письма, пропущенный через анализ MSP."""
+        from msp_antispam.analysis import analyze
+        from msp_antispam.policy import SpamPolicy
+
+        record = self.scan_for(message_id, timeout=timeout)
+        return analyze(record, policy or SpamPolicy(), **kwargs)
+
+    def auth_of(self, message_id: str, **kwargs):  # type: ignore[no-untyped-def]
+        return self.analysis(message_id, **kwargs).auth
+
+    def send_from_zone(self, zone, message_id: str | None = None, *, ip: str = SENDER_IP, sign: bool = True, **kwargs):  # type: ignore[no-untyped-def]
+        mid = message_id or f"sp-{uuid.uuid4().hex[:10]}"
+        raw = kwargs.pop("raw", None) or zone.message(mid, sign=sign)
+        envelope = kwargs.pop("mail_from", zone.address)
+        result = self.smtp_from(ip, envelope, ["ivan@corp.example"], raw, helo=kwargs.pop("helo", zone.helo))
+        return mid, result
 
     def delivered(self, message_id: str, *, timeout: float = 90.0) -> dict[str, object] | None:
         return self.exchange1.wait_for(

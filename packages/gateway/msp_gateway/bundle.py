@@ -237,6 +237,21 @@ def check_main_cf(text: str) -> None:
             raise BundleError(f"main.cf:{number}: строка не похожа на «параметр = значение»")
         if match.group(1) not in MAIN_CF_PARAMETERS:
             raise BundleError(f"main.cf:{number}: параметр вне белого списка")
+        _check_main_value(match.group(1), line.partition("=")[2].strip(), number)
+
+
+#: Значения, которые узел не примет ни от кого, даже от панели с верной контрольной суммой.
+_FIXED_MAIN_VALUES = {
+    # Сбой сканера не должен останавливать почту: по умолчанию Postfix выбирает tempfail (ТЗ 1.2 §4).
+    "milter_default_action": "accept",
+    "milter_protocol": "6",
+}
+
+
+def _check_main_value(name: str, value: str, number: int) -> None:
+    expected = _FIXED_MAIN_VALUES.get(name)
+    if expected is not None and value != expected:
+        raise BundleError(f"main.cf:{number}: значение параметра {name} зафиксировано")
 
 
 def check_master_cf(text: str) -> None:

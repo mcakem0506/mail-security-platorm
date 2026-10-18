@@ -371,9 +371,9 @@ class Milter(StrictModel):
     """
 
     enabled: bool = False
-    #: Сокеты в форме ``inet:host:port``. Хост и порт проверяются как имя и порт, не как строка.
-    inbound_socket: str = "inet:rspamd:11332"
-    outbound_socket: str = "inet:rspamd:11333"
+    #: Сокеты в форме ``inet:IP:port`` или ``unix:/путь``. Имя хоста запрещено: см. validation.milter_socket.
+    inbound_socket: str = "inet:127.0.0.1:11332"
+    outbound_socket: str = "inet:127.0.0.1:11333"
     connect_timeout_seconds: int = Field(default=5, ge=1, le=30)
     command_timeout_seconds: int = Field(default=15, ge=1, le=120)
     content_timeout_seconds: int = Field(default=60, ge=1, le=600)
