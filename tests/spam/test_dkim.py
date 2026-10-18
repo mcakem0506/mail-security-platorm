@@ -39,7 +39,9 @@ def test_a_changed_body_fails(clean_spam) -> None:  # type: ignore[no-untyped-de
 def test_a_changed_signed_header_fails(clean_spam) -> None:  # type: ignore[no-untyped-def]
     zone = Zone("dk")
     clean_spam.dns.records(zone.records(spf="v=spf1 -all", dmarc=None))
-    raw = zone.message("dk-hdr", subject="Оригинал").replace("Subject: Оригинал".encode(), "Subject: Подмена".encode())
+    raw = zone.message("dk-hdr", subject="Оригинал").replace(
+        "Subject: Оригинал".encode(), "Subject: Подмена".encode()
+    )
     auth = run(clean_spam, zone, raw, "dk-hdr")
     assert auth.dkim.result is DkimResult.FAIL
 
@@ -125,7 +127,9 @@ def test_a_malformed_signature_is_not_a_pass(clean_spam) -> None:  # type: ignor
 def test_a_garbage_dkim_header_does_not_break_scanning(clean_spam) -> None:  # type: ignore[no-untyped-def]
     zone = Zone("dk")
     clean_spam.dns.records(zone.records(spf="v=spf1 -all", dmarc=None))
-    raw = zone.message("dk-junk", sign=False, extra_headers="DKIM-Signature: v=1; this is not a signature\r\n")
+    raw = zone.message(
+        "dk-junk", sign=False, extra_headers="DKIM-Signature: v=1; this is not a signature\r\n"
+    )
     auth = run(clean_spam, zone, raw, "dk-junk")
     assert auth.dkim.result is not DkimResult.PASS
 

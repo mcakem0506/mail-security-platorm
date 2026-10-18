@@ -46,7 +46,9 @@ class Zone:
         return out
 
     # --- письмо ----------------------------------------------------------------------------
-    def message(self, message_id: str, *, sign: bool = True, from_address: str | None = None, **kwargs: object) -> bytes:
+    def message(
+        self, message_id: str, *, sign: bool = True, from_address: str | None = None, **kwargs: object
+    ) -> bytes:
         raw = build_message(message_id, from_address or self.address, **kwargs)  # type: ignore[arg-type]
         return self.key.sign(raw) if sign else raw
 

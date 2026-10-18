@@ -10,8 +10,8 @@ from msp_gateway.spec import (
     InboundListener,
     InternalListener,
     Milter,
-    OutboundMode,
     Outbound,
+    OutboundMode,
     RelayDomain,
     Route,
     Target,
@@ -42,11 +42,18 @@ def master_cf(s: GatewaySpec) -> str:
     return render_master_cf(s, config_dir=CONFIG, state_dir=STATE)
 
 
-ENABLED = {"enabled": True, "inbound_socket": "inet:10.77.0.50:11332", "outbound_socket": "inet:10.77.0.50:11333"}
+ENABLED = {
+    "enabled": True,
+    "inbound_socket": "inet:10.77.0.50:11332",
+    "outbound_socket": "inet:10.77.0.50:11333",
+}
 
 
 class TestSocketValidation:
-    @pytest.mark.parametrize("socket", ["inet:10.77.0.50:11332", "inet:127.0.0.1:11332", "inet:[::1]:11332", "unix:/run/rspamd/milter.sock"])
+    @pytest.mark.parametrize(
+        "socket",
+        ["inet:10.77.0.50:11332", "inet:127.0.0.1:11332", "inet:[::1]:11332", "unix:/run/rspamd/milter.sock"],
+    )
     def test_ip_addresses_and_unix_paths_are_accepted(self, socket: str) -> None:
         Milter(enabled=True, inbound_socket=socket, outbound_socket=socket)
 
@@ -91,8 +98,14 @@ class TestRendering:
         text = master_cf(spec(**ENABLED))
         inbound = text.split("postfix-in")[1].split("postfix-out")[0]
         outbound = text.split("postfix-out")[1]
-        assert "smtpd_milters=inet:10.77.0.50:11332" in inbound and "milter_macro_daemon_name=msp-inbound" in inbound
-        assert "smtpd_milters=inet:10.77.0.50:11333" in outbound and "milter_macro_daemon_name=msp-outbound" in outbound
+        assert (
+            "smtpd_milters=inet:10.77.0.50:11332" in inbound
+            and "milter_macro_daemon_name=gw.lab.example" in inbound
+        )
+        assert (
+            "smtpd_milters=inet:10.77.0.50:11333" in outbound
+            and "milter_macro_daemon_name=gw.lab.example" in outbound
+        )
         assert "11333" not in inbound and "11332" not in outbound
 
     def test_the_global_smtpd_milters_parameter_is_never_set(self) -> None:
@@ -126,7 +139,7 @@ class TestNodeRefusesUnsafeMilterSettings:
             "-o smtpd_milters=inet:evil.example:11332",
             "-o smtpd_milters=inet:10.0.0.1:1,inet:10.0.0.2:2",
             "-o smtpd_milters=unix:../../etc/x",
-            "-o milter_macro_daemon_name=anything",
+            "-o milter_macro_daemon_name=bad name;x",
         ],
     )
     def test_per_listener_options_are_checked(self, option: str) -> None:
@@ -136,4 +149,6 @@ class TestNodeRefusesUnsafeMilterSettings:
 
     def test_valid_per_listener_options_pass(self) -> None:
         base = "25 inet n - n - - smtpd\n"
-        check_master_cf(f"{base}  -o smtpd_milters=inet:10.0.0.1:11332\n  -o milter_macro_daemon_name=msp-inbound\n")
+        check_master_cf(
+            f"{base}  -o smtpd_milters=inet:10.0.0.1:11332\n  -o milter_macro_daemon_name=gw.lab.example\n"
+        )

@@ -227,7 +227,7 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
         if spec.milter.enabled:
             out += [
                 f"  -o smtpd_milters={spec.milter.inbound_socket}",
-                "  -o milter_macro_daemon_name=msp-inbound",
+                f"  -o milter_macro_daemon_name={spec.hostname}",
             ]
 
     if spec.internal.enabled:
@@ -253,7 +253,7 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
         if spec.milter.enabled:
             out += [
                 f"  -o smtpd_milters={spec.milter.outbound_socket}",
-                "  -o milter_macro_daemon_name=msp-outbound",
+                f"  -o milter_macro_daemon_name={spec.hostname}",
             ]
 
     out += _standard_services()

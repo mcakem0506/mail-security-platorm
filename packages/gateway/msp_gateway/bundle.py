@@ -293,8 +293,13 @@ def _check_option(option: str, number: int) -> None:
             validation.milter_socket(value, "smtpd_milters")
         except validation.ConfigValueError as error:
             raise BundleError(f"master.cf:{number}: сокет Milter не принят") from error
-    if name == "milter_macro_daemon_name" and value not in ("msp-inbound", "msp-outbound"):
-        raise BundleError(f"master.cf:{number}: имя направления Milter вне белого списка")
+    if name == "milter_macro_daemon_name":
+        # Это значение сканер пишет в Authentication-Results как authserv-id: оно должно быть
+        # именем узла, уникальным среди узлов (ТЗ 1.2 §12).
+        try:
+            validation.hostname(value, "milter_macro_daemon_name")
+        except validation.ConfigValueError as error:
+            raise BundleError(f"master.cf:{number}: authserv-id Milter не принят") from error
 
 
 def _check_master_continuation(service: str, line: str, number: int) -> None:

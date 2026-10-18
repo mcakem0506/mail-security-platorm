@@ -121,6 +121,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B", "BLE"]
+# Проверки MSP 1.2 содержат длинные русские сообщения и строки конфигурации: перенос ухудшает чтение.
+"tests/spam/**" = ["E501"]
+"tests/unit/test_antispam_*.py" = ["E501"]
+"tests/unit/test_gateway_milter.py" = ["E501"]
 "apps/api/msp_api/migrations/**" = ["E501", "I"]
 
 [tool.mypy]

@@ -16,14 +16,24 @@ from .harness import OTHER_IP, SENDER_IP, DkimKey, build_message
 from .zone import Zone
 
 
-def send(spam, zone: Zone, *, ip: str = SENDER_IP, sign: bool = True, mail_from: str | None = None,  # type: ignore[no-untyped-def]
-         from_header: str | None = None, key: DkimKey | None = None):
+def send(
+    spam,
+    zone: Zone,
+    *,
+    ip: str = SENDER_IP,
+    sign: bool = True,
+    mail_from: str | None = None,  # type: ignore[no-untyped-def]
+    from_header: str | None = None,
+    key: DkimKey | None = None,
+):
     mid = f"dm-{zone.domain[:10]}"
     sender = from_header or zone.address
     raw = build_message(mid, sender)
     if sign:
         raw = (key or zone.key).sign(raw)
-    mid2, result = spam.send_from_zone(zone, mid, ip=ip, raw=raw, mail_from=mail_from if mail_from is not None else sender)
+    mid2, result = spam.send_from_zone(
+        zone, mid, ip=ip, raw=raw, mail_from=mail_from if mail_from is not None else sender
+    )
     assert result.get("ok"), result
     assert spam.delivered(mid2) is not None, "DMARC не отклоняет почту на этапе 1.2"
     return spam.auth_of(mid2)
@@ -56,14 +66,20 @@ def test_quarantine_policy_failure_suggests_quarantine(clean_spam) -> None:  # t
     zone = Zone("dm")
     clean_spam.dns.records(zone.records(spf="v=spf1 -all", dmarc="v=DMARC1; p=quarantine"))
     auth = send(clean_spam, zone, ip=OTHER_IP, sign=False)
-    assert auth.dmarc.result is DmarcResult.FAIL and auth.dmarc.suggested_disposition is SuggestedDisposition.QUARANTINE
+    assert (
+        auth.dmarc.result is DmarcResult.FAIL
+        and auth.dmarc.suggested_disposition is SuggestedDisposition.QUARANTINE
+    )
 
 
 def test_policy_none_is_monitoring_only(clean_spam) -> None:  # type: ignore[no-untyped-def]
     zone = Zone("dm")
     clean_spam.dns.records(zone.records(spf="v=spf1 -all", dmarc="v=DMARC1; p=none"))
     auth = send(clean_spam, zone, ip=OTHER_IP, sign=False)
-    assert auth.dmarc.result is DmarcResult.FAIL and auth.dmarc.suggested_disposition is SuggestedDisposition.NONE
+    assert (
+        auth.dmarc.result is DmarcResult.FAIL
+        and auth.dmarc.suggested_disposition is SuggestedDisposition.NONE
+    )
 
 
 def test_no_record_is_none(clean_spam) -> None:  # type: ignore[no-untyped-def]
@@ -194,7 +210,9 @@ class TestRfc9989:
         records[f"_dmarc.{mid_label}"] = {"TXT": ["v=DMARC1; p=reject"]}
         records[author] = {"A": [SENDER_IP]}
         clean_spam.dns.records(records)
-        auth = send(clean_spam, zone, ip=OTHER_IP, sign=False, mail_from=f"x@{author}", from_header=f"x@{author}")
+        auth = send(
+            clean_spam, zone, ip=OTHER_IP, sign=False, mail_from=f"x@{author}", from_header=f"x@{author}"
+        )
         # RFC 9989: политика найдена на промежуточном уровне (reject). Rspamd 3.12.1 ищет
         # только имя автора и организационный домен по PSL, промежуточный уровень пропускает.
         if auth.dmarc.suggested_disposition is SuggestedDisposition.REJECT:
@@ -206,10 +224,14 @@ class TestRfc9989:
         ghost = f"ghost.{zone.domain}"  # записей нет вообще: поддомен «не существует»
         records = zone.records(spf="v=spf1 -all", dmarc="v=DMARC1; p=none; np=reject", dkim=False)
         clean_spam.dns.records(records)
-        auth = send(clean_spam, zone, ip=OTHER_IP, sign=False, mail_from=f"x@{ghost}", from_header=f"x@{ghost}")
+        auth = send(
+            clean_spam, zone, ip=OTHER_IP, sign=False, mail_from=f"x@{ghost}", from_header=f"x@{ghost}"
+        )
         if auth.dmarc.policy is DmarcPolicy.REJECT:
             pytest.skip("установленная версия Rspamd поддерживает тег np (RFC 9989)")
-        assert auth.dmarc.suggested_disposition is SuggestedDisposition.NONE, "отклонение зафиксировано: тег np не применяется"
+        assert auth.dmarc.suggested_disposition is SuggestedDisposition.NONE, (
+            "отклонение зафиксировано: тег np не применяется"
+        )
 
     def test_deviation_testing_flag_t_y(self, clean_spam) -> None:  # type: ignore[no-untyped-def]
         zone = Zone("dm")

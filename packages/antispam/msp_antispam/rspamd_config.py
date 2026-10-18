@@ -288,6 +288,8 @@ def _render_proxy(direction: str) -> str:
         "max_retries = 1;\n"
         "discard_on_reject = false;\n"
         "quarantine_on_reject = false;\n"
+        # Заголовок вердикта в письмо не добавляется: оценка и решение сканера наружу не уходят (§31).
+        'spam_header = "";\n'
     )
 
 
@@ -319,6 +321,8 @@ def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
         "    authentication-results {\n"
         '        header = "Authentication-Results";\n'
         # Чужие Authentication-Results (вышестоящий шлюз) не удаляются: они нужны для сравнения (§25).
+        # По умолчанию сканер удаляет их все (remove = 0), поэтому отключение задано явно.
+        "        remove = false;\n"
         "        add_smtp_user = false;\n"
         "    }\n"
         "    x-rspamd-queue-id {\n"

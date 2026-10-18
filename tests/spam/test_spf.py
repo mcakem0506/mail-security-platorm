@@ -111,7 +111,9 @@ def test_a_null_sender_is_checked_by_helo(clean_spam) -> None:  # type: ignore[n
     clean_spam.dns.records(records)
     mid, result = clean_spam.send_from_zone(zone, mail_from="")
     assert result.get("ok"), result
-    analysis = clean_spam.analysis(mid, received_headers=[f"from {zone.helo} (unknown [{SENDER_IP}]) by gw with ESMTP"])
+    analysis = clean_spam.analysis(
+        mid, received_headers=[f"from {zone.helo} (unknown [{SENDER_IP}]) by gw with ESMTP"]
+    )
     assert analysis.auth.spf.result is SpfResult.PASS
     assert (analysis.auth.spf.identity, analysis.auth.spf.identity_kind) == (zone.helo, "HELO")
 

@@ -12,7 +12,7 @@ import time
 
 import pytest
 from msp_antispam.analysis import analyze
-from msp_antispam.model import DmarcResult, DkimResult, SpfResult
+from msp_antispam.model import DkimResult, DmarcResult, SpfResult
 from msp_antispam.policy import SpamPolicy
 from msp_gateway.spec import Milter
 
@@ -35,7 +35,9 @@ def restore(spam):  # type: ignore[no-untyped-def]
 
 def wait_rspamd(spam, timeout: float = 120.0) -> None:  # type: ignore[no-untyped-def]
     def ready() -> bool:
-        result = docker("exec", spam.rspamd_container, "python3", "-m", "msp_antispam.node", "status", check=False)
+        result = docker(
+            "exec", spam.rspamd_container, "python3", "-m", "msp_antispam.node", "status", check=False
+        )
         return '"proxy_inbound": true' in result.stdout and '"proxy_outbound": true' in result.stdout
 
     spam.wait_until(ready, timeout=timeout, what="сканер снова принимает соединения")
@@ -61,7 +63,9 @@ def test_a_stopped_scanner_does_not_stop_outbound_mail(clean_spam, restore) -> N
     docker("stop", "-t", "2", spam.rspamd_container)
     mid, result = spam.send_outbound()
     assert result.get("ok"), result
-    spam.wait_until(lambda: any(mid in str(i) for i in spam.sink.message_ids()), timeout=60, what="доставка в приёмник")
+    spam.wait_until(
+        lambda: any(mid in str(i) for i in spam.sink.message_ids()), timeout=60, what="доставка в приёмник"
+    )
 
 
 def test_no_scan_record_means_missing_evidence_not_clean(clean_spam, restore) -> None:  # type: ignore[no-untyped-def]
@@ -118,7 +122,10 @@ def test_a_bad_scanner_configuration_is_rejected_and_the_old_one_keeps_working(c
     before = docker("exec", spam.rspamd_container, "python3", "-m", "msp_antispam.node", "status").stdout
     # Принудительно портим выпуск: configtest обязан его отвергнуть, активной останется прежняя версия.
     docker(
-        "exec", spam.rspamd_container, "sh", "-c",
+        "exec",
+        spam.rspamd_container,
+        "sh",
+        "-c",
         "mkdir -p /tmp/bad/local.d && echo 'broken {{{' > /tmp/bad/local.d/options.inc && "
         "rspamadm --var=LOCAL_CONFDIR=/tmp/bad configtest -c /opt/msp-rspamd/rspamd.conf; echo rc=$?",
     )

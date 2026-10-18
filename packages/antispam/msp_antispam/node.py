@@ -89,6 +89,21 @@ def healthcheck() -> bool:
     return False
 
 
+def _rspamd_version() -> str:
+    try:
+        result = subprocess.run(  # noqa: S603  # nosec B603
+            [os.environ.get("MSP_RSPAMD_BIN", "/usr/bin/rspamd"), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = re.search(r"version\s+([0-9][0-9.]*)", result.stdout)
+    return match.group(1) if match else ""
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     cfg = RspamdNodeConfig.model_validate_json(Path(args.config).read_text(encoding="utf-8"))
     store = ReleaseStore(ROOT)
@@ -153,7 +168,15 @@ class Receiver:
         self.dropped = 0
         self.received = 0
         self.sent = 0
+        self.rspamd_version = _rspamd_version()
         self.directory.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def config_version() -> str:
+        try:
+            return ReleaseStore(ROOT).active_version() or ""
+        except OSError:
+            return ""
 
     def accept(self, payload: bytes) -> bool:
         try:
@@ -163,6 +186,12 @@ class Receiver:
         if not isinstance(record, dict):
             return False
         self.received += 1
+        # Происхождение записи: версия выпуска и сканера, под которыми она получена (ТЗ 1.2 §27).
+        record["_msp"] = {
+            "received_at": time.time(),
+            "config_version": self.config_version(),
+            "rspamd_version": self.rspamd_version,
+        }
         name = f"{time.time_ns()}.json"
         (self.directory / name).write_text(json.dumps(record), encoding="utf-8")
         files = sorted(self.directory.glob("*.json"))
