@@ -368,7 +368,7 @@ class TestRelease:
         assert outcome.outcome == "REJECTED" and store.active_version() is None and not reloads
 
     def test_an_unhealthy_release_is_rolled_back(self, tmp_path: Path) -> None:
-        store, first, _ = self.run(tmp_path, config())
+        _, first, _ = self.run(tmp_path, config())
         again = ReleaseStore(tmp_path)
         outcome = apply_release(
             again,

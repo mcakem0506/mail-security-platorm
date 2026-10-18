@@ -598,7 +598,7 @@ class TestAuthenticationConflicts:
 
 
 class TestDkimKeyLifecycle:
-    TRUSTED = {"lab.example"}
+    TRUSTED = frozenset({"lab.example"})
 
     def make(self, generator: str = "alice"):  # type: ignore[no-untyped-def]
         return dkim_keys.generate("lab.example", "s2026", generated_by=generator)
@@ -613,10 +613,10 @@ class TestDkimKeyLifecycle:
     def test_activation_is_forbidden_until_dns_is_verified(self) -> None:
         key, _ = self.make()
         with pytest.raises(dkim_keys.KeyError_):
-            dkim_keys.activate(key, approver="bob", trusted_domains=self.TRUSTED)
+            dkim_keys.activate(key, approver="bob", trusted_domains=set(self.TRUSTED))
         pending = dkim_keys.mark_dns_pending(key)
         with pytest.raises(dkim_keys.KeyError_):
-            dkim_keys.activate(pending, approver="bob", trusted_domains=self.TRUSTED)
+            dkim_keys.activate(pending, approver="bob", trusted_domains=set(self.TRUSTED))
 
     def test_dns_checks(self) -> None:
         key, _ = self.make()
@@ -636,18 +636,18 @@ class TestDkimKeyLifecycle:
         failed = dkim_keys.verify_dns(pending, ["v=DKIM1; k=rsa; p=AAAA"])
         assert failed.status is dkim_keys.KeyStatus.DNS_PENDING and failed.failure
         with pytest.raises(dkim_keys.KeyError_):
-            dkim_keys.activate(failed, approver="bob", trusted_domains=self.TRUSTED)
+            dkim_keys.activate(failed, approver="bob", trusted_domains=set(self.TRUSTED))
 
     def test_four_eyes_and_trusted_domains(self) -> None:
         key, _ = self.make()
         ready = dkim_keys.verify_dns(dkim_keys.mark_dns_pending(key), [key.public_record])
         assert ready.status is dkim_keys.KeyStatus.READY
         with pytest.raises(dkim_keys.KeyError_):
-            dkim_keys.activate(ready, approver="alice", trusted_domains=self.TRUSTED)
+            dkim_keys.activate(ready, approver="alice", trusted_domains=set(self.TRUSTED))
         with pytest.raises(dkim_keys.KeyError_):
             dkim_keys.activate(ready, approver="bob", trusted_domains={"other.example"})
         assert (
-            dkim_keys.activate(ready, approver="bob", trusted_domains=self.TRUSTED).status
+            dkim_keys.activate(ready, approver="bob", trusted_domains=set(self.TRUSTED)).status
             is dkim_keys.KeyStatus.ACTIVE
         )
 
