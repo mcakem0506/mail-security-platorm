@@ -45,7 +45,9 @@ def test_forged_scanner_headers_from_the_internet_are_removed(clean_spam) -> Non
     mid, result = clean_spam.send_from_zone(zone, "tr-forged", ip=OTHER_IP, raw=raw)
     assert result.get("ok") and clean_spam.delivered(mid) is not None
     delivered = raw_at_exchange(clean_spam, mid)
-    assert not SCANNER_HEADERS.search(delivered.replace(b"X-MSP-Scan-ID", b"")), "подделка дошла до получателя"
+    assert not SCANNER_HEADERS.search(delivered.replace(b"X-MSP-Scan-ID", b"")), (
+        "подделка дошла до получателя"
+    )
     assert b"forged-scan-id" not in delivered, "подделанный идентификатор сканирования остался"
 
 
@@ -68,7 +70,9 @@ def test_a_forged_authentication_results_with_our_id_is_flagged(clean_spam) -> N
     mid, _ = clean_spam.send_from_zone(zone, "tr-ar", ip=OTHER_IP, raw=raw)
     assert clean_spam.delivered(mid) is not None
     delivered = raw_at_exchange(clean_spam, mid)
-    headers = re.findall(rb"(?im)^Authentication-Results:.*(?:\r?\n[ \t].*)*", delivered.split(b"\r\n\r\n", 1)[0])
+    headers = re.findall(
+        rb"(?im)^Authentication-Results:.*(?:\r?\n[ \t].*)*", delivered.split(b"\r\n\r\n", 1)[0]
+    )
     texts = [h.decode("utf-8", "replace") for h in headers]
     assert len(texts) >= 2, "ожидались собственный и подделанный заголовки"
     analysis = clean_spam.analysis(mid)
@@ -137,7 +141,10 @@ def test_a_ptr_that_does_not_resolve_back_is_fcrdns_fail_when_postfix_checked_it
 def test_helo_signals_are_evidence_and_never_reject(clean_spam) -> None:  # type: ignore[no-untyped-def]
     zone = Zone("hp")
     clean_spam.dns.records(zone.records(spf="v=spf1 ip4:{ip} -all", dmarc=None))
-    for helo, expected in (("[10.77.0.150]", HeloSignal.IP_LITERAL), ("exchange01.corp.local", HeloSignal.INTERNAL_ONLY_FROM_EXTERNAL)):
+    for helo, expected in (
+        ("[10.77.0.150]", HeloSignal.IP_LITERAL),
+        ("exchange01.corp.local", HeloSignal.INTERNAL_ONLY_FROM_EXTERNAL),
+    ):
         mid, result = clean_spam.send_from_zone(zone, helo=helo)
         assert result.get("ok"), f"HELO {helo} отвергнут: {result}"
         assert clean_spam.delivered(mid) is not None

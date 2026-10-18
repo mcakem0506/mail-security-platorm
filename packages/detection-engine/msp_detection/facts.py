@@ -14,6 +14,7 @@ from msp_contracts import Indicator, IOCType, ScanCompleteness
 from msp_mail_parser import ParsedMessage, category_for_extension, split_domain, to_ascii
 from msp_mail_parser.filetype import MACRO_EXT, SHORTCUT_EXT
 
+from .antispam import antispam_facts
 from .auth import AuthResults, parse_authentication_results, parse_received_spf, received_chain_facts
 from .bec import bec_facts
 from .context import AnalysisContext
@@ -738,6 +739,13 @@ def build_facts(msg: ParsedMessage, ctx: AnalysisContext) -> FactSet:
     # final word: a clean gateway verdict does not lower the platform's own risk (ТЗ 2.1).
     for key, value, ev in gateway_facts(ctx.gateway_findings):
         fs.set(key, value, **ev)
+
+    # Результат сканера анти-спама: аутентификация, репутация, HELO/PTR (ТЗ 1.2 §26). Класс спама
+    # сюда не попадает: это отдельная ось. Чистый результат ничего не снижает.
+    for key, value, ev in antispam_facts(ctx.antispam):
+        fs.set(key, value, **ev)
+    if ctx.antispam is not None and ctx.antispam.expected and not ctx.antispam.scan_present:
+        fs.missing_evidence.append("Rspamd scan evidence unavailable for a message that passed the gateway")
 
     hist = ctx.sender_history
     if hist.known_sender:

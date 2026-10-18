@@ -314,6 +314,18 @@ class Settings(BaseSettings):
     gateway_collector_stale_seconds: int = 180
     gateway_shadow_pending_warn_seconds: int = 900
 
+    # Анти-спам, аутентификация и репутация (ТЗ 1.2). Принуждения в этом этапе нет: ключа,
+    # который его включает, не существует.
+    #: Домены, для которых разрешена подпись DKIM (лабораторный или пилотный домен), через запятую.
+    antispam_dkim_signing_domains: str = ""
+    #: Резолверы для проверки опубликованных ключей DKIM (адреса через запятую); пусто — системный.
+    antispam_dns_resolvers: str = ""
+    antispam_dns_timeout_seconds: float = 3.0
+    #: Сканер, не присылавший сигнал дольше этого, считается недоступным (секунды).
+    antispam_scanner_stale_seconds: int = 180
+    #: Порог доли TEMPERROR среди проверок за час, после которого поднимается тревога.
+    antispam_temperror_ratio_warn: float = 0.2
+
     @field_validator("corporate_domains", "trusted_infrastructure_domains")
     @classmethod
     def _strip(cls, value: str) -> str:
@@ -444,6 +456,12 @@ class Settings(BaseSettings):
     @property
     def corporate_domain_list(self) -> tuple[str, ...]:
         return tuple(d.strip().lower() for d in self.corporate_domains.split(",") if d.strip())
+
+    @property
+    def antispam_signing_domain_set(self) -> frozenset[str]:
+        return frozenset(
+            d.strip().lower() for d in self.antispam_dkim_signing_domains.split(",") if d.strip()
+        )
 
     @property
     def trusted_infrastructure_list(self) -> tuple[str, ...]:

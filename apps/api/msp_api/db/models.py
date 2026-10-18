@@ -1815,4 +1815,8 @@ class ReanalysisJob(Base, IdMixin):
 
 
 # Транспорт почты (ТЗ 1.1): модели вынесены в отдельный модуль, метаданные общие.
-from . import models_transport  # noqa: E402, F401
+# Анти-спам, аутентификация и репутация (ТЗ 1.2).
+from . import (
+    models_antispam,  # noqa: F401
+    models_transport,  # noqa: F401
+)

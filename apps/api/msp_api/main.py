@@ -17,6 +17,7 @@ from .observability import configure_logging
 from .routers import (
     admin,
     analysis,
+    antispam,
     auth,
     dashboard,
     detection,
@@ -114,6 +115,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(real_flow.router, prefix=api_prefix)
     app.include_router(transport.router, prefix=api_prefix)
     app.include_router(transport.agent_router, prefix=api_prefix)
+    app.include_router(antispam.router, prefix=api_prefix)
+    app.include_router(antispam.agent_router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)
     app.include_router(admin.router, prefix=f"{api_prefix}/admin")
     app.include_router(dashboard.router, prefix=api_prefix)

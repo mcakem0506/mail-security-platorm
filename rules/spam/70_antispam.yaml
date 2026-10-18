@@ -1,0 +1,154 @@
+# Свидетельства сканера анти-спама и аутентификации (MSP 1.2, ТЗ 1.2 §26).
+#
+# Правила читают факты, которые порождаются ТОЛЬКО из нормализованной записи сканера
+# (``msp_antispam``), а не из заголовков письма: заголовки X-Spamd-* и Authentication-Results с чужим
+# содержимым доказательством не являются. Вес каждого сигнала небольшой намеренно: ни один из них
+# не должен в одиночку превращать письмо в высокий риск. Класс спама сюда не входит — это отдельная
+# ось (SPAM + LOW_RISK и NOT_SPAM + HIGH_RISK одинаково допустимы). Чистый результат проверок
+# (SPF/DKIM/DMARC pass, письмо не в списках) риск не снижает: правил «если прошло — безопасно» нет.
+ruleset: antispam
+rules:
+  - id: ASP-001
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Политика DMARC домена отправителя требует отклонения, а проверка не пройдена
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.75
+    weight: 25
+    conditions:
+      all:
+        - rspamd_dmarc_policy_reject
+        - sender_external
+    evidence: [rspamd_dmarc_policy_reject]
+    explanation: >-
+      Домен отправителя публикует политику DMARC reject, а письмо не прошло ни SPF, ни DKIM с
+      выравниванием по домену из поля From. Владелец домена просит получателей не принимать такие
+      письма: чаще всего это подделка отправителя. На этом этапе письмо не отклоняется, решение
+      остаётся за человеком.
+    recommendation: Не отвечайте на письмо и не выполняйте содержащиеся в нём инструкции.
+
+  - id: ASP-002
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Политика DMARC домена отправителя требует карантина, а проверка не пройдена
+    category: sender_spoofing
+    severity: medium
+    confidence: 0.65
+    weight: 18
+    conditions:
+      all:
+        - rspamd_dmarc_policy_quarantine
+        - sender_external
+    evidence: [rspamd_dmarc_policy_quarantine]
+    explanation: >-
+      Домен отправителя публикует политику DMARC quarantine, а письмо не прошло проверку с выравниванием
+      по домену из поля From. Это признак подделки отправителя либо неверной настройки у самого
+      отправителя.
+    recommendation: Сверьте отправителя с известными контактами, прежде чем отвечать.
+
+  - id: ASP-003
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: SPF не разрешает отправку с этого адреса
+    category: sender_spoofing
+    severity: low
+    confidence: 0.5
+    weight: 10
+    conditions:
+      any:
+        - rspamd_spf_fail
+        - rspamd_spf_softfail
+    evidence: [rspamd_spf_fail, rspamd_spf_softfail]
+    explanation: >-
+      Сервер, передавший письмо, не указан в SPF-записи домена отправителя. Само по себе это не
+      доказывает подделку: пересылка и списки рассылки ломают SPF. Признак учитывается вместе с остальными.
+
+  - id: ASP-004
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Подпись DKIM письма не прошла проверку
+    category: sender_spoofing
+    severity: low
+    confidence: 0.45
+    weight: 8
+    conditions:
+      - rspamd_dkim_fail
+    evidence: [rspamd_dkim_fail]
+    explanation: >-
+      Письмо содержит подпись DKIM, которая не проверяется: содержимое или заголовки изменены после
+      подписи либо подпись не принадлежит заявленному домену. Списки рассылки и пересылка тоже
+      нарушают подпись, поэтому признак слабый.
+
+  - id: ASP-005
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Отправитель найден в списке репутации
+    category: delivery_scam
+    severity: medium
+    confidence: 0.6
+    weight: 20
+    conditions:
+      - rspamd_reputation_listed
+    evidence: [rspamd_reputation_listed]
+    explanation: >-
+      Адрес или домен отправителя числится в списке репутации, подключённом и одобренном организацией.
+      Отсутствие в списках, напротив, ничего не говорит о безопасности отправителя.
+    recommendation: Проверьте, ожидали ли вы письмо от этого отправителя.
+
+  - id: ASP-006
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Сервер отправителя не имеет подтверждённого имени
+    category: sender_spoofing
+    severity: low
+    confidence: 0.35
+    weight: 6
+    conditions:
+      any:
+        - rspamd_ptr_missing
+        - rspamd_ptr_fcrdns_fail
+        - rspamd_helo_mismatch
+        - rspamd_helo_unresolvable
+    evidence: [rspamd_ptr_missing, rspamd_ptr_fcrdns_fail, rspamd_helo_mismatch, rspamd_helo_unresolvable]
+    explanation: >-
+      У передавшего письмо сервера нет обратной записи, она не подтверждается прямой, либо имя в HELO
+      не соответствует адресу. Так выглядят и временные ботнеты, и небрежно настроенные малые серверы.
+
+  - id: ASP-007
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Сканер анти-спама присвоил письму высокую оценку
+    category: delivery_scam
+    severity: low
+    confidence: 0.4
+    weight: 8
+    conditions:
+      - rspamd_spam_high_score
+    evidence: [rspamd_spam_high_score]
+    explanation: >-
+      Сканер анти-спама присвоил письму оценку выше порога спама. Это независимая ось: нежелательная
+      реклама не обязательно опасна. Вердикт безопасности складывается из остальных признаков.
+
+  - id: ASP-008
+    version: 1
+    status: ACTIVE
+    owner: detection-antispam@corp.example
+    name: Результаты аутентификации вышестоящего шлюза и платформы расходятся
+    category: sender_spoofing
+    severity: low
+    confidence: 0.4
+    weight: 5
+    conditions:
+      - rspamd_auth_conflict
+    evidence: [rspamd_auth_conflict]
+    explanation: >-
+      Вышестоящий шлюз сообщил результат SPF, DKIM или DMARC, отличающийся от результата платформы.
+      Чистый вердикт вышестоящего шлюза риск не снижает; расхождение требует разбора человеком.

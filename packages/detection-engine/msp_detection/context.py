@@ -12,6 +12,7 @@ from datetime import datetime
 from msp_contracts import ExceptionType, IntakeSource, ProtectedCategory, utcnow
 from msp_mail_parser import split_domain, to_ascii
 
+from .antispam import AntispamFindings
 from .gateway import GatewayFindings
 from .similarity import common_service_targets, name_tokens, skeleton
 
@@ -128,6 +129,8 @@ class AnalysisContext:
     # Normalised, trust-checked evidence from ``msp_mail_gateway``. Assembled by the caller so
     # the detection engine keeps no dependency on any gateway implementation.
     gateway_findings: GatewayFindings | None = None
+    # Результат сканера анти-спама (MSP 1.2): нормализованные сигналы, не заголовки письма.
+    antispam: AntispamFindings | None = None
     protected_identities: tuple[ProtectedIdentity, ...] = ()
     directory_users: tuple[DirectoryUser, ...] = ()
     exceptions: tuple[ActiveException, ...] = ()

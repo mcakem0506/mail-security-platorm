@@ -37,7 +37,10 @@ def signing(*keys: dkim_keys.DkimSigningKey, networks: tuple[str, ...] = (TRUSTE
     return DkimSigning(
         enabled=True,
         sign_networks=networks,
-        domains=tuple(SigningDomain(domain=k.domain, selector=k.selector, private_key_file=k.private_key_ref) for k in keys),
+        domains=tuple(
+            SigningDomain(domain=k.domain, selector=k.selector, private_key_file=k.private_key_ref)
+            for k in keys
+        ),
     )
 
 
@@ -70,7 +73,9 @@ def delivered_raw(control, message_id: str) -> bytes:  # type: ignore[no-untyped
 
 
 def wait_sink(spam, mid: str) -> bytes:  # type: ignore[no-untyped-def]
-    spam.wait_until(lambda: any(mid in m for m in spam.sink.message_ids()), timeout=90, what="письмо у приёмника")
+    spam.wait_until(
+        lambda: any(mid in m for m in spam.sink.message_ids()), timeout=90, what="письмо у приёмника"
+    )
     return delivered_raw(spam.sink, mid)
 
 
@@ -104,7 +109,13 @@ def test_a_null_envelope_sender_with_a_corporate_from_is_signed(clean_spam, acti
     mid = "so-null-sender"
     raw = build_message(mid, f"ivan@{DOMAIN}", "partner@elsewhere.example")
     result = clean_spam.smtp_from(
-        "10.77.0.70", "", ["partner@elsewhere.example"], raw, helo="exchange.lab.example", port=2525, starttls=True
+        "10.77.0.70",
+        "",
+        ["partner@elsewhere.example"],
+        raw,
+        helo="exchange.lab.example",
+        port=2525,
+        starttls=True,
     )
     assert result.get("ok"), result
     delivered = wait_sink(clean_spam, mid)
@@ -126,7 +137,10 @@ def test_a_spoofed_corporate_from_from_the_internet_is_never_signed(clean_spam, 
     mid, result = clean_spam.send_inbound(ip=SENDER_IP, mail_from=f"ceo@{DOMAIN}")
     assert result.get("ok"), result
     clean_spam.delivered(mid)
-    raw = delivered_raw(clean_spam.exchange1 if mid in "".join(clean_spam.exchange1.message_ids()) else clean_spam.exchange2, mid)
+    raw = delivered_raw(
+        clean_spam.exchange1 if mid in "".join(clean_spam.exchange1.message_ids()) else clean_spam.exchange2,
+        mid,
+    )
     assert signature_headers(raw) == [], "внешний отправитель получил корпоративную подпись"
 
 
@@ -134,9 +148,13 @@ def test_an_untrusted_client_on_the_internal_port_cannot_get_a_signature(clean_s
     key = install_key(clean_spam, "s2026")
     active(key)
     result = clean_spam.smtp_from(
-        "10.77.0.200", f"ceo@{DOMAIN}", ["partner@elsewhere.example"],
+        "10.77.0.200",
+        f"ceo@{DOMAIN}",
+        ["partner@elsewhere.example"],
         build_message("untrusted-out", f"ceo@{DOMAIN}", "partner@elsewhere.example"),
-        helo="evil.example", port=2525, starttls=True,
+        helo="evil.example",
+        port=2525,
+        starttls=True,
     )
     assert not result.get("ok"), "недоверенный источник принят на внутреннем порту"
     assert not any("untrusted-out" in m for m in clean_spam.sink.message_ids())
@@ -146,9 +164,17 @@ def test_two_from_headers_are_not_signed(clean_spam, active) -> None:  # type: i
     key = install_key(clean_spam, "s2026")
     active(key)
     mid = "so-two-from"
-    raw = build_message(mid, f"ivan@{DOMAIN}", "partner@elsewhere.example", extra_headers=f"From: ceo@{DOMAIN}\r\n")
+    raw = build_message(
+        mid, f"ivan@{DOMAIN}", "partner@elsewhere.example", extra_headers=f"From: ceo@{DOMAIN}\r\n"
+    )
     result = clean_spam.smtp_from(
-        "10.77.0.70", f"ivan@{DOMAIN}", ["partner@elsewhere.example"], raw, helo="exchange.lab.example", port=2525, starttls=True
+        "10.77.0.70",
+        f"ivan@{DOMAIN}",
+        ["partner@elsewhere.example"],
+        raw,
+        helo="exchange.lab.example",
+        port=2525,
+        starttls=True,
     )
     if not result.get("ok"):
         pytest.skip("Postfix отверг письмо с двумя From раньше сканера")
@@ -157,7 +183,9 @@ def test_two_from_headers_are_not_signed(clean_spam, active) -> None:  # type: i
 
 
 def test_a_missing_private_key_means_unsigned_mail_not_lost_mail(clean_spam, active) -> None:  # type: ignore[no-untyped-def]
-    key, _ = dkim_keys.generate(DOMAIN, "s-missing", generated_by="alice", secret_dir=KEY_DIR)  # файл ключа не создаётся
+    key, _ = dkim_keys.generate(
+        DOMAIN, "s-missing", generated_by="alice", secret_dir=KEY_DIR
+    )  # файл ключа не создаётся
     active(key)
     mid, result = clean_spam.send_outbound(mail_from=f"ivan@{DOMAIN}")
     assert result.get("ok"), result

@@ -120,18 +120,26 @@ def test_a_public_list_without_licence_approval_is_never_queried(clean_spam, pro
     mid, _ = clean_spam.send_from_zone(zone)
     clean_spam.scan_for(mid)
     queried = {q["name"] for q in clean_spam.dns.queries()}
-    assert not any(name.endswith("publicbl.test") for name in queried), "запрос к неодобренному провайдеру ушёл"
+    assert not any(name.endswith("publicbl.test") for name in queried), (
+        "запрос к неодобренному провайдеру ушёл"
+    )
 
 
 def test_an_approved_public_list_is_queried(clean_spam, providers) -> None:  # type: ignore[no-untyped-def]
     approval = LicenseApproval(
-        license_approved=True, approved_by="ib-admin", second_approver="platform-admin",
-        approved_at=datetime.now(UTC), usage_scope="корпоративная почта, один узел",
+        license_approved=True,
+        approved_by="ib-admin",
+        second_approver="platform-admin",
+        approved_at=datetime.now(UTC),
+        usage_scope="корпоративная почта, один узел",
         expires_at=datetime.now(UTC) + timedelta(days=30),
     )
     public = lab_provider(
-        id="publicbl", license_mode=LicenseMode.COMMERCIAL_LICENSED, privacy_class=PrivacyClass.EXTERNAL_DNS,
-        zone="zen.publicbl.test", approval=approval,
+        id="publicbl",
+        license_mode=LicenseMode.COMMERCIAL_LICENSED,
+        privacy_class=PrivacyClass.EXTERNAL_DNS,
+        zone="zen.publicbl.test",
+        approval=approval,
     )
     providers(public)
     zone = Zone("rb")
@@ -163,7 +171,9 @@ def test_the_sender_domain_is_queried_only_when_enabled(clean_spam, providers) -
     assert any(zone.domain in q["name"] and q["name"].endswith(ZONE) for q in clean_spam.dns.queries())
 
 
-def test_a_secret_zone_is_not_revealed_by_the_configuration_the_record_or_the_logs(clean_spam, providers) -> None:  # type: ignore[no-untyped-def]
+def test_a_secret_zone_is_not_revealed_by_the_configuration_the_record_or_the_logs(
+    clean_spam, providers
+) -> None:  # type: ignore[no-untyped-def]
     secret = "tok3nsecr3tzone"
     # В хранилище секретов лежит ТОЛЬКО имя зоны; всё остальное правило генерирует MSP.
     rule = f'rbl = "{secret}.{ZONE}";\n'
@@ -181,8 +191,13 @@ def test_a_secret_zone_is_not_revealed_by_the_configuration_the_record_or_the_lo
     record = clean_spam.scan_for(mid)
     assert "MSP_RBL_PRIV_CLIENT_IP" in symbols(record), "секретный провайдер сработал"
     # Выпуск конфигурации и результат MSP не содержат секретную зону.
-    release = docker("exec", clean_spam.rspamd_container, "sh", "-c",
-                     "grep -r -l '" + secret + "' /var/lib/msp-rspamd/releases || true").stdout
+    release = docker(
+        "exec",
+        clean_spam.rspamd_container,
+        "sh",
+        "-c",
+        "grep -r -l '" + secret + "' /var/lib/msp-rspamd/releases || true",
+    ).stdout
     assert release.strip() == "", f"секрет попал в выпуск конфигурации: {release}"
     analysis = clean_spam.analysis(mid, secret_provider_ids=["priv"])
     assert secret not in analysis.evidence.model_dump_json()
