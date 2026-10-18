@@ -27,6 +27,7 @@ from .overlay import merge
 from .rspamd_config import (
     ConfigError,
     ReleaseStore,
+    drift_state,
     RspamdNodeConfig,
     apply_release,
     render,
@@ -421,12 +422,18 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
             }
         else:
             state["last_apply"] = last.get("last_apply") or {"outcome": "ACTIVE", "config_version": version}
+        state["expected_checksum"] = render(cfg).checksum
     except (OSError, ValueError, ConfigError, urllib.error.URLError) as exc:
         # Панель недоступна или назначение не прошло проверку: узел остаётся на прежней версии и работает.
         state["last_apply"] = {"outcome": "SYNC_FAILED", "detail": type(exc).__name__}
     active = ReleaseStore(ROOT).active_version() or ""
     state["config_version"] = active
     state["config_checksum"] = _checksum(active)
+    # Дрейф: действующий выпуск повреждён после применения либо отличается от ожидаемого (ТЗ 1.2 §27).
+    intact = bool(active) and ReleaseStore(ROOT).verify(active)
+    state["drift"] = drift_state(
+        state["config_checksum"] if intact else "tampered", state.get("expected_checksum")
+    )
     with contextlib.suppress(OSError, ValueError, urllib.error.URLError):
         _panel_request(f"{panel_url}/rspamd-status", token, body={"node_id": node_id, "state": state})
     return state

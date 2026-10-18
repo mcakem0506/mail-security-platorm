@@ -638,6 +638,23 @@ def _store_scan(
                 {h for h in headers if h.startswith("x-spamd-") or h in ("x-spam-status", "x-rspamd-score")}
             ),
             "classification_reasons": analysis.classification.reasons,
+            "enriched": bool(headers),
+            # Минимум исходной записи, нужный для повторного разбора, когда появится копия письма.
+            "source_record": {
+                k: record.get(k)
+                for k in (
+                    "from",
+                    "ip",
+                    "action",
+                    "score",
+                    "message_id",
+                    "qid",
+                    "scan_time",
+                    "header_from",
+                    "_msp",
+                )
+                if k in record
+            },
         },
         received_at=evidence.created_at,
     )
@@ -788,6 +805,60 @@ def scan_view(row: SpamScan, *, full: bool = False) -> dict[str, Any]:
             }
         )
     return out
+
+
+def enrich_scan(session: Session, settings: Settings, storage: ObjectStorage | None, row: SpamScan) -> bool:
+    """Дополнить запись сканера данными теневой копии: HELO, признаки рассылки, результаты вышестоящего шлюза.
+
+    Запись сканера приходит раньше копии письма, поэтому разбор по заголовкам откладывается до её
+    появления. Повторный вызов безопасен.
+    """
+    if (row.details or {}).get("enriched"):
+        return False
+    message = _find_transport_message(session, row.organization_id, row.internet_message_id, row.queue_id)
+    raw = _load_raw(storage, message)
+    if message is None or raw is None:
+        return False
+    headers = _headers_of(raw)
+    source = dict((row.details or {}).get("source_record") or {})
+    source["symbols"] = row.symbols
+    source["rcpt"] = [""] * int((row.details or {}).get("recipient_count") or 0)
+    policy = active_policy(session, row.organization_id)
+    org = session.get(Organization, row.organization_id)
+    protected = tuple(org.corporate_domains or ()) if org else settings.corporate_domain_list
+    analysis = analyze(
+        source,
+        policy,
+        headers=headers,
+        received_headers=headers.get("received", []),
+        protected_domains=protected,
+        secret_provider_ids=secret_provider_ids(session, row.organization_id),
+    )
+    evidence = analysis.evidence
+    if evidence is None or analysis.auth is None:
+        return False
+    row.transport_message_id = message.id
+    row.auth = analysis.auth.model_dump(mode="json")
+    row.helo = analysis.helo.model_dump(mode="json") if analysis.helo else {}
+    row.spam_class = analysis.spam_class.value
+    row.signals = [
+        {"code": sg.code, "kind": sg.kind, "risk_effect": sg.risk_effect, "symbol": sg.symbol}
+        for sg in (analysis.signals.signals if analysis.signals else [])
+    ]
+    row.missing_evidence = list(analysis.missing_evidence)
+    row.details = {
+        **(row.details or {}),
+        "enriched": True,
+        "bulk": analysis.bulk.reasons,
+        "classification_reasons": analysis.classification.reasons,
+        "forged_scanner_headers": sorted(
+            {h for h in headers if h.startswith("x-spamd-") or h in ("x-spam-status", "x-rspamd-score")}
+        ),
+    }
+    existing = session.execute(select(AuthConflictRecord).where(AuthConflictRecord.scan_id == row.id)).first()
+    if existing is None:
+        _record_conflicts(session, row.organization_id, row, analysis, headers, evidence)
+    return True
 
 
 def get_scan(session: Session, organization_id: str, identifier: str) -> SpamScan | None:
@@ -1576,6 +1647,8 @@ def remember_node_state(session: Session, organization_id: str, node_id: str, st
             "scan_errors",
             "last_apply",
             "dkim_missing_keys",
+            "drift",
+            "expected_checksum",
         )
     }
     details = dict(node.details or {})

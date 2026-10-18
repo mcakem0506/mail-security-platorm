@@ -238,4 +238,8 @@ def compute(session: Session, organization_id: str, settings: Settings) -> list[
                 )
             )
 
+    # Анти-спам (ТЗ 1.2): импорт здесь, потому что модуль тревог анти-спама использует типы этого модуля.
+    from . import antispam_alerts
+
+    alerts.extend(antispam_alerts.compute(session, organization_id, settings))
     return sorted(alerts, key=lambda a: (_ORDER[a.severity], a.code, a.node_id))

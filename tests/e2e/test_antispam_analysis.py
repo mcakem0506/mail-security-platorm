@@ -44,8 +44,13 @@ def shadow_copy(db, organization, storage, raw: bytes):  # type: ignore[no-untyp
     key = f"eml/{organization.id}/{hashlib.sha256(raw).hexdigest()}.eml"
     storage.put(key, raw, content_type="message/rfc822")
     message = TransportMessage(
-        organization_id=organization.id, node_id="a" * 32, idempotency_key=hashlib.sha256(raw).hexdigest(),
-        direction="INBOUND", content_sha256=hashlib.sha256(raw).hexdigest(), size_bytes=len(raw), raw_storage_key=key,
+        organization_id=organization.id,
+        node_id="a" * 32,
+        idempotency_key=hashlib.sha256(raw).hexdigest(),
+        direction="INBOUND",
+        content_sha256=hashlib.sha256(raw).hexdigest(),
+        size_bytes=len(raw),
+        raw_storage_key=key,
     )
     db.add(message)
     db.commit()
@@ -67,13 +72,18 @@ def signal_rules(db, result):  # type: ignore[no-untyped-def]
     from msp_api.db.models import DetectionSignal
     from sqlalchemy import select
 
-    return {s.rule_id for s in db.execute(select(DetectionSignal).where(DetectionSignal.result_id == result.id)).scalars()}
+    return {
+        s.rule_id
+        for s in db.execute(select(DetectionSignal).where(DetectionSignal.result_id == result.id)).scalars()
+    }
 
 
 def ingest(db, settings, organization, *records):  # type: ignore[no-untyped-def]
     from msp_api.services import antispam
 
-    outcome = antispam.ingest_scans(db, settings, organization_id=organization.id, node_id="a" * 32, scans=list(records))
+    outcome = antispam.ingest_scans(
+        db, settings, organization_id=organization.id, node_id="a" * 32, scans=list(records)
+    )
     db.commit()
     return outcome
 
@@ -86,7 +96,9 @@ def test_scanner_evidence_becomes_facts_and_rules(db, organization, settings, st
     assert "ASP-001" in signal_rules(db, result)
 
 
-def test_the_spam_class_is_stored_beside_the_verdict_and_does_not_change_it(db, organization, settings, storage) -> None:  # type: ignore[no-untyped-def]
+def test_the_spam_class_is_stored_beside_the_verdict_and_does_not_change_it(
+    db, organization, settings, storage
+) -> None:  # type: ignore[no-untyped-def]
     from msp_api.db.models_antispam import SpamScan
     from sqlalchemy import select
 
@@ -98,12 +110,16 @@ def test_the_spam_class_is_stored_beside_the_verdict_and_does_not_change_it(db, 
     assert row.security_verdict not in ("SPAM", "HIGH_CONFIDENCE_SPAM", "NOT_SPAM"), "оси не смешиваются"
 
 
-def test_a_clean_authentication_result_lowers_nothing_and_creates_no_clean_fact(db, organization, settings, storage) -> None:  # type: ignore[no-untyped-def]
+def test_a_clean_authentication_result_lowers_nothing_and_creates_no_clean_fact(
+    db, organization, settings, storage
+) -> None:  # type: ignore[no-untyped-def]
     ingest(db, settings, organization, scan("all_pass", "ap-clean@sender.example"))
     result = analyse(db, settings, shadow_copy(db, organization, storage, CLEAN), storage)
     clean_facts = [k for k in result.facts if k.startswith("rspamd_") and "pass" in k]
     assert not clean_facts
-    assert not {r for r in signal_rules(db, result) if r.startswith("ASP-") and r not in ("ASP-006", "ASP-007")}
+    assert not {
+        r for r in signal_rules(db, result) if r.startswith("ASP-") and r not in ("ASP-006", "ASP-007")
+    }
 
 
 def test_an_unknown_symbol_does_not_change_the_risk(db, organization, settings, storage) -> None:  # type: ignore[no-untyped-def]
@@ -121,13 +137,19 @@ def test_an_unknown_symbol_does_not_change_the_risk(db, organization, settings, 
     assert second.score == score_without
 
 
-def test_a_missing_scan_on_a_shadow_copy_is_missing_evidence_not_clean(db, organization, settings, storage) -> None:  # type: ignore[no-untyped-def]
+def test_a_missing_scan_on_a_shadow_copy_is_missing_evidence_not_clean(
+    db, organization, settings, storage
+) -> None:  # type: ignore[no-untyped-def]
     result = analyse(db, settings, shadow_copy(db, organization, storage, CLEAN), storage)
     assert any("Rspamd" in str(item) for item in result.missing_evidence), result.missing_evidence
-    assert result.classification.value != "LOW_RISK", "без данных сканера письмо не может считаться низким риском"
+    assert result.classification.value != "LOW_RISK", (
+        "без данных сканера письмо не может считаться низким риском"
+    )
 
 
-def test_a_reputation_listing_raises_risk_but_not_listed_does_not_lower_it(db, organization, settings, storage) -> None:  # type: ignore[no-untyped-def]
+def test_a_reputation_listing_raises_risk_but_not_listed_does_not_lower_it(
+    db, organization, settings, storage
+) -> None:  # type: ignore[no-untyped-def]
     listed = scan("all_pass", "ap-clean@sender.example")
     listed["symbols"].append({"name": "MSP_RBL_LABZONE_CLIENT_IP", "score": 0, "options": []})
     ingest(db, settings, organization, listed)
@@ -135,10 +157,17 @@ def test_a_reputation_listing_raises_risk_but_not_listed_does_not_lower_it(db, o
     assert "ASP-005" in signal_rules(db, result)
 
 
-def test_the_applied_action_is_observe_only_whatever_the_scanner_suggested(db, organization, settings) -> None:  # type: ignore[no-untyped-def]
+def test_the_applied_action_is_observe_only_whatever_the_scanner_suggested(
+    db, organization, settings
+) -> None:  # type: ignore[no-untyped-def]
     from msp_api.db.models_antispam import SpamScan
     from sqlalchemy import select
 
-    ingest(db, settings, organization, scan("dmarc_reject_fail", "ap-reject@sender.example", action="reject", score=30.0))
+    ingest(
+        db,
+        settings,
+        organization,
+        scan("dmarc_reject_fail", "ap-reject@sender.example", action="reject", score=30.0),
+    )
     row = db.execute(select(SpamScan)).scalar_one()
     assert row.suggested_action == "REJECT" and row.applied_action == "OBSERVE_ONLY"

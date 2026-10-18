@@ -110,10 +110,15 @@ def spam_messages(
 
 
 @router.get("/spam/messages/{message_id}")
-def spam_message(message_id: str, session: DbSession, actor: SpamReader) -> dict[str, Any]:
+def spam_message(
+    message_id: str, session: DbSession, actor: SpamReader, settings: AppSettings
+) -> dict[str, Any]:
     row = antispam.get_scan(session, actor.organization_id, message_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "результат сканирования не найден")
+    # Копия письма могла появиться уже после записи сканера: дополняем разбор по заголовкам.
+    if antispam.enrich_scan(session, settings, build_storage(settings), row):
+        session.commit()
     return antispam.scan_view(row, full=True)
 
 
@@ -372,10 +377,14 @@ def auth_conflict_review(
 
 
 @router.get("/auth/{message_id}")
-def auth_of_message(message_id: str, session: DbSession, actor: AuthReader) -> dict[str, Any]:
+def auth_of_message(
+    message_id: str, session: DbSession, actor: AuthReader, settings: AppSettings
+) -> dict[str, Any]:
     row = antispam.get_scan(session, actor.organization_id, message_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "результат сканирования не найден")
+    if antispam.enrich_scan(session, settings, build_storage(settings), row):
+        session.commit()
     return {
         "message_id": row.internet_message_id,
         "direction": row.direction,

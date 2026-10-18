@@ -87,9 +87,20 @@ class TestMetrics:
     def test_dkim_signing_is_counted_and_a_missing_signature_for_an_active_domain_is_a_failure(self) -> None:
         metrics = ScanMetrics()
         metrics.configure(signing_domains=frozenset({"corp.example"}), active_providers=frozenset())
-        signed = {"symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}, {"name": "DKIM_SIGNED"}], "from": "i@corp.example"}
-        unsigned = {"symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}], "from": "i@corp.example", "header_from": ["i@corp.example"]}
-        foreign = {"symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}], "from": "x@other.example", "header_from": ["x@other.example"]}
+        signed = {
+            "symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}, {"name": "DKIM_SIGNED"}],
+            "from": "i@corp.example",
+        }
+        unsigned = {
+            "symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}],
+            "from": "i@corp.example",
+            "header_from": ["i@corp.example"],
+        }
+        foreign = {
+            "symbols": [{"name": "MSP_DIRECTION_OUTBOUND"}],
+            "from": "x@other.example",
+            "header_from": ["x@other.example"],
+        }
         for item in (signed, unsigned, foreign):
             metrics.observe(item)
         text = metrics.render()
@@ -124,34 +135,53 @@ class TestOverlay:
             "thresholds": {"greylist": 3, "add_header": 5, "reject": 12},
             "providers": [
                 {
-                    "id": "labzone", "provider_name": "Лаб", "enabled": True, "license_mode": "LAB_ZONE",
-                    "query_types": ["CLIENT_IP"], "privacy_class": "INTERNAL", "zone": "rbl.lab.test",
+                    "id": "labzone",
+                    "provider_name": "Лаб",
+                    "enabled": True,
+                    "license_mode": "LAB_ZONE",
+                    "query_types": ["CLIENT_IP"],
+                    "privacy_class": "INTERNAL",
+                    "zone": "rbl.lab.test",
                 }
             ],
-            "signing_domains": [{"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}],
+            "signing_domains": [
+                {"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}
+            ],
         }
         result = merge(base_config(), overlay, key_exists=lambda path: True)
         assert result.config.thresholds.reject == 12
         assert [p.id for p in result.config.providers] == ["labzone"]
-        assert [(d.domain, d.selector) for d in result.config.dkim_signing.domains] == [("corp.example", "s1")]
+        assert [(d.domain, d.selector) for d in result.config.dkim_signing.domains] == [
+            ("corp.example", "s1")
+        ]
 
     def test_the_panel_cannot_widen_who_gets_signed(self) -> None:
         overlay = {
-            "signing_domains": [{"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}],
+            "signing_domains": [
+                {"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}
+            ],
             "sign_networks": ["0.0.0.0/0"],
         }
         result = merge(base_config(), overlay, key_exists=lambda path: True)
         assert result.config.dkim_signing.sign_networks == ("10.77.0.64/26",)
 
     def test_signing_is_not_enabled_on_a_node_without_trusted_networks(self) -> None:
-        overlay = {"signing_domains": [{"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}]}
+        overlay = {
+            "signing_domains": [
+                {"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}
+            ]
+        }
         node_without = base_config(dkim_signing=DkimSigning(enabled=False))
         result = merge(node_without, overlay, key_exists=lambda path: True)
         assert result.config.dkim_signing.enabled is False
         assert any("доверенные сети" in item for item in result.ignored)
 
     def test_a_domain_without_a_key_file_is_reported_and_left_out(self) -> None:
-        overlay = {"signing_domains": [{"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}]}
+        overlay = {
+            "signing_domains": [
+                {"domain": "corp.example", "selector": "s1", "private_key_file": "/run/secrets/k.key"}
+            ]
+        }
         result = merge(base_config(), overlay, key_exists=lambda path: False)
         assert result.missing_keys == ["corp.example:s1"]
         assert result.config.dkim_signing.enabled is False
@@ -163,7 +193,11 @@ class TestOverlay:
             {"providers": [{"id": "Bad Id", "provider_name": "x", "zone": "a.example"}]},
             {"providers": [{"id": "ok", "provider_name": "x", "zone": 'a".example'}]},
             {"signing_domains": [{"domain": "corp.example", "selector": "s 1", "private_key_file": "/k"}]},
-            {"signing_domains": [{"domain": "corp.example", "selector": "s1", "private_key_file": "/etc/../shadow"}]},
+            {
+                "signing_domains": [
+                    {"domain": "corp.example", "selector": "s1", "private_key_file": "/etc/../shadow"}
+                ]
+            },
         ],
     )
     def test_hostile_assignments_do_not_pass_the_model(self, overlay: dict) -> None:
@@ -217,7 +251,9 @@ class TestReceiver:
 
 
 class TestKeygen:
-    def test_the_private_key_stays_on_the_node_and_cannot_be_overwritten(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_the_private_key_stays_on_the_node_and_cannot_be_overwritten(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         import argparse
 
         args = argparse.Namespace(domain="corp.example", selector="s1", secret_dir=str(tmp_path))

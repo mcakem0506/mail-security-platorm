@@ -166,9 +166,25 @@ class SpamStack(Stack):
     def __init__(self, workdir: Path, **kwargs: object) -> None:
         super().__init__(workdir, **kwargs)  # type: ignore[arg-type]
         self.ports["SPAM_DNS_CONTROL"] = _free_port()
+        self.ports["SPAM_METRICS_PORT"] = _free_port()
         (workdir / "rspamd-bootstrap").mkdir(parents=True, exist_ok=True)
         (workdir / "secrets" / "rspamd").mkdir(parents=True, exist_ok=True)
         self.node_cfg = node_config()
+
+    def panel_env(self) -> dict[str, str]:
+        env = super().panel_env()
+        base = f"http://host.docker.internal:{self.panel_port}/api/v1/gateway-agent"
+        env.update(
+            {
+                "SPAM_PANEL_URL": base,
+                "SPAM_PANEL_TOKEN_FILE": "/run/secrets/rspamd/panel.token",
+            }
+        )
+        return env
+
+    @property
+    def metrics_url(self) -> str:
+        return f"http://127.0.0.1:{self.ports['SPAM_METRICS_PORT']}/metrics"
 
     @property
     def dns(self) -> Dns:
@@ -190,6 +206,8 @@ class SpamStack(Stack):
             'password = "$2$xwtn6bkbz4dkdsxdjp3wjmyzmzpdepg5$tsd3tzcb65msjcjnzzhoh1h39ub8ykg8cs3dy6z6xhi1xpg5rtpb";\n',
             encoding="utf-8",
         )
+        if self.panel_port:
+            (secrets / "panel.token").write_text(self.panel_token, encoding="utf-8")
         for path in secrets.rglob("*"):
             path.chmod(0o644)
 

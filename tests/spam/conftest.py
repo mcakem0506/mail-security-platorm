@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from tests.gateway.harness import LAB_RECIPIENTS, docker_available
+from tests.gateway.panel import Panel
 
 from .harness import SpamStack, milter_spec, node_config
 
@@ -48,12 +49,16 @@ def spam(tmp_path_factory):  # type: ignore[no-untyped-def]
     if reuse:
         yield _attach(Path(reuse))
         return
-    stack = SpamStack(tmp_path_factory.mktemp("spamlab"))
+    panel = Panel(tmp_path_factory.mktemp("spampanel"))
+    panel.start()
+    stack = SpamStack(tmp_path_factory.mktemp("spamlab"), panel_port=panel.port, panel_token=panel.token)
+    stack.panel = panel  # type: ignore[attr-defined]
     try:
         stack.up(milter_spec(), LAB_RECIPIENTS)
         yield stack
     finally:
         stack.down()
+        panel.close()
 
 
 @pytest.fixture
