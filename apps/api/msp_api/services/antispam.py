@@ -1576,3 +1576,72 @@ def remember_node_state(session: Session, organization_id: str, node_id: str, st
     details["rspamd"] = {**allowed, "reported_at": now().isoformat()}
     node.details = details
     node.last_heartbeat_at = node.last_heartbeat_at or now()
+
+
+# ---------------------------------------------------------------------------------------------
+# Связь с движком обнаружения (ТЗ 1.2 §26)
+# ---------------------------------------------------------------------------------------------
+def findings_for(session: Session, organization_id: str, message_id: str, *, expected: bool) -> Any:
+    """Нормализованные свидетельства сканера для движка обнаружения.
+
+    В движок попадают только сигналы, помеченные в отображении как влияющие на риск; неизвестные
+    символы, класс спама и чистые результаты проверок туда не идут. ``expected`` — письмо прошло
+    через шлюз с включённым сканером, и отсутствие записи сканера становится недостающим свидетельством.
+    """
+    from msp_detection.antispam import AntispamFindings
+
+    mid = (message_id or "").strip().strip("<>")
+    if not mid:
+        return AntispamFindings(expected=expected) if expected else None
+    row = (
+        session.execute(
+            select(SpamScan)
+            .where(
+                SpamScan.organization_id == organization_id,
+                SpamScan.internet_message_id.in_([mid, f"<{mid}>"]),
+            )
+            .order_by(SpamScan.received_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        return AntispamFindings(expected=expected) if expected else None
+    conflict = session.execute(
+        select(func.count())
+        .select_from(AuthConflictRecord)
+        .where(
+            AuthConflictRecord.scan_id == row.id,
+            AuthConflictRecord.disposition != ConflictDisposition.FALSE_ALARM,
+        )
+    ).scalar_one()
+    hostile = False
+    if row.client_ip:
+        ip_row = session.execute(
+            select(SourceIpReputationRecord.analyst_confirmed).where(
+                SourceIpReputationRecord.organization_id == organization_id,
+                SourceIpReputationRecord.ip == row.client_ip,
+            )
+        ).scalar_one_or_none()
+        hostile = ip_row == "MALICIOUS"
+    return AntispamFindings(
+        scan_present=True,
+        expected=expected,
+        risk_signals=[s["code"] for s in (row.signals or []) if s.get("risk_effect") == "INCREASE"],
+        auth_conflict=bool(conflict),
+        source_confirmed_hostile=hostile,
+        mapping_version=row.symbol_mapping_version,
+    )
+
+
+def record_security_verdict(session: Session, organization_id: str, message_id: str, verdict: str) -> None:
+    """Записать вердикт безопасности рядом с классом спама. Это вторая ось: класс он не меняет."""
+    mid = (message_id or "").strip().strip("<>")
+    if not mid:
+        return
+    for row in session.execute(
+        select(SpamScan).where(
+            SpamScan.organization_id == organization_id, SpamScan.internet_message_id.in_([mid, f"<{mid}>"])
+        )
+    ).scalars():
+        row.security_verdict = verdict[:32]

@@ -66,6 +66,7 @@ from ..db.models import (
     RiskVerdictHistory,
 )
 from ..observability import record_qr_decode, rule_triggers, short_domain_lookalike_total
+from . import antispam as antispam_service
 from . import canary, domain_variants
 from .campaigns import build_fingerprint, correlate
 from .gateways import build_registry as build_gateway_registry
@@ -261,6 +262,15 @@ def build_context(
             logger.warning("gateway.layer_failed", extra={"error": type(exc).__name__})
             gateway_findings = empty_gateway_findings()
 
+    antispam_findings = None
+    if parsed is not None:
+        try:
+            antispam_findings = antispam_service.findings_for(
+                session, organization_id, parsed.message_id, expected=source is IntakeSource.SHADOW
+            )
+        except Exception as exc:  # noqa: BLE001 - анти-спам не должен останавливать анализ
+            logger.warning("antispam.findings_failed", extra={"error": type(exc).__name__})
+
     return AnalysisContext(
         organization_id=organization_id,
         organization_name=org.name if org else settings.organization_name,
@@ -268,6 +278,7 @@ def build_context(
         trusted_infrastructure_domains=trusted,
         trusted_gateways=trusted_gateways,
         gateway_findings=gateway_findings,
+        antispam=antispam_findings,
         protected_identities=protected,
         directory_users=users,
         exceptions=active_exceptions,
@@ -699,6 +710,12 @@ def run_local_analysis(
         record_qr_decode(parsed.qr.get("stats") or {})
 
     persist_result(session, job=job, message=message, detection=detection, verdict=verdict)
+    try:
+        antispam_service.record_security_verdict(
+            session, job.organization_id, parsed.message_id, verdict.classification.value
+        )
+    except Exception as exc:  # noqa: BLE001 - вторая ось не должна ронять анализ
+        logger.warning("antispam.verdict_not_recorded", extra={"error": type(exc).__name__})
 
     correlation = correlate(
         session,

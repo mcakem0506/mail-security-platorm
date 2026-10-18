@@ -160,7 +160,8 @@ def reject_safety(
     reasons: list[str] = []
     if metrics.suggested_reject_reviewed < min_reviewed:
         reasons.append(
-            f"INSUFFICIENT_SAMPLE: просмотрено {metrics.suggested_reject_reviewed} писем с предложенным отказом, "
+            f"INSUFFICIENT_SAMPLE: просмотрено {metrics.suggested_reject_reviewed} писем "
+            f"с предложенным отказом, "
             f"нужно не меньше {min_reviewed}"
         )
     elif metrics.suggested_reject_fp_upper > max_fp_upper:
