@@ -222,8 +222,30 @@ class SpamStack(Stack):
         self.write_rspamd()
         super().up(spec or milter_spec(), recipients if recipients is not None else LAB_RECIPIENTS)
 
+    _SYNC_SIGNAL = (
+        "import os,signal,sys\n"
+        "sig = signal.SIGSTOP if sys.argv[1] == 'stop' else signal.SIGCONT\n"
+        "for d in os.listdir('/proc'):\n"
+        "    if d.isdigit():\n"
+        "        try:\n"
+        "            cmd = open('/proc/%s/cmdline' % d, 'rb').read().split(b'\\0')\n"
+        "        except OSError:\n"
+        "            continue\n"
+        "        if b'msp_antispam.node' in cmd and b'sync' in cmd:\n"
+        "            os.kill(int(d), sig)\n"
+    )
+
+    def freeze_sync(self) -> None:
+        """Остановить синхронизацию узла с панелью: иначе она каждые несколько секунд заменяет конфигурацию,
+        выпущенную тестом, назначением панели (провайдеры и домены подписи панели заменяют локальные)."""
+        docker("exec", self.rspamd_container, "python3", "-c", self._SYNC_SIGNAL, "stop", check=False)
+
+    def thaw_sync(self) -> None:
+        docker("exec", self.rspamd_container, "python3", "-c", self._SYNC_SIGNAL, "cont", check=False)
+
     def reapply_rspamd(self, cfg: RspamdNodeConfig) -> dict[str, object]:
         """Выпустить новую конфигурацию сканера на работающем узле тем же путём, что и при запуске."""
+        self.freeze_sync()
         self.write_rspamd(cfg)
         result = docker(
             "exec",
@@ -338,7 +360,10 @@ class SpamStack(Stack):
                     return True
             return False
 
-        self.wait_until(check, timeout=timeout, what=f"результат сканирования письма {message_id}")
+        try:
+            self.wait_until(check, timeout=timeout, what=f"результат сканирования письма {message_id}")
+        except TimeoutError as exc:
+            raise TimeoutError(f"{exc}\n--- журнал Rspamd ---\n{self.rspamd_log(60)}") from exc
         return found
 
     def clear_scans(self) -> None:

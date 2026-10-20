@@ -167,7 +167,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             current = config_id()
-            if current and current != before:
+            # Все прежние воркеры ушли: пока хоть один живёт, он может принять письмо по старой конфигурации
+            # (на медленной машине первые письма после перезагрузки иначе обрабатывает прежняя).
+            if current and not (set(current.split(",")) & set(before.split(","))):
                 return True
             time.sleep(1)
         return False

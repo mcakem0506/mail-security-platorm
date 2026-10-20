@@ -66,6 +66,7 @@ class Person:
 def admin(spam) -> Iterator[Person]:  # type: ignore[no-untyped-def]
     if not getattr(spam, "panel_port", None):
         pytest.skip("стенд без панели")
+    spam.thaw_sync()  # другие модули замораживают синхронизацию, когда выпускают свою конфигурацию
     person = Person(spam.panel, "admin@corp.example")
     yield person
     person.close()
