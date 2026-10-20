@@ -213,8 +213,10 @@ class SpamStack(Stack):
         )
         if self.panel_port:
             (secrets / "panel.token").write_text(self.panel_token, encoding="utf-8")
+        # Каталоги должны оставаться проходимыми (x): с режимом 0644 на Linux внутрь не попасть.
+        secrets.chmod(0o755)
         for path in secrets.rglob("*"):
-            path.chmod(0o644)
+            path.chmod(0o755 if path.is_dir() else 0o644)
 
     def up(self, spec=None, recipients=None) -> None:  # type: ignore[no-untyped-def]
         self.write_rspamd()

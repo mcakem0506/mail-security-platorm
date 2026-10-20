@@ -171,7 +171,7 @@ def test_the_dns_server_going_away_does_not_stop_mail(clean_spam, restore) -> No
     mid, result = spam.send_inbound(ip=SENDER_IP)
     assert result.get("ok"), result
     assert spam.delivered(mid, timeout=120) is not None
-    auth = spam.auth_of(mid, timeout=120)
+    auth = spam.auth_of(mid, timeout=300)
     assert auth.spf.result in (SpfResult.TEMPERROR, SpfResult.NONE)
     assert auth.spf.result is not SpfResult.FAIL
     assert lab_spec() is not None

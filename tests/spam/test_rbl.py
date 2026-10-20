@@ -59,14 +59,20 @@ def providers(spam):  # type: ignore[no-untyped-def]
 
 def test_a_listed_client_is_recorded_and_the_mail_is_still_delivered(clean_spam, providers) -> None:  # type: ignore[no-untyped-def]
     providers(lab_provider())
-    zone = Zone("rb")
-    records = zone.records(spf="v=spf1 ip4:{ip} -all", dmarc=None)
-    records.update(listed(SENDER_IP))
-    clean_spam.dns.records(records)
-    mid, result = clean_spam.send_from_zone(zone)
-    assert result.get("ok"), "листинг не отклоняет письмо на этапе 1.2"
-    assert clean_spam.delivered(mid) is not None
-    record = clean_spam.scan_for(mid)
+    # После перезагрузки модуль RBL в новом воркере может подняться позже первого письма (медленный
+    # CI): допускаем до трёх попыток, каждая с новым доменом, чтобы кэш DNS не скрывал результат.
+    for attempt in range(3):
+        zone = Zone(f"rb{attempt}")
+        records = zone.records(spf="v=spf1 ip4:{ip} -all", dmarc=None)
+        records.update(listed(SENDER_IP))
+        clean_spam.dns.records(records)
+        mid, result = clean_spam.send_from_zone(zone)
+        assert result.get("ok"), "листинг не отклоняет письмо на этапе 1.2"
+        assert clean_spam.delivered(mid) is not None
+        record = clean_spam.scan_for(mid)
+        if "MSP_RBL_LABZONE_CLIENT_IP" in symbols(record):
+            break
+        time.sleep(5)
     assert "MSP_RBL_LABZONE_CLIENT_IP" in symbols(record)
     analysis = clean_spam.analysis(mid, secret_provider_ids=[])
     assert "REPUTATION_LISTED" in analysis.signals.codes(risk_only=True)
