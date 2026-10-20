@@ -127,7 +127,9 @@ class TestMasterCf:
         "option",
         [
             "-o content_filter=smtp:evil:25",
-            "-o smtpd_milters=inet:evil:1",
+            "-o smtpd_milters=inet:evil:1,inet:other:2",
+            "-o smtpd_milters=inet:ev il:1",
+            "-o milter_macro_daemon_name=ot her",
             "-o mail_owner=root",
             "-o recipient_bcc_maps=hash:/x",
             "-o smtpd_sasl_auth_enable=yes",

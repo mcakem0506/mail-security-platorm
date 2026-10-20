@@ -104,6 +104,23 @@ class Permission(StrEnum):
     #: (только ручной разбор на узле): оно необратимо и в 1.1 не автоматизируется.
     ADMIN_GATEWAY_QUEUE = "gateway:queue:admin"
 
+    # анти-спам, аутентификация и репутация (ТЗ 1.2 §34)
+    VIEW_SPAM = "spam:read"
+    EDIT_SPAM_POLICY = "spam:policy:edit"
+    #: Одобрить кандидата политики может не тот, кто его правил (четыре глаза).
+    APPROVE_SPAM_POLICY = "spam:policy:approve"
+    SIMULATE_SPAM_POLICY = "spam:simulate"
+    VIEW_AUTH = "auth:read"
+    REVIEW_AUTH_CONFLICT = "auth:conflict:review"
+    VIEW_REPUTATION = "reputation:read"
+    #: Включение провайдера репутации уносит данные письма во внешний DNS и требует лицензии.
+    MANAGE_REPUTATION_PROVIDER = "reputation:provider:manage"
+    VIEW_DKIM = "dkim:read"
+    GENERATE_DKIM_KEY = "dkim:key:generate"
+    #: Активация ключа подписи — отдельное право: подпись от имени организации необратима для получателей.
+    ACTIVATE_DKIM_KEY = "dkim:key:activate"
+    RETIRE_DKIM_KEY = "dkim:key:retire"
+
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
@@ -120,8 +137,13 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.VIEW_GATEWAY,
     Permission.VIEW_GATEWAY_QUEUE,
     Permission.VIEW_GATEWAY_TLS,
+    Permission.VIEW_SPAM,
+    Permission.VIEW_AUTH,
+    Permission.VIEW_REPUTATION,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
+    Permission.SIMULATE_SPAM_POLICY,
+    Permission.REVIEW_AUTH_CONFLICT,
     Permission.CLASSIFY_INCIDENT,
     Permission.REPORT_MISSED_DETECTION,
     Permission.SIMULATE_DETECTION,
@@ -161,6 +183,13 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.DRAIN_GATEWAY_NODE,
     Permission.SYNC_GATEWAY_RECIPIENTS,
     Permission.ADMIN_GATEWAY_QUEUE,
+    Permission.EDIT_SPAM_POLICY,
+    Permission.APPROVE_SPAM_POLICY,
+    Permission.MANAGE_REPUTATION_PROVIDER,
+    Permission.VIEW_DKIM,
+    Permission.GENERATE_DKIM_KEY,
+    Permission.ACTIVATE_DKIM_KEY,
+    Permission.RETIRE_DKIM_KEY,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.
@@ -181,6 +210,11 @@ _PLATFORM_ADMIN: frozenset[Permission] = frozenset(
         Permission.DRAIN_GATEWAY_NODE,
         Permission.ADMIN_GATEWAY_QUEUE,
         Permission.VIEW_GATEWAY_TLS,
+        # Состояние сканера и репутации видно, чтобы эксплуатировать; политика и ключи — не его.
+        Permission.VIEW_SPAM,
+        Permission.VIEW_AUTH,
+        Permission.VIEW_REPUTATION,
+        Permission.VIEW_DKIM,
     }
 )
 

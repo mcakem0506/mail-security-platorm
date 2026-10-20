@@ -168,3 +168,30 @@ def absolute_path(value: str, field: str) -> str:
     if ".." in value.split("/"):
         raise _reject(field, "путь не должен содержать «..»")
     return value
+
+
+def milter_socket(value: str, field: str) -> str:
+    """``inet:IP:порт`` или ``unix:/абсолютный/путь`` — больше никаких форм Milter.
+
+    Имя хоста вместо адреса запрещено намеренно. Postfix при ошибке разрешения имени сканера
+    считает это ошибкой конфигурации и отвечает всем клиентам ``421`` (в том числе проверкам
+    самого шлюза), не применяя ``milter_default_action``. С адресом недоступный сканер — это
+    «соединение отвергнуто», и почта идёт дальше (``accept``).
+    """
+    if not isinstance(value, str) or not value:
+        raise _reject(field, "ожидалась строка")
+    if value.startswith("unix:"):
+        path = value[len("unix:") :]
+        if not re.fullmatch(r"/[A-Za-z0-9._/\-]{1,200}", path) or ".." in path:
+            raise _reject(field, "путь сокета не принят")
+        return value
+    match = re.fullmatch(r"inet:(?P<host>[0-9.]{7,15}|\[[0-9a-fA-F:]+\]):(?P<port>[0-9]{1,5})", value)
+    if match is None:
+        raise _reject(field, "ожидалось inet:IP-адрес:порт или unix:/путь; имя хоста недопустимо")
+    host = match.group("host").strip("[]")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError as error:
+        raise _reject(field, "адрес сканера не распознан") from error
+    port(int(match.group("port")), field)
+    return value

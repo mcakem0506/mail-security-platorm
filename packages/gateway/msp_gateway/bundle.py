@@ -16,6 +16,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from . import validation
+
 
 class BundleError(ValueError):
     """Пакет повреждён или не соответствует своему описанию."""
@@ -159,6 +161,11 @@ MAIN_CF_PARAMETERS = frozenset(
         "msp_in_recipient",
         "msp_out_client",
         "msp_out_recipient",
+        "milter_protocol",
+        "milter_default_action",
+        "milter_connect_timeout",
+        "milter_command_timeout",
+        "milter_content_timeout",
     }
 )
 
@@ -204,6 +211,8 @@ MASTER_CF_OPTIONS = frozenset(
         "smtp_tls_verify_cert_match",
         "smtp_tls_mandatory_protocols",
         "smtp_fallback_relay",
+        "smtpd_milters",
+        "milter_macro_daemon_name",
     }
 )
 
@@ -228,6 +237,21 @@ def check_main_cf(text: str) -> None:
             raise BundleError(f"main.cf:{number}: строка не похожа на «параметр = значение»")
         if match.group(1) not in MAIN_CF_PARAMETERS:
             raise BundleError(f"main.cf:{number}: параметр вне белого списка")
+        _check_main_value(match.group(1), line.partition("=")[2].strip(), number)
+
+
+#: Значения, которые узел не примет ни от кого, даже от панели с верной контрольной суммой.
+_FIXED_MAIN_VALUES = {
+    # Сбой сканера не должен останавливать почту: по умолчанию Postfix выбирает tempfail (ТЗ 1.2 §4).
+    "milter_default_action": "accept",
+    "milter_protocol": "6",
+}
+
+
+def _check_main_value(name: str, value: str, number: int) -> None:
+    expected = _FIXED_MAIN_VALUES.get(name)
+    if expected is not None and value != expected:
+        raise BundleError(f"main.cf:{number}: значение параметра {name} зафиксировано")
 
 
 def check_master_cf(text: str) -> None:
@@ -259,9 +283,23 @@ def check_master_cf(text: str) -> None:
 
 
 def _check_option(option: str, number: int) -> None:
-    name = option.partition("=")[0]
+    name, _, value = option.partition("=")
     if name not in MASTER_CF_OPTIONS:
         raise BundleError(f"master.cf:{number}: параметр -o вне белого списка")
+    if name == "smtpd_milters":
+        # Сокет сканера — единственное значение с адресом: другая форма (список, макросы,
+        # несколько сокетов) отвергается, а не нормализуется.
+        try:
+            validation.milter_socket(value, "smtpd_milters")
+        except validation.ConfigValueError as error:
+            raise BundleError(f"master.cf:{number}: сокет Milter не принят") from error
+    if name == "milter_macro_daemon_name":
+        # Это значение сканер пишет в Authentication-Results как authserv-id: оно должно быть
+        # именем узла, уникальным среди узлов (ТЗ 1.2 §12).
+        try:
+            validation.hostname(value, "milter_macro_daemon_name")
+        except validation.ConfigValueError as error:
+            raise BundleError(f"master.cf:{number}: authserv-id Milter не принят") from error
 
 
 def _check_master_continuation(service: str, line: str, number: int) -> None:

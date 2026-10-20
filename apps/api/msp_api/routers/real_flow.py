@@ -34,7 +34,7 @@ from ..schemas import (
 )
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import corpus_promotion, gateway_readiness, real_flow
+from ..services import antispam, corpus_promotion, gateway_readiness, real_flow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["real-flow"])
@@ -108,6 +108,8 @@ def real_flow_summary(
         "by_source": real_flow.count_by_source(session, actor.organization_id),
         "rule_pressure": real_flow.rule_pressure(session, actor.organization_id, days=days),
         "promotion": promotion,
+        # Анти-спам (MSP 1.2 §29): класс спама, аутентификация, репутация и метрики ложных срабатываний.
+        "antispam": antispam.real_flow_extension(session, actor.organization_id, days=days),
     }
 
 

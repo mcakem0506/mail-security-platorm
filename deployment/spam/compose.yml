@@ -1,0 +1,69 @@
+# Стенд MSP 1.2: анти-спам, аутентификация и репутация (ТЗ 1.2 §37). Профиль: spam-security-test.
+#
+# Подключается ПОВЕРХ стенда шлюза (deployment/gateway/compose.yml): добавляет сканер Rspamd,
+# Redis и управляемый DNS. Реальных DNSBL и чужих зон нет: все записи SPF, DKIM, DMARC, PTR и
+# «чёрных списков» отдаёт fake_dns, поэтому проверки не зависят от Интернета.
+#
+#   10.77.0.50  rspamd      — сканер (прокси-воркеры: входящий :11332, исходящий :11333)
+#   10.77.0.51  rspamd-dns  — управляемый DNS
+#   10.77.0.52  rspamd-redis
+name: ${COMPOSE_PROJECT_NAME:-msp-spamtest}
+
+services:
+  rspamd:
+    build:
+      context: ../..
+      dockerfile: infrastructure/rspamd/Dockerfile
+    image: msp-rspamd:test
+    profiles: [spam-security-test]
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, DAC_OVERRIDE, KILL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      rspamd-dns: {condition: service_started}
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.50
+    # Контроллер на 127.0.0.1 внутри контейнера: наружу не публикуется (§31).
+    volumes:
+      - ${GW_TEST_DIR:?укажите каталог стенда}/rspamd-bootstrap:/bootstrap:ro
+      - ${GW_TEST_DIR}/secrets/rspamd:/run/secrets/rspamd:ro
+      - rspamd-state:/var/lib/msp-rspamd
+      - rspamd-data:/var/lib/rspamd
+    environment:
+      # Связь с панелью: по умолчанию выключена, узел работает автономно.
+      MSP_PANEL_URL: ${SPAM_PANEL_URL:-}
+      MSP_PANEL_TOKEN_FILE: ${SPAM_PANEL_TOKEN_FILE:-}
+      MSP_NODE_ID: ${SPAM_NODE_ID:-00000000000000000000000000000001}
+      MSP_SYNC_INTERVAL: "${SPAM_SYNC_INTERVAL:-5}"
+    ports:
+      - "127.0.0.1:${SPAM_METRICS_PORT:-19101}:9101"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  rspamd-dns:
+    image: msp-gateway-tools:test
+    build:
+      context: ../..
+      dockerfile: deployment/gateway/test/Dockerfile.tools
+    profiles: [spam-security-test]
+    restart: "no"
+    command: ["python", "/opt/fake_dns.py", "--port", "53", "--control", "8053"]
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.51
+    ports:
+      - "127.0.0.1:${SPAM_DNS_CONTROL:-18053}:8053"
+
+  rspamd-redis:
+    image: redis:7-alpine
+    profiles: [spam-security-test]
+    restart: "no"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.52
+
+volumes:
+  rspamd-state:
+  rspamd-data:

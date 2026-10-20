@@ -350,6 +350,18 @@
 * **Конфигурацию** назначает администратор ИБ (`gateway:config:activate`); откат — [GATEWAY_ROLLBACK.md](GATEWAY_ROLLBACK.md).
 * **Не делайте:** не удаляйте письма из очереди автоматикой; не включайте шлюз в боевой поток без отдельной приёмки.
 
+## 6.4 Анти-спам и аутентификация (MSP 1.2)
+
+> Дополнения этапа MSP 1.2. **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.** Принуждения нет: сканер только наблюдает.
+
+* **Страница:** «Анти-спам и аутентификация» в консоли. Состояние сканера, конфигурации узла (IN_SYNC / DRIFTED / UNKNOWN), тревоги.
+* **Настройки:** `MSP_ANTISPAM_DKIM_SIGNING_DOMAINS` (пусто — подписи нет), `MSP_ANTISPAM_DNS_RESOLVERS`,
+  `MSP_ANTISPAM_DNS_TIMEOUT_SECONDS`, `MSP_ANTISPAM_SCANNER_STALE_SECONDS`, `MSP_ANTISPAM_TEMPERROR_RATIO_WARN`.
+* **Провайдеры репутации:** заведите, запросите включение с областью лицензии (`reputation:provider:manage`); одобрить должен другой человек. Подробно: [RBL_LICENSING.md](RBL_LICENSING.md).
+* **Подпись DKIM:** только для лабораторного/пилотного домена; ключ лучше создавать на узле. Ключ создаёт один, активирует другой (`dkim:key:generate`, `dkim:key:activate`). Ротация — [DKIM_SIGNING.md](DKIM_SIGNING.md).
+* **Политика:** кандидат проходит DRAFT → SHADOW → VALIDATION → APPROVED → ACTIVE_SHADOW (`spam:policy:edit`, `spam:policy:approve`).
+* **Не делайте:** не кладите закрытые ключи и секретные зоны в Git, базу или журналы; не публикуйте контроллер Rspamd наружу; не включайте зону без лицензии.
+
 ## Смотрите также
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — установка, обновление, откат, эксплуатация

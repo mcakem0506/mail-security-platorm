@@ -34,6 +34,13 @@ scrape_configs:
         labels:
           component: gateway
 
+  # Сканер анти-спама (ТЗ 1.2 §36): приёмник результатов отдаёт /metrics на порту 9101 во внутренней сети.
+  - job_name: msp-rspamd
+    static_configs:
+      - targets: ["rspamd:9101"]
+        labels:
+          component: antispam
+
   - job_name: postgres
     static_configs:
       - targets: ["postgres-exporter:9187"]

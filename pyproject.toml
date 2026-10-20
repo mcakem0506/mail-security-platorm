@@ -27,6 +27,8 @@ dependencies = [
   "python-multipart>=0.0.9",
   "prometheus-client>=0.20",
   "minio>=7.2",
+  "dnspython>=2.6",
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -54,7 +56,8 @@ sandbox = [
 ]
 dev = [
   "aiosmtpd>=1.4",  # настоящий SMTP-сервер с TLS для проверок шлюза
-  "cryptography>=42",  # выпуск лабораторных сертификатов для стенда шлюза
+  "dkimpy>=1.1",  # независимая подпись DKIM для проверок (ТЗ 1.2 §38)
+  "authres>=1.2",  # требуется dkimpy для построения цепочек ARC в проверках
   "pytest>=8",
   "pytest-cov>=5",
   "hypothesis>=6.100",
@@ -72,6 +75,7 @@ where = [
   "packages/shared-contracts",
   "packages/gateway",
   "packages/attachment-sandbox",
+  "packages/antispam",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",
@@ -118,6 +122,14 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B", "BLE"]
+# Проверки MSP 1.2 содержат длинные русские сообщения и строки конфигурации: перенос ухудшает чтение.
+"tests/spam/**" = ["E501"]
+"scripts/record_spam_corpus.py" = ["E501"]
+"scripts/evaluate_spam.py" = ["E501"]
+"packages/antispam/msp_antispam/corpus.py" = ["E501"]
+"tests/unit/test_antispam_*.py" = ["E501"]
+"tests/unit/test_gateway_milter.py" = ["E501"]
+"tests/e2e/test_antispam_e2e.py" = ["E501", "F811"]
 "apps/api/msp_api/migrations/**" = ["E501", "I"]
 
 [tool.mypy]

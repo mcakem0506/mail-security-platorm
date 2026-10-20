@@ -1814,5 +1814,8 @@ class ReanalysisJob(Base, IdMixin):
         return min(1.0, self.processed / self.total_messages)
 
 
-# Транспорт почты (ТЗ 1.1): модели вынесены в отдельный модуль, метаданные общие.
-from . import models_transport  # noqa: E402, F401
+# Транспорт почты (ТЗ 1.1) и анти-спам (ТЗ 1.2): модели вынесены в отдельные модули, метаданные общие.
+from . import (  # noqa: E402
+    models_antispam,  # noqa: F401
+    models_transport,  # noqa: F401
+)

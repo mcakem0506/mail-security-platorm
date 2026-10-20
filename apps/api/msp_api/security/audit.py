@@ -65,6 +65,27 @@ class AuditAction:
     TRANSPORT_NODE_FLUSH = "transport.node_flush"
     TRANSPORT_RECIPIENTS_SYNC = "transport.recipients_sync"
     TRANSPORT_QUEUE_VIEWED = "transport.queue_viewed"
+    # Анти-спам, аутентификация и репутация (ТЗ 1.2 §34).
+    SPAM_RSPAMD_CONFIG_RELEASED = "antispam.rspamd_config_released"
+    SPAM_RSPAMD_CONFIG_ROLLED_BACK = "antispam.rspamd_config_rolled_back"
+    SPAM_PROVIDER_CREATED = "antispam.provider_created"
+    SPAM_PROVIDER_ACTIVATION_REQUESTED = "antispam.provider_activation_requested"
+    SPAM_PROVIDER_APPROVED = "antispam.provider_approved"
+    SPAM_PROVIDER_REJECTED = "antispam.provider_rejected"
+    SPAM_PROVIDER_SUSPENDED = "antispam.provider_suspended"
+    SPAM_DKIM_KEY_GENERATED = "antispam.dkim_key_generated"
+    SPAM_DKIM_KEY_DNS_CHECKED = "antispam.dkim_key_dns_checked"
+    SPAM_DKIM_KEY_ACTIVATED = "antispam.dkim_key_activated"
+    SPAM_DKIM_KEY_RETIRING = "antispam.dkim_key_retiring"
+    SPAM_DKIM_KEY_RETIRED = "antispam.dkim_key_retired"
+    SPAM_POLICY_CREATED = "antispam.policy_created"
+    SPAM_POLICY_CHANGED = "antispam.policy_changed"
+    SPAM_POLICY_TRANSITION = "antispam.policy_transition"
+    SPAM_POLICY_SIMULATED = "antispam.policy_simulated"
+    SPAM_BAYES_LEARNED = "antispam.bayes_learned"
+    SPAM_BAYES_UNLEARNED = "antispam.bayes_unlearned"
+    SPAM_AUTH_CONFLICT_DISPOSITION = "antispam.auth_conflict_disposition"
+    SPAM_REVIEW_RECORDED = "antispam.review_recorded"
     # Detection quality, rule lifecycle and analyst decisions (ТЗ 1.0.3 §56).
     # The analyst's classification is audited because every quality metric is derived from it:
     # if the record of who decided what can be lost, the metrics cannot be defended.

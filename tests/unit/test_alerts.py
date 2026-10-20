@@ -132,6 +132,11 @@ def _exported_metrics() -> set[str]:
         names.add(name)
     for name in re.findall(r"counter\(\s*\"(msp_gateway_[a-z_]+)\"", gateway):
         names.add(name)
+    # Метрики сканера анти-спама отдаёт приёмник узла (msp_antispam.metrics); имена перечислены в нём.
+    from msp_antispam.metrics import METRIC_NAMES
+
+    names.update(METRIC_NAMES)
+    # Метрики анти-спама самой панели объявлены в observability.py и учтены выше.
     for name in list(names):
         if name == "msp_gateway_delivery_delay_seconds":
             names.update({f"{name}_bucket", f"{name}_sum", f"{name}_count"})

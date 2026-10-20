@@ -177,6 +177,16 @@ def render_main_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str, log_fi
         "smtpd_tls_session_cache_database =",
         "tls_random_source = dev:/dev/urandom",
     ]
+    if spec.milter.enabled:
+        lines += [
+            "milter_protocol = 6",
+            # Обязательно ``accept``: по умолчанию Postfix выбирает tempfail, и падение сканера
+            # превратилось бы в отказ приёма всей почты (ТЗ 1.2 §4).
+            "milter_default_action = accept",
+            f"milter_connect_timeout = {spec.milter.connect_timeout_seconds}s",
+            f"milter_command_timeout = {spec.milter.command_timeout_seconds}s",
+            f"milter_content_timeout = {spec.milter.content_timeout_seconds}s",
+        ]
     text = "\n".join(lines) + "\n"
     _assert_whitelisted(text)
     return text
@@ -214,6 +224,11 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
             "  -o smtpd_recipient_restrictions=msp_in_recipient,permit",
             "  -o smtpd_data_restrictions=reject_unauth_pipelining",
         ]
+        if spec.milter.enabled:
+            out += [
+                f"  -o smtpd_milters={spec.milter.inbound_socket}",
+                f"  -o milter_macro_daemon_name={spec.hostname}",
+            ]
 
     if spec.internal.enabled:
         relay = (
@@ -235,6 +250,11 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
             "  -o smtpd_recipient_restrictions=msp_out_recipient",
             "  -o smtpd_data_restrictions=reject_unauth_pipelining",
         ]
+        if spec.milter.enabled:
+            out += [
+                f"  -o smtpd_milters={spec.milter.outbound_socket}",
+                f"  -o milter_macro_daemon_name={spec.hostname}",
+            ]
 
     out += _standard_services()
 

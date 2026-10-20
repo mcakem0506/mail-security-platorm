@@ -389,3 +389,81 @@ groups:
         annotations:
           summary: "Самопроверка: шлюз принял бы чужое письмо"
           description: "Недоверенный источник смог адресовать внешнего получателя. Слить узел и разобраться немедленно."
+
+  # Анти-спам, аутентификация и репутация (ТЗ 1.2 §36). На этапе 1.2 сканер только наблюдает, поэтому
+  # его сбои — warning: теряется наблюдение, а не доставка. Исключение — расхождение конфигурации.
+  - name: msp-antispam
+    interval: 30s
+    rules:
+      - alert: MspRspamdDown
+        expr: msp_rspamd_up == 0 or up{job="msp-rspamd"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сканер анти-спама недоступен"
+          description: "Почта идёт дальше без проверки; новые письма получают недостающее свидетельство, а не «чисто»."
+
+      - alert: MspRspamdScanErrorSpike
+        expr: increase(msp_rspamd_scan_errors_total[10m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Растёт число ошибок сканирования"
+          description: "Записи сканера не разбираются: проверьте версию сканера и формат отдачи результатов."
+
+      - alert: MspRspamdRedisDown
+        expr: msp_rspamd_redis_up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis сканера недоступен"
+          description: "Bayes, greylisting и накопительная репутация работают частично; проверки аутентификации продолжаются."
+
+      - alert: MspAuthTemporaryErrorsHigh
+        expr: sum(increase(msp_spf_results_total{result="TEMPERROR"}[15m])) / clamp_min(sum(increase(msp_spf_results_total[15m])), 1) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Много проверок SPF завершилось временной ошибкой DNS"
+          description: "Результат при сбое DNS — TEMPERROR (недостающее свидетельство), а не FAIL."
+
+      - alert: MspDmarcTemporaryErrorSpike
+        expr: sum(increase(msp_dmarc_results_total{result="TEMPERROR"}[15m])) / clamp_min(sum(increase(msp_dmarc_results_total[15m])), 1) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Всплеск временных ошибок DMARC"
+          description: "Проверьте резолвер сканера и доступность DNS."
+
+      - alert: MspDkimSigningFailures
+        expr: increase(msp_dkim_sign_failures_total[15m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Исходящие письма домена с действующим ключом уходят без подписи"
+          description: "Проверьте файл закрытого ключа на узле и сети подписи."
+
+      - alert: MspRblProviderListedBurst
+        expr: sum(increase(msp_rbl_listed_total[15m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Всплеск срабатываний списков репутации"
+          description: "Возможна атака либо ошибка провайдера; на этапе 1.2 письма не отклоняются."
+
+      - alert: MspSpamFalsePositiveRise
+        expr: increase(msp_spam_fp_total[1h]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Аналитики находят ложные срабатывания спама"
+          description: "Прежде чем обсуждать отказ в этапе 1.3, разберите причины: символы и пороги."
+

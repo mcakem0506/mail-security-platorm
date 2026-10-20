@@ -436,6 +436,16 @@ sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key
 (`docs/GATEWAY_LAB_RUNBOOK.md`). Токен узла — `MSP_GATEWAY_INGEST_TOKEN` (не короче 32 символов,
 иначе приём событий отвечает 503). **MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
 
+Голова на момент MSP 1.2 — `c860d5cdb90d`. Новые таблицы анти-спама, аутентификации и репутации
+(`models_antispam.py`): сканирования, политики и кандидаты, провайдеры и допуски, репутация IP и доменов,
+ключи DKIM (без закрытой части), решения аналитика по просмотру. Существующие таблицы не меняются.
+Сканер — отдельный образ `infrastructure/rspamd`, работает на узле шлюза, а не рядом с панелью (в корневой
+`compose.yml` его нет намеренно); лабораторный стенд — профиль `spam-security-test` в `deployment/spam/compose.yml` (`docs/RSPAMD_ARCHITECTURE.md`). Настройки панели:
+`MSP_ANTISPAM_DKIM_SIGNING_DOMAINS` (по умолчанию пусто — подписи нет), `MSP_ANTISPAM_DNS_RESOLVERS`,
+`MSP_ANTISPAM_DNS_TIMEOUT_SECONDS`, `MSP_ANTISPAM_SCANNER_STALE_SECONDS`, `MSP_ANTISPAM_TEMPERROR_RATIO_WARN`.
+Закрытые ключи DKIM лежат только в хранилище секретов узла (`docs/DKIM_SIGNING.md`). Принуждения нет ни в
+одном режиме. **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
+
 Таблица `validation_messages` живёт отдельно от `mail_messages` намеренно: обычное письмо
 удаляется по сроку хранения почты, запись валидации — по своему, и объединение означало бы либо
 потерю измерений вместе с почтой, либо хранение почты ради измерений.

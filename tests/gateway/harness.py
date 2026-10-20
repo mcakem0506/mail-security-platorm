@@ -264,6 +264,10 @@ def make_message(message_id: str, sender: str, recipient: str, *, body: str = "�
 
 
 class Stack:
+    #: Файлы и профили Compose. Стенд 1.2 подменяет их, добавляя сканер, Redis и DNS.
+    compose_files: tuple[Path, ...] = (COMPOSE,)
+    compose_profiles: tuple[str, ...] = ("gateway-test",)
+
     def __init__(self, workdir: Path, *, panel_port: int | None = None, panel_token: str = "") -> None:
         self.workdir = workdir
         #: Порт панели на хосте; если задан, узел и сборщик получают её адрес и токен.
@@ -310,10 +314,8 @@ class Stack:
             [
                 "docker",
                 "compose",
-                "-f",
-                str(COMPOSE),
-                "--profile",
-                "gateway-test",
+                *[part for path in self.compose_files for part in ("-f", str(path))],
+                *[part for name in self.compose_profiles for part in ("--profile", name)],
                 *(["--profile", "gateway-panel"] if self.panel_port else []),
                 *args,
             ],

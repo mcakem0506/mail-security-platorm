@@ -1131,3 +1131,166 @@ export const transportApi = {
     request<{ flush_requested: boolean }>(`/api/v1/gateway/nodes/${id}/flush`, { method: "POST" }),
   resume: (id: string) => request<{ drain_requested: boolean }>(`/api/v1/gateway/nodes/${id}/resume`, { method: "POST" }),
 };
+
+// ---------------------------------------------------------------------------------------------
+// Анти-спам, аутентификация и репутация (MSP 1.2)
+// ---------------------------------------------------------------------------------------------
+export interface SpamSummary {
+  window_hours: number;
+  analyzed: number;
+  spam_classes: Record<string, number>;
+  suggested_actions: Record<string, number>;
+  score_histogram: Record<string, number>;
+  top_symbols: [string, number][];
+  rbl_hits: number;
+  applied_action: string;
+  enforcement_enabled: boolean;
+  false_positive_metrics: { spam_fp_per_1000: number; reviewed: number; spam_fn: number };
+  health: { node_id: string; rspamd: Record<string, unknown> | null }[];
+}
+
+export interface SpamScanRow {
+  id: string;
+  message_id: string;
+  direction: string;
+  score: number;
+  required_score: number;
+  suggested_action: string;
+  applied_action: string;
+  spam_class: string;
+  security_verdict: string | null;
+  client_ip: string;
+  sender_domain: string;
+  spf: string | null;
+  dkim: string | null;
+  dmarc: string | null;
+  arc: string | null;
+  received_at: string;
+  missing_evidence: string[];
+}
+
+export interface AuthDistribution {
+  window_hours: number;
+  analyzed: number;
+  distributions: Record<string, Record<string, number>>;
+  top_failing_domains: [string, number][];
+  incomplete: number;
+  alignment_failures: number;
+  conflicts: number;
+}
+
+export interface AuthConflict {
+  id: string;
+  scan_id: string;
+  kind: string;
+  upstream_value: string;
+  msp_value: string;
+  note: string;
+  disposition: string;
+  reviewed_by: string;
+}
+
+export interface ReputationView {
+  known: boolean;
+  tier: string;
+  score: number;
+  explanations: string[];
+  first_seen?: string;
+  last_seen?: string;
+  message_count?: number;
+  suppresses_hard_signals?: boolean;
+}
+
+export interface SpamPolicyRow {
+  id: string;
+  version: number;
+  state: string;
+  edited_by: string;
+  approved_by: string;
+  thresholds: Record<string, number> | null;
+  enforcement_enabled: boolean;
+}
+
+export interface PolicySimulation {
+  evaluated: number;
+  changed: number;
+  applied_action: string;
+  items: {
+    scan_id: string;
+    message_id: string;
+    score: number;
+    current_spam_class: string;
+    candidate_spam_class: string;
+    current_suggested_action: string;
+    hypothetical_action: string;
+    changed: boolean;
+  }[];
+}
+
+export interface DkimKeyRow {
+  id: string;
+  domain: string;
+  selector: string;
+  dns_name: string;
+  public_record: string;
+  status: string;
+  generated_by: string;
+  activated_by: string;
+  failure: string;
+  retire_at: string | null;
+  private_key_ref: string;
+  private_key_pem?: string;
+}
+
+export interface ReputationProviderRow {
+  id: string;
+  provider_name: string;
+  type: string;
+  license_mode: string;
+  privacy_class: string;
+  query_types: string[];
+  status: string;
+  approval_state: string;
+  requested_by: string;
+  approved_by: string;
+  usage_scope: string;
+  zone: string | null;
+  has_secret_zone: boolean;
+}
+
+export interface SpamValidation {
+  metrics: Record<string, number | null>;
+  reject_safety: { ready_for_discussion: boolean; reasons: string[]; enforcement_enabled: boolean };
+}
+
+const G = "/api/v1/gateway";
+const post = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+
+export const antispamApi = {
+  summary: (hours = 24) => request<SpamSummary>(`${G}/spam/summary${query({ hours })}`),
+  messages: (params: { limit?: number; spam_class?: string } = {}) =>
+    request<{ items: SpamScanRow[] }>(`${G}/spam/messages${query(params)}`),
+  validation: () => request<SpamValidation>(`${G}/spam/validation`),
+  authDistribution: (hours = 24) => request<AuthDistribution>(`${G}/auth/distribution${query({ hours })}`),
+  conflicts: () => request<{ items: AuthConflict[] }>(`${G}/auth/conflicts`),
+  reviewConflict: (id: string, disposition: string) =>
+    request<AuthConflict>(`${G}/auth/conflicts/${id}`, { method: "PUT", body: JSON.stringify({ disposition }) }),
+  ipReputation: (ip: string) => request<ReputationView>(`${G}/reputation/ip/${encodeURIComponent(ip)}`),
+  domainReputation: (domain: string) =>
+    request<ReputationView>(`${G}/reputation/domain/${encodeURIComponent(domain)}`),
+  policies: () => request<{ items: SpamPolicyRow[]; active_version: number | null; enforcement_enabled: boolean }>(`${G}/spam/policies`),
+  createPolicy: (thresholds: Record<string, number>) => post<SpamPolicyRow>(`${G}/spam/policies`, { thresholds }),
+  simulate: (id: string) => post<PolicySimulation>(`${G}/spam/policies/${id}/simulate`),
+  transition: (id: string, target: string) => post<SpamPolicyRow>(`${G}/spam/policies/${id}/transition`, { target }),
+  activateShadow: (id: string) => post<SpamPolicyRow>(`${G}/spam/policies/${id}/activate-shadow`),
+  dkimKeys: () => request<{ items: DkimKeyRow[] }>(`${G}/dkim/keys`),
+  generateKey: (domain: string, selector: string) => post<DkimKeyRow>(`${G}/dkim/keys`, { domain, selector }),
+  verifyKeyDns: (id: string) => post<DkimKeyRow>(`${G}/dkim/keys/${id}/verify-dns`),
+  activateKey: (id: string) => post<DkimKeyRow>(`${G}/dkim/keys/${id}/activate`),
+  retireKey: (id: string) => post<DkimKeyRow>(`${G}/dkim/keys/${id}/retire`),
+  providers: () => request<{ items: ReputationProviderRow[] }>(`${G}/spam/providers`),
+  createProvider: (body: Record<string, unknown>) => post<ReputationProviderRow>(`${G}/spam/providers`, body),
+  providerAction: (id: string, action: "request-activation" | "approve" | "reject" | "suspend", body?: unknown) =>
+    post<ReputationProviderRow>(`${G}/spam/providers/${id}/${action}`, body ?? {}),
+};
