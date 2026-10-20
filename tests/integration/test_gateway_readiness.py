@@ -520,7 +520,14 @@ class TestTheTwoRegistriesMustAgree:
         """
         gaps = self._script().read_gap_registry()
         assert gaps is not None
-        assert {gap["gap_id"] for gap in gaps} == {"GAP-001", "GAP-002", "GAP-003", "GAP-004"}
+        assert {gap["gap_id"] for gap in gaps} == {
+            "GAP-001",
+            "GAP-002",
+            "GAP-003",
+            "GAP-004",
+            "GAP-005",
+            "GAP-006",
+        }
         for gap in gaps:
             assert gap["status"], f"{gap['gap_id']}: статус обязателен"
             assert gap["compensating_controls"], f"{gap['gap_id']}: мера обязательна"

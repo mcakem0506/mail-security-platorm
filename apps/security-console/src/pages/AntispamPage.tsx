@@ -192,7 +192,7 @@ function Overview() {
               Проанализировано писем: <strong>{s.analyzed}</strong>. Применённое действие: <strong>{s.applied_action}</strong>.
               Принуждение: <strong>{s.enforcement_enabled ? "включено" : "выключено"}</strong>.
             </p>
-            <div className="grid">
+            <div className="tiles">
               <div>
                 <h3>Классы спама</h3>
                 <Bars data={Object.fromEntries(Object.entries(s.spam_classes).map(([k, v]) => [CLASS_LABEL[k] ?? k, v]))} />
@@ -324,7 +324,7 @@ function AuthTab({ canReview }: { canReview: boolean }) {
             Недоступный DNS даёт TEMPERROR (недостающее свидетельство), а не FAIL. Неполных проверок: {d.incomplete};
             провалов выравнивания: {d.alignment_failures}; расхождений с вышестоящим шлюзом: {d.conflicts}.
           </p>
-          <div className="grid">
+          <div className="tiles">
             {Object.entries(d.distributions).map(([method, values]) => (
               <div key={method}>
                 <h3>{method.toUpperCase()}</h3>
@@ -370,7 +370,7 @@ function AuthTab({ canReview }: { canReview: boolean }) {
                 <td>
                   {canReview &&
                     ["EXPECTED", "REAL_PROBLEM", "FALSE_ALARM"].map((value) => (
-                      <button key={value} className="btn btn--small" onClick={() => decide(c.id, value)}>
+                      <button key={value} className="button button--tiny" onClick={() => decide(c.id, value)}>
                         {value}
                       </button>
                     ))}
@@ -406,13 +406,13 @@ function ReputationTab() {
         затухает со временем. Числа без объяснения не показываются.
       </p>
       <Problem error={error} />
-      <div className="row">
+      <div className="filters">
         <select value={kind} onChange={(e) => setKind(e.target.value as "ip" | "domain")}>
           <option value="ip">IP-адрес</option>
           <option value="domain">Домен</option>
         </select>
         <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="203.0.113.5 или example.com" />
-        <button className="btn" onClick={look} disabled={!value.trim()}>
+        <button className="button" onClick={look} disabled={!value.trim()}>
           Показать
         </button>
       </div>
@@ -479,22 +479,22 @@ function PolicyTab({ canEdit, canApprove, canSimulate }: { canEdit: boolean; can
                 </td>
                 <td>
                   {canSimulate && (
-                    <button className="btn btn--small" onClick={() => act(async () => setSimulation(await antispamApi.simulate(p.id)))}>
+                    <button className="button button--tiny" onClick={() => act(async () => setSimulation(await antispamApi.simulate(p.id)))}>
                       Симулировать
                     </button>
                   )}
                   {NEXT[p.state] && NEXT[p.state] !== "APPROVED" && NEXT[p.state] !== "ACTIVE_SHADOW" && canEdit && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.transition(p.id, NEXT[p.state] ?? ""))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.transition(p.id, NEXT[p.state] ?? ""))}>
                       → {NEXT[p.state]}
                     </button>
                   )}
                   {p.state === "VALIDATION" && canApprove && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.transition(p.id, "APPROVED"))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.transition(p.id, "APPROVED"))}>
                       Одобрить
                     </button>
                   )}
                   {p.state === "APPROVED" && canApprove && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.activateShadow(p.id))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.activateShadow(p.id))}>
                       Включить в теневом режиме
                     </button>
                   )}
@@ -504,7 +504,7 @@ function PolicyTab({ canEdit, canApprove, canSimulate }: { canEdit: boolean; can
           </tbody>
         </table>
         {canEdit && (
-          <div className="row">
+          <div className="filters">
             <label>
               подозрение от <input value={suspected} onChange={(e) => setSuspected(e.target.value)} size={4} />
             </label>
@@ -512,7 +512,7 @@ function PolicyTab({ canEdit, canApprove, canSimulate }: { canEdit: boolean; can
               спам от <input value={spam} onChange={(e) => setSpam(e.target.value)} size={4} />
             </label>
             <button
-              className="btn"
+              className="button"
               onClick={() => act(() => antispamApi.createPolicy({ suspected: Number(suspected), spam: Number(spam) }))}
             >
               Создать кандидата
@@ -616,17 +616,17 @@ function DkimTab({
                 </td>
                 <td>
                   {canGenerate && (k.status === "DNS_PENDING" || k.status === "READY") && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.verifyKeyDns(k.id))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.verifyKeyDns(k.id))}>
                       Проверить DNS
                     </button>
                   )}
                   {canActivate && k.status === "READY" && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.activateKey(k.id))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.activateKey(k.id))}>
                       Активировать
                     </button>
                   )}
                   {canRetire && (k.status === "ACTIVE" || k.status === "RETIRING") && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.retireKey(k.id))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.retireKey(k.id))}>
                       {k.status === "ACTIVE" ? "Начать вывод" : "Завершить вывод"}
                     </button>
                   )}
@@ -636,11 +636,11 @@ function DkimTab({
           </tbody>
         </table>
         {canGenerate && (
-          <div className="row">
+          <div className="filters">
             <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="домен подписи" />
             <input value={selector} onChange={(e) => setSelector(e.target.value)} placeholder="селектор" />
             <button
-              className="btn"
+              className="button"
               onClick={() =>
                 act(async () => {
                   setFresh(await antispamApi.generateKey(domain.trim(), selector.trim()));
@@ -665,7 +665,7 @@ function DkimTab({
             закройте это окно: панель её не сохраняет.
           </p>
           <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{fresh.private_key_pem ?? ""}</pre>
-          <button className="btn" onClick={() => setFresh(null)}>
+          <button className="button" onClick={() => setFresh(null)}>
             Я сохранил ключ
           </button>
         </section>
@@ -724,7 +724,7 @@ function ProvidersTab({ canManage }: { canManage: boolean }) {
                 <td>
                   {canManage && (p.approval_state === "DRAFT" || p.approval_state === "REJECTED" || p.approval_state === "SUSPENDED") && (
                     <button
-                      className="btn btn--small"
+                      className="button button--tiny"
                       onClick={() => act(() => antispamApi.providerAction(p.id, "request-activation", { usage_scope: scope }))}
                     >
                       Запросить включение
@@ -732,16 +732,16 @@ function ProvidersTab({ canManage }: { canManage: boolean }) {
                   )}
                   {canManage && p.approval_state === "PENDING_APPROVAL" && (
                     <>
-                      <button className="btn btn--small" onClick={() => act(() => antispamApi.providerAction(p.id, "approve"))}>
+                      <button className="button button--tiny" onClick={() => act(() => antispamApi.providerAction(p.id, "approve"))}>
                         Одобрить
                       </button>
-                      <button className="btn btn--small" onClick={() => act(() => antispamApi.providerAction(p.id, "reject"))}>
+                      <button className="button button--tiny" onClick={() => act(() => antispamApi.providerAction(p.id, "reject"))}>
                         Отклонить
                       </button>
                     </>
                   )}
                   {canManage && p.approval_state === "APPROVED" && (
-                    <button className="btn btn--small" onClick={() => act(() => antispamApi.providerAction(p.id, "suspend"))}>
+                    <button className="button button--tiny" onClick={() => act(() => antispamApi.providerAction(p.id, "suspend"))}>
                       Приостановить
                     </button>
                   )}
@@ -751,13 +751,13 @@ function ProvidersTab({ canManage }: { canManage: boolean }) {
           </tbody>
         </table>
         {canManage && (
-          <div className="row">
+          <div className="filters">
             <input value={id} onChange={(e) => setId(e.target.value)} placeholder="идентификатор" />
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="название" />
             <input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="зона DNS" />
             <input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="область применения лицензии" />
             <button
-              className="btn"
+              className="button"
               disabled={!id.trim() || !zone.trim()}
               onClick={() =>
                 act(() =>

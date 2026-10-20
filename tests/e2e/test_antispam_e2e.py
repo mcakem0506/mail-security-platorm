@@ -591,3 +591,25 @@ class TestValidationMetrics:
             f"{BASE}/spam/review-queue", params={"selection": "NOPE"}
         )
         assert response.status_code == 400
+
+
+class TestRealFlowExtension:
+    def test_the_real_flow_summary_carries_the_antispam_block_without_inventing_rates(
+        self, client, people
+    ) -> None:  # type: ignore[no-untyped-def]
+        analyst = as_(client, people, "analyst")
+        block = analyst.get("/api/v1/detection/real-flow/summary").json()["antispam"]
+        assert block["scanned"] == 0 and block["enforcement_enabled"] is False
+        assert block["spam_fp_per_1000"] is None, "без просмотров доля — null, а не ноль"
+        push(client, scan_record("dmarc_reject_fail", "rf-1"), scan_record("all_pass", "rf-2"))
+        block = analyst.get("/api/v1/detection/real-flow/summary").json()["antispam"]
+        assert block["scanned"] == 2
+        assert set(block["pending_review"]) == {
+            "SUGGESTED_REJECT",
+            "DMARC_REJECT_FAILURE",
+            "RBL_LISTED",
+            "HIGH_SCORE",
+            "LOW_SCORE_SAMPLE",
+            "AUTH_CONFLICT",
+        }
+        assert block["pending_review"]["DMARC_REJECT_FAILURE"] >= 1

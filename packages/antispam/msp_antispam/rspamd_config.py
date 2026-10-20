@@ -36,6 +36,8 @@ _PATH = re.compile(r"^/[A-Za-z0-9._/\-]{1,200}$")
 def path_ok(value: str) -> bool:
     """Абсолютный путь без выхода из каталога: «..» и «//» недопустимы."""
     return bool(_PATH.match(value)) and ".." not in value.split("/") and "//" not in value
+
+
 _ID = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 _NETWORK = re.compile(r"^[0-9a-fA-F:.]+(/[0-9]{1,3})?$")
 
@@ -69,8 +71,14 @@ class RedisSettings(_Strict):
         return value
 
 
+#: Порог родных действий Rspamd, которого оценка не достигает: письмо не отклоняется, не откладывается
+#: и не меняется.
+UNREACHABLE_SCORE = 1000000.0
+
+
 class Thresholds(_Strict):
-    """Пороги родных действий Rspamd. Они дают ``suggested_action`` и не исполняются (§6)."""
+    """Пороги предложения. В конфигурацию Rspamd они не попадают (там недостижимые значения): по ним
+    панель считает ``suggested_action`` по оценке (§6)."""
 
     greylist: float = Field(default=4.0, ge=0, le=100)
     add_header: float = Field(default=6.0, ge=0, le=100)
@@ -276,7 +284,13 @@ def _render_options_override(cfg: RspamdNodeConfig) -> str:
     """Список «своих» сетей заменяется, а не дополняется: слияние сохранило бы частные сети по
     умолчанию, и сканер молча пропускал бы проверки для любого отправителя из них."""
     local = ["127.0.0.0/8", "::1", *cfg.local_networks]
-    return "# Сгенерировано MSP.\nlocal_addrs = [" + ", ".join(_q(n) for n in local) + "];\n"
+    # Шаблон GTUBE даёт родное действие reject, которое Milter исполнил бы. Для проверки
+    # работоспособности сканера он не нужен: этап 1.2 ничего не отклоняет (§6). Значение должно
+    # перекрыть умолчание, поэтому оно лежит в слое override.
+    return (
+        "# Сгенерировано MSP.\nlocal_addrs = [" + ", ".join(_q(n) for n in local) + "];\n"
+        'gtube_patterns = "disabled";\n'
+    )
 
 
 def _render_proxy(direction: str) -> str:
@@ -309,9 +323,23 @@ def _render_settings(cfg: RspamdNodeConfig) -> str:
 
 
 def _render_actions(cfg: RspamdNodeConfig) -> str:
+    del cfg
+    # Milter исполняет родное действие сканера: reject отклоняет письмо, greylist и soft reject
+    # откладывают его,
+    # add header меняет. Поэтому на этапе 1.2 пороги этих действий недостижимы, а «предложение» панель считает
+    # по оценке и порогам узла (``msp-advisory.json``). Наблюдение — свойство конфигурации сканера, а не
+    # только пометка в панели (§6).
+    return (
+        f"reject = {UNREACHABLE_SCORE};\n"
+        f"add_header = {UNREACHABLE_SCORE - 1};\n"
+        f"greylist = {UNREACHABLE_SCORE - 2};\n"
+    )
+
+
+def _render_advisory(cfg: RspamdNodeConfig) -> str:
     t = cfg.thresholds
-    # Пороги дают предложение. Действие MTA на этапе 1.2 — только наблюдение (§6).
-    return f"reject = {t.reject};\nadd_header = {t.add_header};\ngreylist = {t.greylist};\n"
+    body = {"greylist": t.greylist, "add_header": t.add_header, "reject": t.reject}
+    return json.dumps(body, sort_keys=True) + "\n"
 
 
 def _render_milter_headers(cfg: RspamdNodeConfig) -> str:
@@ -474,6 +502,7 @@ def render(cfg: RspamdNodeConfig) -> RenderedRspamd:
         ),
         "local.d/settings.conf": _render_settings(cfg),
         "local.d/actions.conf": _render_actions(cfg),
+        "msp-advisory.json": _render_advisory(cfg),
         "local.d/milter_headers.conf": _render_milter_headers(cfg),
         "local.d/metadata_exporter.conf": _render_metadata_exporter(cfg),
         "local.d/dmarc.conf": _render_dmarc(),

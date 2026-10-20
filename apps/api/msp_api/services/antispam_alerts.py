@@ -135,7 +135,7 @@ def compute(session: Session, organization_id: str, settings: Settings) -> list[
         alerts.extend(_node_alerts(node, settings))
 
     since = datetime.now(UTC) - timedelta(hours=1)
-    rows = list(
+    rows: list[dict[str, Any] | None] = list(
         session.execute(
             select(SpamScan.auth)
             .where(SpamScan.organization_id == organization_id, SpamScan.received_at >= since)

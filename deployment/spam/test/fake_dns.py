@@ -90,7 +90,7 @@ def answer(data: bytes) -> bytes | None:
         return None
     ident = data[:2]
     name, offset = read_name(data, 12)
-    qtype, qclass = struct.unpack("!HH", data[offset : offset + 4])
+    qtype, _qclass = struct.unpack("!HH", data[offset : offset + 4])
     question = data[12 : offset + 4]
     kind = CODES.get(qtype, str(qtype))
     with LOCK:
@@ -118,7 +118,7 @@ def answer(data: bytes) -> bytes | None:
 
 def serve_udp(port: int) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", port))
+    sock.bind(("0.0.0.0", port))  # noqa: S104 - тестовый DNS в изолированной сети
     while True:
         data, peer = sock.recvfrom(4096)
 
@@ -133,7 +133,7 @@ def serve_udp(port: int) -> None:
 def serve_tcp(port: int) -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", port))
+    server.bind(("0.0.0.0", port))  # noqa: S104
     server.listen(16)
     while True:
         conn, _ = server.accept()
@@ -169,7 +169,7 @@ class Control(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_PUT(self) -> None:  # noqa: N802
+    def do_PUT(self) -> None:
         payload = self._body()
         with LOCK:
             if self.path == "/records":
@@ -181,7 +181,7 @@ class Control(BaseHTTPRequestHandler):
                 return
         self._send({"ok": True})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         if self.path == "/reset":
             with LOCK:
                 STATE["records"] = {}
@@ -191,7 +191,7 @@ class Control(BaseHTTPRequestHandler):
         else:
             self._send({"error": "unknown"}, 404)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/queries":
             with LOCK:
                 self._send(list(STATE["log"]))  # type: ignore[call-overload]
@@ -212,7 +212,7 @@ def main() -> None:
     args = parser.parse_args()
     threading.Thread(target=serve_udp, args=(args.port,), daemon=True).start()
     threading.Thread(target=serve_tcp, args=(args.port,), daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", args.control), Control).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", args.control), Control).serve_forever()  # noqa: S104
 
 
 if __name__ == "__main__":

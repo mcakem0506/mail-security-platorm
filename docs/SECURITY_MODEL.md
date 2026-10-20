@@ -431,3 +431,11 @@ Basic-аутентификация передаёт пароль служебн�
 `gateway:queue:admin`, `gateway:node:drain`, `gateway:recipient:sync`, `gateway:tls:read`,
 `gateway:config:read`, `gateway:config:validate`, `gateway:config:activate`, `gateway:config:rollback`.
 Любое действие оператора шлюза пишется в аудит (`transport.*`).
+
+## Дополнения этапа MSP 1.2
+
+Новые права: `spam:read`, `spam:policy:edit`, `spam:policy:approve`, `spam:simulate`, `auth:read`, `auth:conflict:review`,
+`reputation:read`, `reputation:provider:manage`, `dkim:read`, `dkim:key:generate`, `dkim:key:activate`, `dkim:key:retire`.
+Операции «четырёх глаз»: активация провайдера репутации, активация ключа DKIM, одобрение кандидата политики; отказ
+записывается в аудит. Закрытые ключи, секретные зоны RBL, UCL и Lua не хранятся в Git, базе, интерфейсе и журналах.
+Принуждения (reject/discard/quarantine) нет ни в одном режиме. Угрозы — в [THREAT_MODEL.md](THREAT_MODEL.md). **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**

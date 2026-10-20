@@ -1,0 +1,10 @@
+{
+ "corpus_checksum": "3b5dd6d738fbf6bc08d1a5e8cf6ce71be6a80ef729af29d975f47d28a0231f91",
+ "metrics": {
+  "authentication_conflict_rate": 1.0,
+  "bulk_precision": 1.0,
+  "spam_precision": 1.0,
+  "spam_recall": 0.8333,
+  "suggested_reject_precision": 1.0
+ }
+}

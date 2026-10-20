@@ -1024,3 +1024,202 @@ jobs:
         env:
           MSP_GATEWAY_TESTS: "1"
         run: pytest -q -rs -o addopts="" tests/unit/test_attachment_sandbox.py tests/security/test_attachment_isolation.py tests/gateway/test_sandbox_container.py
+
+  rspamd-config-test:
+    name: Rspamd config test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/unit/test_antispam_config.py tests/unit/test_antispam_node.py tests/unit/test_gateway_milter.py tests/unit/test_rspamd_reference.py
+
+  rspamd-milter-integration:
+    name: Rspamd Milter integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_milter_smoke.py tests/spam/test_trust_and_helo.py tests/spam/test_panel_antispam.py
+
+  rspamd-outage-failopen:
+    name: Rspamd outage fail-open
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_failopen.py -k "not dns"
+
+  spf-tests:
+    name: SPF tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_spf.py
+
+  dkim-tests:
+    name: DKIM tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_dkim.py
+
+  dmarc-rfc9989-tests:
+    name: DMARC RFC 9989 tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_dmarc.py
+
+  arc-tests:
+    name: ARC tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_arc.py
+
+  rbl-provider-tests:
+    name: RBL provider tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_rbl.py
+
+  dkim-signing-tests:
+    name: DKIM signing tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_dkim_signing.py
+
+  dns-failure-tests:
+    name: DNS failure tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/spam/test_failopen.py -k "dns"
+
+  spam-policy-regression:
+    name: Spam policy regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/unit/test_antispam_auth.py tests/unit/test_antispam_core.py tests/unit/test_antispam_corpus.py tests/e2e/test_antispam_e2e.py tests/e2e/test_antispam_analysis.py tests/e2e/test_antispam_alerts.py

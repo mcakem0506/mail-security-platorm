@@ -1,3 +1,4 @@
 *.sh text eol=lf
 deployment/gateway/** text eol=lf
 deployment/gateway/msp-journal-write text eol=lf
+infrastructure/rspamd/reference/** -text

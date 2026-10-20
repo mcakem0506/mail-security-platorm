@@ -152,3 +152,37 @@ class TestNodeRefusesUnsafeMilterSettings:
         check_master_cf(
             f"{base}  -o smtpd_milters=inet:10.0.0.1:11332\n  -o milter_macro_daemon_name=gw.lab.example\n"
         )
+
+
+class TestPostscreenIsNotAvailable:
+    """Postscreen только оценивается (ТЗ 1.2 §21): узел не примет его параметры и не сформирует их."""
+
+    def test_node_rejects_postscreen_main_cf_parameters(self) -> None:
+        for line in (
+            "postscreen_greet_action = enforce",
+            "postscreen_dnsbl_sites = lab.rbl.test*2",
+            "postscreen_access_list = permit_mynetworks",
+        ):
+            with pytest.raises(BundleError):
+                check_main_cf(line + "\n")
+
+    def test_node_rejects_a_postscreen_service_in_master_cf(self) -> None:
+        with pytest.raises(BundleError):
+            check_master_cf("smtp inet n - n - 1 postscreen\n")
+
+    def test_rendered_configuration_never_mentions_postscreen(self) -> None:
+        s = spec()
+        assert "postscreen" not in main_cf(s)
+        assert "postscreen" not in render_master_cf(s, config_dir=CONFIG, state_dir=STATE)
+
+    def test_the_spec_has_no_field_to_enable_it(self) -> None:
+        with pytest.raises(ValidationError):
+            GatewaySpec(
+                hostname="gw.lab.example",
+                relay_domains=(RelayDomain(domain="corp.example", route="exchange"),),
+                routes=(Route(name="exchange", targets=(Target(host="exchange.lab.example", port=25),)),),
+                inbound=InboundListener(),
+                internal=InternalListener(trusted_networks=("10.77.0.64/26",)),
+                outbound=Outbound(mode=OutboundMode.SINK, host="sink.lab.example", port=2527),
+                postscreen_enabled=True,  # type: ignore[call-arg]
+            )

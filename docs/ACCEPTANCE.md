@@ -242,3 +242,7 @@ NEXT PHASE:
 ## Этап MSP 1.1
 
 Приёмка основы шлюза — в [MSP_1_1_ACCEPTANCE.md](MSP_1_1_ACCEPTANCE.md). MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.
+
+## Этап MSP 1.2
+
+Дополнения этапа MSP 1.2. Приёмка анти-спама, аутентификации и репутации — в [MSP_1_2_ACCEPTANCE.md](MSP_1_2_ACCEPTANCE.md). **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**

@@ -150,3 +150,47 @@ gaps:
       начало, показывает лишь прочитанную часть, а вердикт остаётся неполным. Полная распаковка в
       изолированном процессе (вариант 1 ADR) остаётся возможным развитием, но не необходима для
       закрытия пробела.
+
+  - id: GAP-005
+    category: authentication
+    description: >-
+      Rspamd 3.12.1 пропускает синтаксически неверный механизм SPF и вычисляет остаток записи,
+      тогда как RFC 7208 §4.6 требует permerror.
+    root_cause: >-
+      Поведение модуля SPF сканера. Проверку нельзя переписывать в MSP (ТЗ 1.2 запрещает
+      собственную реализацию SPF), поэтому отличие принято и названо.
+    severity: low
+    status: VALIDATION
+    owner: detection-auth@corp.example
+    target_release: MSP 1.3
+    examples:
+      - SPF-PERMERROR-DEVIATION
+    mitigation: >-
+      Результат нормализуется и помечается как полученный от сканера; сигнал AUTH_SPF_FAIL имеет
+      низкий вес и ничего не отклоняет. Отличие описано в SPF_VALIDATION.md и проверяется в
+      лабораторной матрице (tests/spam/test_spf.py), так что смена поведения сканера не пройдёт
+      незамеченной.
+    planned_fix: >-
+      Подтвердить долю затронутых доменов на реальном потоке; при необходимости рассмотреть
+      обновление Rspamd или отдельный разбор записи без подмены проверки.
+
+  - id: GAP-006
+    category: authentication
+    description: >-
+      Rspamd 3.12.1 не реализует DMARC по RFC 9989: нет поиска по дереву, np и t.
+    root_cause: >-
+      Модуль DMARC сканера следует RFC 7489. Переписывать DMARC в MSP запрещено ТЗ 1.2, поэтому
+      отличие принято и названо.
+    severity: low
+    status: VALIDATION
+    owner: detection-auth@corp.example
+    target_release: MSP 1.3
+    examples:
+      - DMARC-RFC9989-DEVIATION
+    mitigation: >-
+      Результат DMARC используется как слабый сигнал, принуждения нет. Все провалы при политике
+      reject попадают в обязательный просмотр аналитика (DMARC_REJECT_FAILURE). Отличия описаны в
+      DMARC_RFC9989.md и фиксируются тестами tests/spam/test_dmarc.py.
+    planned_fix: >-
+      Измерить расхождения на реальном потоке просмотром; решение об отказе возможно только после
+      reject_safety (SPAM_REAL_FLOW_VALIDATION.md).

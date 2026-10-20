@@ -400,3 +400,39 @@ class TestRelease:
         ):
             assert _FATAL_LINE.search(line), line
         assert not _FATAL_LINE.search("syntax OK")
+
+
+class TestObserveOnlyConfiguration:
+    """Milter исполняет родные действия Rspamd, поэтому наблюдение — свойство конфигурации (ТЗ 1.2 §6)."""
+
+    def _files(self) -> dict[str, str]:
+        from msp_antispam.rspamd_config import DkimSigning, RspamdNodeConfig, Thresholds, render
+
+        cfg = RspamdNodeConfig(
+            authserv_id="gw.example.test",
+            nameservers=("192.0.2.53",),
+            redis={"host": "192.0.2.52", "port": 6379},  # type: ignore[arg-type]
+            thresholds=Thresholds(greylist=1, add_header=2, reject=3),
+            local_networks=("192.0.2.0/26",),
+            hyperscan=False,
+            dkim_signing=DkimSigning(enabled=False, sign_networks=("192.0.2.0/26",)),
+        )
+        return {k: v.decode() for k, v in render(cfg).files.items()}
+
+    def test_native_actions_are_unreachable_and_strictly_ordered(self) -> None:
+        text = self._files()["local.d/actions.conf"]
+        values = {
+            line.split("=")[0].strip(): float(line.split("=")[1].strip(" ;")) for line in text.splitlines()
+        }
+        assert set(values) == {"reject", "add_header", "greylist"}
+        assert values["greylist"] < values["add_header"] < values["reject"]
+        assert min(values.values()) >= 1_000_000 - 10
+
+    def test_advisory_thresholds_live_outside_rspamd_actions(self) -> None:
+        import json
+
+        files = self._files()
+        assert json.loads(files["msp-advisory.json"]) == {"add_header": 2.0, "greylist": 1.0, "reject": 3.0}
+
+    def test_the_gtube_pattern_is_disabled(self) -> None:
+        assert 'gtube_patterns = "disabled"' in self._files()["override.d/options.inc"]

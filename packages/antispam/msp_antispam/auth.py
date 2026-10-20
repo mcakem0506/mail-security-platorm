@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from msp_mail_parser.domains import split_domain
 
@@ -104,7 +104,7 @@ def aligned(left: str, right: str, *, strict: bool = False) -> bool:
     return organizational_domain(left) == organizational_domain(right)
 
 
-def _first(symbols: Iterable[RspamdSymbol], table: dict[str, object]) -> RspamdSymbol | None:
+def _first(symbols: Iterable[RspamdSymbol], table: Mapping[str, object]) -> RspamdSymbol | None:
     # Порядок таблицы — порядок предпочтения: содержательный результат выше «нет данных».
     by_name = {s.name: s for s in symbols}
     for name in table:

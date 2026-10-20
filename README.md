@@ -404,6 +404,23 @@ python scripts/evaluate_detection.py --gate
 
 ---
 
+### Этап MSP 1.2 — анти-спам, аутентификация и репутация
+
+> **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.** Rspamd подключён как Milter с fail-open, проверки SPF/DKIM/DMARC/ARC, репутация, подпись DKIM для лабораторного домена,
+> симулятор политики. Принуждения нет, MX не переключается.
+
+| Документ | Назначение |
+|---|---|
+| [RSPAMD_ARCHITECTURE.md](docs/RSPAMD_ARCHITECTURE.md) | Архитектура сканера |
+| [SPAM_CLASSIFICATION.md](docs/SPAM_CLASSIFICATION.md) | Классы и сигналы |
+| [SPF_VALIDATION.md](docs/SPF_VALIDATION.md), [DKIM_VALIDATION.md](docs/DKIM_VALIDATION.md), [DMARC_RFC9989.md](docs/DMARC_RFC9989.md), [ARC_VALIDATION.md](docs/ARC_VALIDATION.md) | Проверки аутентификации |
+| [REPUTATION_PROVIDERS.md](docs/REPUTATION_PROVIDERS.md), [RBL_LICENSING.md](docs/RBL_LICENSING.md) | Провайдеры и лицензии |
+| [DKIM_SIGNING.md](docs/DKIM_SIGNING.md) | Подпись исходящей почты |
+| [SPAM_POLICY_SIMULATOR.md](docs/SPAM_POLICY_SIMULATOR.md) | Политика и симулятор |
+| [SPAM_REAL_FLOW_VALIDATION.md](docs/SPAM_REAL_FLOW_VALIDATION.md) | Проверка на реальном потоке |
+| [POSTSCREEN_EVALUATION.md](docs/POSTSCREEN_EVALUATION.md) | Оценка postscreen |
+| [MSP_1_2_ACCEPTANCE.md](docs/MSP_1_2_ACCEPTANCE.md) | Приёмка |
+
 ## Ограничения
 
 MSP 1.1 добавляет транспортный узел на Postfix, но **не одобрен для боевого переключения MX**: нет высокой доступности, антиспама, принуждения SPF/DKIM/DMARC и пользовательского карантина.

@@ -1,0 +1,2818 @@
+[
+ {
+  "id": "SPC-TRAN-001",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Сброс пароля для вашей учётной записи",
+  "body": "Вы запросили сброс пароля. Если это были вы, перейдите по ссылке в личном кабинете в течение часа. Если нет, просто проигнорируйте письмо.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-001",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1002",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-001",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-001",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Replica watches cheap!!! best price",
+  "body": "BUY NOW cheap replica watches and bags, 80% OFF, limited offer, click here http://watch-1003.example.top/ now!!!",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": true,
+   "helo": "ip",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-001",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1000.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-001",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-001",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-001",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1002",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1002. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-001",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1002",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1002? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-001",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Согласование встречи",
+  "body": "Здравствуйте, предлагаю встретиться в четверг в 15:00 в вашем офисе для обсуждения договора. Подтвердите, пожалуйста.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-002",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Сброс пароля для вашей учётной записи",
+  "body": "Вы запросили сброс пароля. Если это были вы, перейдите по ссылке в личном кабинете в течение часа. Если нет, просто проигнорируйте письмо.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-002",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1002",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-002",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-002",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Дешёвые таблетки без рецепта",
+  "body": "Купите виагру и другие препараты со скидкой 90%! Без рецепта, доставка по всему миру. Заходите http://pharma-1001.example.xyz/buy",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-002",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1001.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-002",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-002",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-002",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1001",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1001. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-002",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1001",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1001? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-002",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-003",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Счёт 1002 за октябрь",
+  "body": "Во вложении счёт № 1002 за услуги связи за октябрь. Оплатите его до конца месяца. По вопросам обращайтесь в бухгалтерию.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-003",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1002",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-003",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-003",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Replica watches cheap!!! best price",
+  "body": "BUY NOW cheap replica watches and bags, 80% OFF, limited offer, click here http://watch-1003.example.top/ now!!!",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-003",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1002.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-003",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-003",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-003",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1004",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1004. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-003",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1002",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1002? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-003",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-004",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Ваша заявка № 1003 зарегистрирована",
+  "body": "Мы получили вашу заявку № 1003 в службу поддержки. Ответим в течение одного рабочего дня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-004",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1003",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-004",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-004",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Заработок от 5000 в день без вложений",
+  "body": "Работа на дому! Зарабатывайте 5000 в день, ничего не вкладывая. Пишите прямо сейчас, количество мест ограничено! http://cash-1006.example.click",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-004",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1004.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-004",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-004",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-004",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1006",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1006. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-004",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1004",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1004? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-004",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Согласование встречи",
+  "body": "Здравствуйте, предлагаю встретиться в четверг в 15:00 в вашем офисе для обсуждения договора. Подтвердите, пожалуйста.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-005",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Ваша заявка № 1007 зарегистрирована",
+  "body": "Мы получили вашу заявку № 1007 в службу поддержки. Ответим в течение одного рабочего дня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-005",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1005",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-005",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-005",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "ВЫ ВЫИГРАЛИ ПРИЗ!!! Получите деньги СЕЙЧАС",
+  "body": "ПОЗДРАВЛЯЕМ!!! Вы выиграли 1 000 000 в лотерее! Для получения выигрыша срочно отправьте данные карты. Только сегодня! http://prize-1004.example.top/claim",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "ip",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-005",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1005.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-005",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-005",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-005",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1007",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1007. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-005",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1005",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1005? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-005",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-006",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Сброс пароля для вашей учётной записи",
+  "body": "Вы запросили сброс пароля. Если это были вы, перейдите по ссылке в личном кабинете в течение часа. Если нет, просто проигнорируйте письмо.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-006",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1007",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-006",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-006",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "ВЫ ВЫИГРАЛИ ПРИЗ!!! Получите деньги СЕЙЧАС",
+  "body": "ПОЗДРАВЛЯЕМ!!! Вы выиграли 1 000 000 в лотерее! Для получения выигрыша срочно отправьте данные карты. Только сегодня! http://prize-1008.example.top/claim",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-006",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1006.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-006",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-006",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-006",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1006",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1006. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-006",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1006",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1006? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-006",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-007",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Счёт 1006 за октябрь",
+  "body": "Во вложении счёт № 1006 за услуги связи за октябрь. Оплатите его до конца месяца. По вопросам обращайтесь в бухгалтерию.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-007",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1008",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-007",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-007",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Дешёвые таблетки без рецепта",
+  "body": "Купите виагру и другие препараты со скидкой 90%! Без рецепта, доставка по всему миру. Заходите http://pharma-1009.example.xyz/buy",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-007",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1009.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-007",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-007",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-007",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1009",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1009. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-007",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1007",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1007? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-007",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-008",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Счёт 1010 за октябрь",
+  "body": "Во вложении счёт № 1010 за услуги связи за октябрь. Оплатите его до конца месяца. По вопросам обращайтесь в бухгалтерию.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-008",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1010",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-008",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-008",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Replica watches cheap!!! best price",
+  "body": "BUY NOW cheap replica watches and bags, 80% OFF, limited offer, click here http://watch-1007.example.top/ now!!!",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-008",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1007.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-008",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-008",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-008",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1007",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1007. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-008",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1009",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1009? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-008",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-009",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Счёт 1010 за октябрь",
+  "body": "Во вложении счёт № 1010 за услуги связи за октябрь. Оплатите его до конца месяца. По вопросам обращайтесь в бухгалтерию.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-009",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1011",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-009",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-009",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Replica watches cheap!!! best price",
+  "body": "BUY NOW cheap replica watches and bags, 80% OFF, limited offer, click here http://watch-1011.example.top/ now!!!",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "ip",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-009",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1011.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-009",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-009",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-009",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1009",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1009. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-009",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1010",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1010? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-009",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-010",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Заказ № 1012 подтверждён",
+  "body": "Здравствуйте! Ваш заказ № 1012 принят и будет отправлен в течение двух рабочих дней. Состав заказа и сроки доставки доступны в личном кабинете.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-010",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Дайджест недели № 1010",
+  "body": "Главное за неделю: новые статьи, обзор релизов и анонс вебинара. Чтобы отписаться, воспользуйтесь ссылкой в конце письма.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-010",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-010",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Заработок от 5000 в день без вложений",
+  "body": "Работа на дому! Зарабатывайте 5000 в день, ничего не вкладывая. Пишите прямо сейчас, количество мест ограничено! http://cash-1010.example.click",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-010",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1009.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-010",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Срочная просьба",
+  "body": "Добрый день. Нужно срочно оплатить счёт поставщику, реквизиты ниже. Я на совещании и не отвечу на звонки. Подтвердите, что оплатите сегодня.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-010",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-010",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1010",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1010. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-010",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1010",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1010? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-010",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Согласование встречи",
+  "body": "Здравствуйте, предлагаю встретиться в четверг в 15:00 в вашем офисе для обсуждения договора. Подтвердите, пожалуйста.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-011",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Счёт 1010 за октябрь",
+  "body": "Во вложении счёт № 1010 за услуги связи за октябрь. Оплатите его до конца месяца. По вопросам обращайтесь в бухгалтерию.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-011",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1013",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-011",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Новая коллекция уже в магазине",
+  "body": "Познакомьтесь с новинками сезона. Скидка 10% по промокоду для подписчиков. Отписаться можно по ссылке ниже.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-011",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "ВЫ ВЫИГРАЛИ ПРИЗ!!! Получите деньги СЕЙЧАС",
+  "body": "ПОЗДРАВЛЯЕМ!!! Вы выиграли 1 000 000 в лотерее! Для получения выигрыша срочно отправьте данные карты. Только сегодня! http://prize-1012.example.top/claim",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-011",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1012.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-011",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-011",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-011",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1013",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1013. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-011",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1012",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1012? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-011",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Согласование встречи",
+  "body": "Здравствуйте, предлагаю встретиться в четверг в 15:00 в вашем офисе для обсуждения договора. Подтвердите, пожалуйста.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-TRAN-012",
+  "category": "transactional",
+  "label": "HAM",
+  "subject": "Заказ № 1012 подтверждён",
+  "body": "Здравствуйте! Ваш заказ № 1012 принят и будет отправлен в течение двух рабочих дней. Состав заказа и сроки доставки доступны в личном кабинете.",
+  "extra_headers": [],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-NEWS-012",
+  "category": "newsletter",
+  "label": "BULK",
+  "subject": "Бюллетень компании, выпуск 1011",
+  "body": "В этом выпуске: итоги квартала, новые сотрудники, расписание мероприятий. Вы получили письмо, потому что подписались на рассылку.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<mailto:unsubscribe@corpus.example>"
+   ],
+   [
+    "Precedence",
+    "bulk"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MARK-012",
+  "category": "marketing_bulk",
+  "label": "BULK",
+  "subject": "Осенняя распродажа: скидки до 30%",
+  "body": "Только до конца недели скидки на выбранные товары. Подробности на сайте. Отписаться от акций можно в настройках профиля.",
+  "extra_headers": [
+   [
+    "List-Unsubscribe",
+    "<https://corpus.example/unsub>"
+   ]
+  ],
+  "context": {
+   "spf": "pass",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 120,
+  "note": ""
+ },
+ {
+  "id": "SPC-CLAS-012",
+  "category": "classic_spam",
+  "label": "SPAM",
+  "subject": "Дешёвые таблетки без рецепта",
+  "body": "Купите виагру и другие препараты со скидкой 90%! Без рецепта, доставка по всему миру. Заходите http://pharma-1013.example.xyz/buy",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-PHIS-012",
+  "category": "phishing",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1013.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-BEC-012",
+  "category": "bec",
+  "label": "ATTACK",
+  "subject": "Конфиденциально: смена реквизитов",
+  "body": "Коллеги, у поставщика поменялись банковские реквизиты. Все платежи с понедельника переводите на новый счёт. Это распоряжение руководства.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-MALW-012",
+  "category": "malware_simulation",
+  "label": "ATTACK",
+  "subject": "Документ для подписи",
+  "body": "Откройте вложенный документ и включите макросы для просмотра. Контрольная строка для проверки антивируса (безвредна): X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+  "extra_headers": [],
+  "context": {
+   "spf": "softfail",
+   "dkim": "none",
+   "dmarc": "quarantine",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": ""
+ },
+ {
+  "id": "SPC-FORW-012",
+  "category": "forwarding",
+  "label": "HAM",
+  "subject": "Fwd: условия поставки № 1011",
+  "body": "Пересылаю письмо поставщика с условиями поставки № 1011. Посмотрите, пожалуйста, до пятницы.",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "valid",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "пересылка: SPF не проходит, подпись автора цела"
+ },
+ {
+  "id": "SPC-MAIL-012",
+  "category": "mailing_list",
+  "label": "BULK",
+  "subject": "[dev-list] Вопрос по релизу 1014",
+  "body": "Коллеги, подскажите, как правильно настроить сборку для релиза 1014? Заранее спасибо.\r\n\r\n-- \r\nСписок рассылки dev-list. Отписаться: см. List-Unsubscribe",
+  "extra_headers": [
+   [
+    "List-Id",
+    "<dev-list.corpus.example>"
+   ],
+   [
+    "List-Unsubscribe",
+    "<mailto:dev-list-leave@corpus.example>"
+   ]
+  ],
+  "context": {
+   "spf": "fail",
+   "dkim": "broken",
+   "dmarc": "none",
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": true
+  },
+  "recipients": 1,
+  "note": "список изменил тело письма: подпись автора нарушена, ARC цел"
+ },
+ {
+  "id": "SPC-BROK-012",
+  "category": "broken_auth_legit",
+  "label": "HAM",
+  "subject": "Коммерческое предложение",
+  "body": "Добрый день! Направляем коммерческое предложение на поставку канцтоваров. Условия обсудим по телефону, звоните в любое время.",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "authorized",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "небольшая организация без SPF и DKIM"
+ },
+ {
+  "id": "SPC-UPST-001",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1000.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-UPST-002",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1001.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-UPST-003",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1002.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-UPST-004",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1004.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-UPST-005",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Вход в банк заблокирован",
+  "body": "Мы заметили подозрительную активность. Чтобы разблокировать доступ, введите данные карты: http://bank-verify-1005.example.xyz/unlock",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-UPST-006",
+  "category": "upstream_conflict",
+  "label": "ATTACK",
+  "subject": "Срочно: подтвердите пароль учётной записи",
+  "body": "Ваш пароль истекает сегодня. Подтвердите его, чтобы не потерять доступ к почте: http://login-secure-1006.example.top/verify",
+  "extra_headers": [],
+  "context": {
+   "spf": "fail",
+   "dkim": "none",
+   "dmarc": "reject",
+   "client": "other",
+   "ptr": false,
+   "helo": "mail",
+   "upstream_ar": "ksmg.corp.example; spf=pass; dkim=pass; dmarc=pass",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "вышестоящий шлюз сообщил pass, MSP видит провал"
+ },
+ {
+  "id": "SPC-SMOKE-001",
+  "category": "gtube_smoke",
+  "label": "SMOKE",
+  "subject": "GTUBE smoke",
+  "body": "XJS*C4JDBQADN1.NSBN3*2IDNEN*GTUBE-STANDARD-ANTI-UBE-TEST-EMAIL*C.34X",
+  "extra_headers": [],
+  "context": {
+   "spf": "none",
+   "dkim": "none",
+   "dmarc": null,
+   "client": "other",
+   "ptr": true,
+   "helo": "mail",
+   "upstream_ar": "",
+   "arc": false
+  },
+  "recipients": 1,
+  "note": "проверка работоспособности; в метрики качества не входит"
+ }
+]

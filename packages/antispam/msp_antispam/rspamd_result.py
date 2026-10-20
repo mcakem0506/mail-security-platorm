@@ -147,6 +147,25 @@ def direction_of(symbols: Iterable[RspamdSymbol]) -> tuple[Direction, bool]:
     return Direction.INBOUND, False
 
 
+def _advisory_action(record: Mapping[str, Any], msp: Mapping[str, Any]) -> SuggestedAction:
+    """Предложение сканера. Родное действие Rspamd на этапе 1.2 недостижимо (иначе Milter исполнил бы его),
+    поэтому по оценке и порогам узла (``_msp.advisory_thresholds``) считается то, что сканер предложил бы.
+    Без порогов (запись старого вида или снятая со стенда) берётся родное действие записи."""
+    native = suggested_action(record.get("action"))
+    thresholds = msp.get("advisory_thresholds") if isinstance(msp, Mapping) else None
+    if not isinstance(thresholds, Mapping) or not thresholds:
+        return native
+    score = _number(record.get("score"))
+    derived = SuggestedAction.NO_ACTION
+    if "reject" in thresholds and score >= _number(thresholds["reject"]):
+        derived = SuggestedAction.REJECT
+    elif "add_header" in thresholds and score >= _number(thresholds["add_header"]):
+        derived = SuggestedAction.ADD_HEADER
+    elif "greylist" in thresholds and score >= _number(thresholds["greylist"]):
+        derived = SuggestedAction.GREYLIST
+    return derived if native in (SuggestedAction.NO_ACTION, SuggestedAction.UNKNOWN) else native
+
+
 def parse_scan(
     record: Mapping[str, Any],
     *,
@@ -173,7 +192,7 @@ def parse_scan(
         scan_id=qid if qid != "unknown" else "",
         score=_number(record.get("score")),
         required_score=_number(record.get("required_score"), default_required_score),
-        suggested_action=suggested_action(record.get("action")),
+        suggested_action=_advisory_action(record, msp or {}),
         symbols=symbols,
         groups=groups,
         scan_time_ms=max(0, scan_ms),

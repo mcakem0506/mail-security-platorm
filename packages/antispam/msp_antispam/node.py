@@ -27,9 +27,9 @@ from .overlay import merge
 from .rspamd_config import (
     ConfigError,
     ReleaseStore,
-    drift_state,
     RspamdNodeConfig,
     apply_release,
+    drift_state,
     render,
 )
 
@@ -244,6 +244,23 @@ class Receiver:
         except OSError:
             return ""
 
+    @staticmethod
+    def advisory_thresholds() -> dict[str, float]:
+        """Пороги предложения действия из активного выпуска (в Rspamd они недостижимы)."""
+        try:
+            raw = json.loads(
+                (ReleaseStore(ROOT).active_link / "msp-advisory.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            k: float(v)
+            for k, v in raw.items()
+            if k in ("greylist", "add_header", "reject") and isinstance(v, (int, float))
+        }
+
     def accept(self, payload: bytes) -> bool:
         try:
             record = json.loads(payload)
@@ -259,6 +276,7 @@ class Receiver:
             "received_at": time.time(),
             "config_version": self.config_version(),
             "rspamd_version": self.rspamd_version,
+            "advisory_thresholds": self.advisory_thresholds(),
         }
         name = f"{time.time_ns()}-{self.received:08d}.json"
         (self.directory / name).write_text(json.dumps(record), encoding="utf-8")

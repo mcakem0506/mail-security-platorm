@@ -913,7 +913,7 @@ def summary(session: Session, organization_id: str, *, hours: int = 24) -> dict[
     actions = Counter(r.suggested_action for r in rows)
     symbols: Counter[str] = Counter()
     rbl_hits = 0
-    histogram = Counter()
+    histogram: Counter[str] = Counter()
     for r in rows:
         for s in r.symbols or []:
             name = str(s.get("name", ""))
@@ -1726,3 +1726,39 @@ def record_security_verdict(session: Session, organization_id: str, message_id: 
         )
     ).scalars():
         row.security_verdict = verdict[:32]
+
+
+def real_flow_extension(session: Session, organization_id: str, *, days: int | None = None) -> dict[str, Any]:
+    """Блок анти-спама для сводки реального потока (ТЗ 1.2 §29).
+
+    Показывает рядом с качеством детектирования: класс спама, результаты аутентификации, репутацию и
+    предложенное действие, а также обязательные выборки для просмотра и метрики ложных срабатываний.
+    Доли — ``None``, пока нет знаменателя: ноль читался бы как «ложных нет».
+    """
+    hours = (days or 7) * 24
+    base = summary(session, organization_id, hours=hours)
+    metrics = validation_metrics(session, organization_id, hours=hours)
+    selections = {}
+    for selection in validation.Selection:
+        selections[selection.value] = len(
+            review_queue(session, organization_id, selection.value, limit=500, hours=hours)
+        )
+    return {
+        "window_hours": hours,
+        "scanned": base["analyzed"],
+        "spam_classes": base["spam_classes"],
+        "suggested_actions": base["suggested_actions"],
+        "rbl_hits": base["rbl_hits"],
+        "auth": auth_distribution(session, organization_id, hours=hours)["distributions"],
+        "pending_review": selections,
+        "reviewed": metrics.reviewed,
+        "reviewed_fraction": metrics.reviewed_fraction,
+        "spam_fp_per_1000": metrics.spam_fp_per_1000 if metrics.reviewed else None,
+        "auth_fp_per_1000": metrics.auth_fp_per_1000 if metrics.reviewed else None,
+        "rbl_fp_per_1000": metrics.rbl_fp_per_1000 if metrics.reviewed else None,
+        "suggested_reject_fp_rate": metrics.suggested_reject_fp_rate,
+        "spam_fn": metrics.spam_fn,
+        "score_at_fn": metrics.score_at_fn,
+        "symbols_at_fn": metrics.symbols_at_fn,
+        "enforcement_enabled": False,
+    }

@@ -124,6 +124,9 @@ ignore = [
 "tests/**" = ["S", "B", "BLE"]
 # Проверки MSP 1.2 содержат длинные русские сообщения и строки конфигурации: перенос ухудшает чтение.
 "tests/spam/**" = ["E501"]
+"scripts/record_spam_corpus.py" = ["E501"]
+"scripts/evaluate_spam.py" = ["E501"]
+"packages/antispam/msp_antispam/corpus.py" = ["E501"]
 "tests/unit/test_antispam_*.py" = ["E501"]
 "tests/unit/test_gateway_milter.py" = ["E501"]
 "tests/e2e/test_antispam_e2e.py" = ["E501", "F811"]
