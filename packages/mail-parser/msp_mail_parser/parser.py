@@ -271,6 +271,8 @@ class _Walker:
         #: inline image rather than an attachment, so collecting only attachments would miss
         #: the common case entirely.
         self.images: list[tuple[str, bytes]] = []
+        #: PDF-вложения: отрисовываются песочницей после разбора тела (ТЗ 1.1 §57).
+        self.pdfs: list[tuple[str, bytes]] = []
         self.document_reports: dict[str, Any] = {}
         self.attachment_smuggling: list[dict[str, Any]] = []
 
@@ -403,6 +405,31 @@ class _Walker:
                         content=None,  # archive members are analysed statically, not retained
                     )
                 )
+            # 7z и RAR известны только по оглавлению (ТЗ 1.1 §56): у такого файла нет ни содержимого,
+            # ни хэша, и выдумывать их нельзя. Опасное имя при этом видно и считается.
+            for entry in report.entries:
+                if not entry.listed_only or entry.is_dir:
+                    continue
+                member_flags = list(entry.details)
+                if entry.encrypted:
+                    member_flags.append("ENCRYPTED_MEMBER")
+                self.r.attachments.append(
+                    ParsedAttachment(
+                        meta=AttachmentMeta(
+                            filename=entry.name,
+                            normalized_filename=normalize_filename(entry.name),
+                            declared_mime="application/octet-stream",
+                            detected_type="unknown",
+                            size=entry.size,
+                            sha256="",
+                            extension=entry.extension,
+                            depth=entry.depth,
+                            parent_sha256=meta.sha256,
+                            flags=[*member_flags, "LISTED_ONLY"],
+                        ),
+                        content=None,
+                    )
+                )
         if detected.category == "html" and len(data) <= 2 * 1024 * 1024:
             html = data.decode("utf-8", errors="replace")
             urls, stats = extract_urls_from_html(html, limit=self.limits.max_urls)
@@ -445,6 +472,51 @@ class _Walker:
 
         if detected.category == "image":
             self.images.append((meta.normalized_filename or filename, data))
+        if detected.type == "pdf":
+            self.pdfs.append((meta.normalized_filename or filename, data))
+
+
+#: Сколько PDF одного письма рисуется. Процесс на каждое вложение стоит дорого (ADR): остальные
+#: честно помечаются как не просмотренные, а не пропускаются молча.
+MAX_PDFS_RENDERED = 3
+
+
+def _render_pdfs(pdfs: list[tuple[str, bytes]], result: ParsedMessage) -> list[tuple[str, bytes]]:
+    """Отрисовать PDF в изолированном процессе и вернуть страницы как изображения для декодера QR.
+
+    Любой исход, кроме полной отрисовки, фиксируется в ``limits_hit``: «QR не найден» допустимо
+    сказать только о том, что действительно просмотрено (ТЗ 1.1 §57: зашифрованный или
+    повреждённый PDF — недостающее свидетельство, а не чистый результат).
+    """
+    from .images import decoder_available
+
+    if not decoder_available():
+        # Без декодера отрисовка бессмысленна; факт, что QR в PDF не искали, не должен пропасть.
+        result.limits_hit.append("PDF_NOT_EXAMINED")
+        return []
+    try:
+        from msp_attachment_sandbox import page_images, render_pdf
+    except ImportError:
+        result.limits_hit.append("PDF_NOT_EXAMINED")
+        return []
+
+    pages: list[tuple[str, bytes]] = []
+    for index, (name, data) in enumerate(pdfs):
+        if index >= MAX_PDFS_RENDERED:
+            result.limits_hit.append("PDF_NOT_FULLY_RENDERED")
+            break
+        outcome = render_pdf(data)
+        if outcome.status in {"OK", "PARTIAL"}:
+            pages.extend(page_images(outcome, name))
+            if outcome.status == "PARTIAL" or outcome.flags:
+                result.limits_hit.append("PDF_NOT_FULLY_RENDERED")
+        else:
+            # ENCRYPTED_UNSCANNABLE, MALFORMED, LIMIT_EXCEEDED, TIMEOUT, CRASHED, ...
+            result.limits_hit.append("PDF_UNSCANNABLE")
+    for code in ("PDF_NOT_FULLY_RENDERED", "PDF_UNSCANNABLE", "PDF_NOT_EXAMINED"):
+        while result.limits_hit.count(code) > 1:
+            result.limits_hit.remove(code)
+    return pages
 
 
 def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessage:
@@ -531,8 +603,18 @@ def parse_message(raw: bytes, limits: ParserLimits | None = None) -> ParsedMessa
     # --- QR codes (ТЗ 1.0.3 §38) ---------------------------------------------------------
     # Done after the body is assembled, because a QR-shaped image only becomes a signal
     # together with wording that asks the reader to scan it.
-    if walker.images:
-        qr = inspect_images(walker.images, body_text=result.normalized_text)
+    # --- PDF: страницы рисует песочница, QR ищет второй изолированный процесс (ТЗ 1.1 §57) ---
+    pdf_pages: list[tuple[str, bytes]] = []
+    if walker.pdfs:
+        pdf_pages = _render_pdfs(walker.pdfs, result)
+    forced = frozenset(name for name, _ in pdf_pages)
+    if walker.images or pdf_pages:
+        qr = inspect_images(
+            [*walker.images, *pdf_pages],
+            body_text=result.normalized_text,
+            max_images=40,
+            forced=forced,
+        )
         if qr.candidate_images or qr.scan_prompt:
             result.qr = qr.as_dict()
             urls.extend(qr.urls)

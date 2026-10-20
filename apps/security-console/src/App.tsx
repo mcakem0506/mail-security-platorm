@@ -18,6 +18,7 @@ import { SimulatorPage } from "./pages/SimulatorPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { RealFlowPage } from "./pages/RealFlowPage";
 import { ReevaluationPage } from "./pages/ReevaluationPage";
+import { TransportPage } from "./pages/TransportPage";
 
 interface NavItem {
   to: string;
@@ -57,6 +58,10 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/reevaluation", label: "Переоценка", permission: "quality:read" },
       { to: "/real-flow", label: "Реальный поток", permission: "realflow:read" },
     ],
+  },
+  {
+    title: "Транспорт почты",
+    items: [{ to: "/transport", label: "Шлюз (Gateway)", permission: "gateway:read" }],
   },
   {
     title: "Threat Intelligence",
@@ -168,6 +173,7 @@ export function App() {
             <Route path="/releases" element={<ReleasesPage user={user} />} />
             <Route path="/reevaluation" element={<ReevaluationPage user={user} />} />
             <Route path="/real-flow" element={<RealFlowPage user={user} />} />
+            <Route path="/transport" element={<TransportPage user={user} />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />
             <Route path="/gateways" element={<GatewaysPage user={user} />} />

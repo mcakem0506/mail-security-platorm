@@ -56,6 +56,15 @@ class AuditAction:
     GATEWAY_CREDENTIAL_ROTATED = "gateway.credential_rotated"  # nosec
     GATEWAY_CONFLICT_RESOLVED = "gateway.conflict_resolved"
     TRUSTED_HOP_CHANGED = "gateway.trusted_hop_changed"
+    # Транспорт почты (ТЗ 1.1 §42). Каждое изменение границы организации пишется отдельно.
+    TRANSPORT_CONFIG_VALIDATED = "transport.config_validated"
+    TRANSPORT_CONFIG_ACTIVATED = "transport.config_activated"
+    TRANSPORT_CONFIG_ROLLED_BACK = "transport.config_rolled_back"
+    TRANSPORT_NODE_DRAIN = "transport.node_drain"
+    TRANSPORT_NODE_RESUME = "transport.node_resume"
+    TRANSPORT_NODE_FLUSH = "transport.node_flush"
+    TRANSPORT_RECIPIENTS_SYNC = "transport.recipients_sync"
+    TRANSPORT_QUEUE_VIEWED = "transport.queue_viewed"
     # Detection quality, rule lifecycle and analyst decisions (ТЗ 1.0.3 §56).
     # The analyst's classification is audited because every quality metric is derived from it:
     # if the record of who decided what can be lost, the metrics cannot be defended.

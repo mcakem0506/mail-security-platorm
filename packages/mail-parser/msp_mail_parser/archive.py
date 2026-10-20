@@ -14,7 +14,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass, field
 
-from .filetype import ARCHIVE_TYPES, detect_type, last_extension, normalize_filename
+from .filetype import ARCHIVE_TYPES, category_for_extension, detect_type, last_extension, normalize_filename
 from .limits import Deadline, ParserLimits
 
 _CHUNK = 64 * 1024
@@ -37,6 +37,8 @@ class ArchiveEntry:
     extension: str = ""
     extracted: bool = False
     details: list[str] = field(default_factory=list)
+    #: Известно только по оглавлению: содержимое не распаковывалось (7z, RAR).
+    listed_only: bool = False
 
 
 @dataclass
@@ -220,6 +222,66 @@ def _inspect_gzip(
         _inspect(out, detected.type, limits, depth + 1, budget, report, deadline)
 
 
+def _inspect_sandboxed(
+    data: bytes,
+    fmt: str,
+    limits: ParserLimits,
+    depth: int,
+    budget: _Budget,
+    report: ArchiveReport,
+    deadline: Deadline,
+) -> None:
+    """7z и RAR: оглавление из изолированного процесса (ТЗ 1.1 §56; GAP-003).
+
+    Содержимое не распаковывается, поэтому результат всегда помечен ``LISTING_ONLY``: вложенные
+    файлы известны по именам, а не по содержимому, и вердикт не вправе из этого делать вывод «чисто».
+    Любой отказ воркера превращается в названный признак, а не в пустой отчёт.
+    """
+    from msp_attachment_sandbox import list_archive
+
+    deadline.check()
+    result = list_archive(data, fmt)
+    report.flags.add("LISTING_ONLY")
+    status = result.status
+    if status in {"OK", "ENCRYPTED_UNSCANNABLE"}:
+        report.flags.update(result.flags)
+        if status == "ENCRYPTED_UNSCANNABLE":
+            report.flags.add("ENCRYPTED_UNSCANNABLE")
+        for item in result.payload.get("entries", []):
+            name = str(item.get("name", ""))
+            entry = ArchiveEntry(
+                name=normalize_filename(name) if not item.get("dir") else name[:255],
+                size=int(item.get("size", 0) or 0),
+                compressed_size=int(item.get("compressed", 0) or 0),
+                depth=depth,
+                encrypted=bool(item.get("encrypted")),
+                is_dir=bool(item.get("dir")),
+                is_symlink=bool(item.get("symlink")),
+                extension=last_extension(name),
+                listed_only=True,
+            )
+            if entry.extension:
+                entry.category = category_for_extension(entry.extension)
+            report.entries.append(entry)
+            budget.files += 1
+            if not entry.is_dir:
+                report.file_count += 1
+                report.total_uncompressed += entry.size
+        if result.payload.get("entries_truncated"):
+            report.flags.add("TOO_MANY_FILES")
+        return
+    if status == "UNAVAILABLE":
+        report.flags.add("SANDBOX_UNAVAILABLE")
+    elif status == "MALFORMED":
+        report.flags.update(result.flags or ["CORRUPT_ARCHIVE"])
+    elif status == "LIMIT_EXCEEDED":
+        report.flags.update(result.flags or ["EXTRACTION_LIMIT"])
+    else:
+        # TIMEOUT, CRASHED, OUTPUT_TOO_LARGE, PROTOCOL_ERROR: разобрать не удалось.
+        report.flags.add("ARCHIVE_SANDBOX_FAILED")
+        report.flags.add(f"SANDBOX_{status}")
+
+
 def _inspect(
     data: bytes,
     fmt: str,
@@ -234,8 +296,10 @@ def _inspect(
         _inspect_zip(data, limits, depth, budget, report, deadline)
     elif fmt == "gzip":
         _inspect_gzip(data, limits, depth, budget, report, deadline)
+    elif fmt in {"7z", "rar"}:
+        _inspect_sandboxed(data, fmt, limits, depth, budget, report, deadline)
     else:
-        # 7z / RAR / CAB: no safe in-process library is bundled in v1. Report, never execute.
+        # CAB: безопасного разбора нет. Сообщаем, что не разобрано, и ничего не исполняем.
         report.flags.add("UNSUPPORTED_ARCHIVE_FORMAT")
 
 

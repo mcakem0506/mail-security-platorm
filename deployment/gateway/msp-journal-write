@@ -1,0 +1,4 @@
+#!/bin/sh
+# Обёртка для транспорта pipe: Postfix запускает её с очищенным окружением.
+exec /usr/bin/env PYTHONPATH=/opt/msp MSP_JOURNAL_DIR="${MSP_JOURNAL_DIR:-/var/lib/msp/journal}" \
+  /usr/bin/python3 -m msp_gateway.journal_writer "$@"

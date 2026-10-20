@@ -54,7 +54,7 @@ jobs:
       # The optional extras are installed on purpose. Without `exchange` the EWS tests fail
       # outright, and without `qr` the QR decoding tests skip — silently, which is worse: the
       # isolation checks the stage relies on would simply never run in CI.
-      - run: pip install -e ".[dev,exchange,qr]"
+      - run: pip install -e ".[dev,exchange,qr,sandbox]"
       - name: The optional components really are present
         run: |
           python - <<'PY'
@@ -322,7 +322,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
 
       # Every rule condition must name a fact the engine can produce. A rule with a typo in a
       # condition loads cleanly, validates cleanly and never fires — it looks like coverage on
@@ -357,7 +357,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # Fuzzing, the performance budget and regex safety run as their own job: they are slower
       # than the rest and a timeout here must be readable as "robustness", not as a flaky test
       # somewhere in the suite (ТЗ 1.0.3 §43–§47).
@@ -373,7 +373,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
 
       # Rules are data, and the data has to be checkable: every condition must name a fact the
       # engine can produce, every ACTIVE rule must have an owner, and nothing in a rule file may
@@ -415,7 +415,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # The dataset validates itself: ids unique, expectations present, no case claiming a gap
       # that is not registered. A corpus that silently lost its assertions would make every
       # later metric meaningless while still reporting a number.
@@ -443,7 +443,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       # A short fuzz run on every change; the long one is scheduled separately. The point of the
       # smoke run is that a parser change that crashes on malformed input fails here rather than
       # on the first malformed message in production.
@@ -459,7 +459,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
       - name: Local analysis budget
         run: pytest -q tests/security/test_parser_robustness.py -k Performance
       # The corpus run reports P50/P95/P99. A regression here means every analyst waits longer,
@@ -686,7 +686,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,qr,sandbox]"
 
       # GAP-001 закрыт сигналом, который сам по себе ничего не весит и срабатывает только при
       # независимом подтверждении. Два вида ошибки здесь стоят по-разному и поэтому проверяются
@@ -855,3 +855,172 @@ jobs:
             readiness.md
             readiness.json
           retention-days: 90
+
+  gateway-config-validation:
+    name: Gateway config validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/unit/test_gateway_validation.py tests/unit/test_gateway_bundle_content.py tests/unit/test_gateway_state.py
+
+  gateway-container-build:
+    name: Gateway container build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_smoke.py
+
+  gateway-open-relay-test:
+    name: Gateway open relay test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_open_relay.py
+
+  gateway-smtp-integration:
+    name: Gateway SMTP integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_protocol.py tests/gateway/test_config_activation.py tests/gateway/test_tls_downstream.py tests/gateway/test_drain.py
+
+  gateway-queue-durability:
+    name: Gateway queue durability
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_durability.py tests/gateway/test_pressure_and_load.py
+
+  gateway-recipient-map:
+    name: Gateway recipient map
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_recipients_live.py
+
+  gateway-tls-tests:
+    name: Gateway TLS tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_tls_downstream.py tests/gateway/test_monitoring_live.py
+
+  gateway-shadow-failure-isolation:
+    name: Gateway shadow failure isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/gateway/test_shadow_live.py tests/gateway/test_panel_integration.py
+
+  attachment-sandbox-tests:
+    name: Attachment sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Без MSP_GATEWAY_TESTS проверки стенда не собираются, а зелёный прогон говорил бы обратное.
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/unit/test_attachment_sandbox.py tests/security/test_attachment_isolation.py tests/gateway/test_sandbox_container.py

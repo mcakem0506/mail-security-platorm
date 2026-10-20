@@ -349,6 +349,25 @@ Exchange, доступные возможности EWS, доступ к слу�
 | [DETECTION_RELEASE_PROCESS.md](docs/DETECTION_RELEASE_PROCESS.md) | Порядок выпуска изменений |
 | [SEMANTIC_ANALYSIS_POLICY.md](docs/SEMANTIC_ANALYSIS_POLICY.md) | Политика семантического анализа |
 
+### Этап MSP 1.1 — основа транспортного шлюза
+
+> **MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.** Реализованы Postfix-узел, плоскость управления, пакет Exchange, песочница вложений; MX не переключается и DNS не меняется.
+
+| Документ | Назначение |
+|---|---|
+| [GATEWAY_ARCHITECTURE.md](docs/GATEWAY_ARCHITECTURE.md) | Архитектура шлюза |
+| [GATEWAY_MAIL_FLOW.md](docs/GATEWAY_MAIL_FLOW.md) | Поток почты |
+| [GATEWAY_QUEUE.md](docs/GATEWAY_QUEUE.md) | Очередь |
+| [GATEWAY_TLS.md](docs/GATEWAY_TLS.md) | TLS |
+| [GATEWAY_RECIPIENT_VALIDATION.md](docs/GATEWAY_RECIPIENT_VALIDATION.md) | Справочник получателей |
+| [GATEWAY_EXCHANGE_INTEGRATION.md](docs/GATEWAY_EXCHANGE_INTEGRATION.md) | Интеграция с Exchange |
+| [GATEWAY_SHADOW_ANALYSIS.md](docs/GATEWAY_SHADOW_ANALYSIS.md) | Теневой анализ |
+| [GATEWAY_BACKPRESSURE.md](docs/GATEWAY_BACKPRESSURE.md) | Давление и слив |
+| [GATEWAY_OPERATIONS.md](docs/GATEWAY_OPERATIONS.md) | Эксплуатация |
+| [GATEWAY_SECURITY_MODEL.md](docs/GATEWAY_SECURITY_MODEL.md) | Модель безопасности |
+| [GATEWAY_LAB_RUNBOOK.md](docs/GATEWAY_LAB_RUNBOOK.md) | Лабораторный стенд |
+| [GATEWAY_ROLLBACK.md](docs/GATEWAY_ROLLBACK.md) | Откат |
+
 ### Этап MSP 1.0.4
 
 | Документ | Назначение |
@@ -386,6 +405,8 @@ python scripts/evaluate_detection.py --gate
 ---
 
 ## Ограничения
+
+MSP 1.1 добавляет транспортный узел на Postfix, но **не одобрен для боевого переключения MX**: нет высокой доступности, антиспама, принуждения SPF/DKIM/DMARC и пользовательского карантина.
 
 Платформа **не является** полноценным Secure Email Gateway и не фильтрует почту inline.
 Она **не заменяет** корпоративный антивирус и не выполняет динамический анализ (sandbox).

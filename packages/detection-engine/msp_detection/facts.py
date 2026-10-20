@@ -537,7 +537,10 @@ def _attachment_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> 
     for att in msg.attachments:
         m = att.meta
         flags = list(m.flags)
-        fs.add_indicator(IOCType.SHA256, m.sha256, f"attachment:{m.normalized_filename}")
+        # У файла, известного только по оглавлению архива, хэша нет: выдуманный хэш ушёл бы в
+        # запросы Threat Intelligence как настоящий индикатор.
+        if m.sha256:
+            fs.add_indicator(IOCType.SHA256, m.sha256, f"attachment:{m.normalized_filename}")
         cat_by_ext = category_for_extension(m.extension)
         ev = {"filename": m.normalized_filename, "sha256": m.sha256, "type": m.detected_type}
         exts = [e for e in m.normalized_filename.lower().split(".")[1:] if e]
@@ -612,7 +615,9 @@ def _attachment_facts(msg: ParsedMessage, ctx: AnalysisContext, fs: FactSet) -> 
         if m.depth > 0 and any(f in flags for f in ("EXECUTABLE", "SCRIPT", "SHORTCUT", "DOUBLE_EXTENSION")):
             fs.flag("archive_contains_dangerous_file", **ev, depth=m.depth)
         if flags:
-            fs.attachment_flags[m.sha256] = sorted(set(flags))
+            fs.attachment_flags[m.sha256 or f"{m.parent_sha256 or ''}:{m.normalized_filename}"] = sorted(
+                set(flags)
+            )
     if msg.encrypted:
         fs.flag("message_encrypted")
         fs.missing_evidence.append("Message content is encrypted and cannot be analysed")
@@ -775,12 +780,21 @@ _LIMIT_FACTS: dict[str, str] = {
     # Not a parser limit in the usual sense, but the same consequence: part of the message was
     # not read, so the scan is not complete and the verdict must not read as clean (§38, §3).
     "QR_NOT_DECODED": "limit_qr_not_decoded",
+    # PDF (ТЗ 1.1 §57): страницы, которые не удалось отрисовать, — непросмотренные страницы.
+    "PDF_NOT_FULLY_RENDERED": "limit_pdf_not_fully_rendered",
+    "PDF_UNSCANNABLE": "limit_pdf_unscannable",
+    "PDF_NOT_EXAMINED": "limit_pdf_not_examined",
 }
 #: Archive limits are reported per attachment rather than on the message.
 _ARCHIVE_LIMIT_FLAGS: dict[str, str] = {
     "EXTRACTION_LIMIT": "limit_decompressed_size_exceeded",
     "NESTING_LIMIT": "limit_archive_depth_exceeded",
     "TOO_MANY_FILES": "limit_archive_file_count_exceeded",
+    # 7z и RAR (ТЗ 1.1 §56): оглавление вместо распаковки, шифрование и сбой песочницы.
+    "LISTING_ONLY": "limit_archive_listing_only",
+    "ENCRYPTED_UNSCANNABLE": "limit_archive_encrypted_unscannable",
+    "ARCHIVE_SANDBOX_FAILED": "limit_archive_sandbox_failed",
+    "SANDBOX_UNAVAILABLE": "limit_archive_sandbox_unavailable",
 }
 #: What each limit means for the analyst, in one clause.
 _LIMIT_EVIDENCE: dict[str, str] = {
@@ -792,6 +806,13 @@ _LIMIT_EVIDENCE: dict[str, str] = {
     "MAX_URLS": "в письме больше ссылок, чем платформа разбирает",
     "PARSER_TIMEOUT": "разбор письма не завершился за отведённое время",
     "QR_NOT_DECODED": "в письме есть изображение, похожее на QR-код; содержимое кода не прочитано",
+    "PDF_NOT_FULLY_RENDERED": "PDF отрисован не полностью: QR-коды на неотрисованных страницах не искались",
+    "PDF_UNSCANNABLE": "PDF не удалось разобрать (зашифрован, повреждён, слишком велик): QR не искались",
+    "PDF_NOT_EXAMINED": "PDF не просматривался на QR-коды: изолированный разбор недоступен",
+    "LISTING_ONLY": "архив 7z/RAR разобран только по оглавлению: содержимое файлов не проверено",
+    "ENCRYPTED_UNSCANNABLE": "архив зашифрован паролем: содержимое не проверено",
+    "ARCHIVE_SANDBOX_FAILED": "разбор архива в изолированном процессе не удался: содержимое не проверено",
+    "SANDBOX_UNAVAILABLE": "изолированный разбор архивов недоступен: содержимое не проверено",
 }
 
 

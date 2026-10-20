@@ -26,6 +26,14 @@ scrape_configs:
   # queue depth and provider counters. A dedicated exporter is added here when the workers are
   # scaled onto separate hosts.
 
+  # Узлы шлюза (ТЗ 1.1 §45): агент отдаёт /metrics на порту 9100. Порт открывается только во
+  # внутренней сети мониторинга и не публикуется наружу.
+  - job_name: msp-gateway
+    static_configs:
+      - targets: ["gateway-postfix:9100"]
+        labels:
+          component: gateway
+
   - job_name: postgres
     static_configs:
       - targets: ["postgres-exporter:9187"]

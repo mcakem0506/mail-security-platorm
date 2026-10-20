@@ -1765,6 +1765,197 @@ class GoldenCorpusBuilder:
                 labels=["macro"],
             )
 
+    def _sandboxed_attachments(self) -> None:
+        """Архивы 7z/RAR и PDF, разбираемые в изолированном процессе (ТЗ 1.1 §55-§57; GAP-003, GAP-004).
+
+        Образцы строятся детерминированно из описания формата (``msp_attachment_sandbox.samples``),
+        а не берутся готовыми бинарными файлами. Каждый кейс отвечает на один вопрос: что платформа
+        говорит о письме, содержимое которого она либо увидела, либо честно не смогла увидеть.
+        """
+        from msp_attachment_sandbox import samples
+
+        bad_sender: dict[str, Any] = {
+            "auth": "spf=fail; dkim=none; dmarc=fail",
+            "source_host": "mx.vendor-unknown.example",
+        }
+        archive_cases: list[tuple[str, str, bytes, str, str, list[str], list[str]]] = [
+            (
+                "SBX-001",
+                "docs.7z",
+                samples.make_7z_stored({"invoice.pdf.exe": b"MZ" + b"\x00" * 64}),
+                "application/x-7z-compressed",
+                "исполняемый файл с двойным расширением внутри 7z",
+                ["ATT-001"],
+                ["listing_only", "executable_member"],
+            ),
+            (
+                "SBX-002",
+                "documents.rar",
+                samples.make_rar5({"setup.exe": b"MZ" + b"\x00" * 64}),
+                "application/vnd.rar",
+                "исполняемый файл внутри RAR 5",
+                ["ATT-001"],
+                ["listing_only", "executable_member"],
+            ),
+            (
+                "SBX-003",
+                "update.rar",
+                samples.make_rar4({"update.js": b"eval(1)"}),
+                "application/vnd.rar",
+                "сценарий внутри RAR 4",
+                ["ATT-002"],
+                ["listing_only", "script_member"],
+            ),
+            (
+                "SBX-004",
+                "secure.rar",
+                samples.make_rar5({"doc.docx": b"content"}, encrypt_files=True),
+                "application/vnd.rar",
+                "RAR с зашифрованными файлами: не проверено, и это названо",
+                ["ATT-010"],
+                ["encrypted_archive", "unscannable"],
+            ),
+            (
+                "SBX-005",
+                "big.7z",
+                samples.make_7z_stored({"z.bin": b"A" * 10}, declared_size=5 * 1024**3),
+                "application/x-7z-compressed",
+                "7z, заявляющий пять гигабайт при нескольких байтах: бомба определяется по заголовку",
+                ["ATT-012"],
+                ["archive_bomb", "listing_only"],
+            ),
+        ]
+        for index, (case_id, filename, data, mime, note, rules, labels) in enumerate(archive_cases, start=1):
+            self._add(
+                case_id,
+                DatasetCategory.MALICIOUS_ATTACHMENT,
+                _build(
+                    subject="Документы по заявке",
+                    from_addr=f"sender{index}@vendor-unknown.example",
+                    from_name="Отдел документооборота",
+                    text="Документы во вложении. Просим подтвердить получение.",
+                    attachments=[(filename, data, mime)],
+                    source_ip=f"198.51.100.{210 + index}",
+                    **bad_sender,
+                ),
+                RiskLevel.SUSPICIOUS,
+                expected_rules=rules,
+                scenarios=["THR-ATT-001"],
+                labels=["sandbox", *labels],
+                notes=note,
+                known_gap="",
+            )
+
+        # Безобидный архив от известного отправителя: содержимое не распаковывалось, поэтому письмо
+        # не может быть названо проверенным (ADR: вердикт не опускается до LOW_RISK).
+        self._add(
+            "SBX-006",
+            DatasetCategory.MALICIOUS_ATTACHMENT,
+            _build(
+                subject="Акт сверки",
+                from_addr="accounting@partner.example",
+                from_name="Бухгалтерия партнёра",
+                text="Акт сверки во вложении.",
+                attachments=[
+                    (
+                        "act.7z",
+                        samples.make_7z_stored({"act.txt": "Акт сверки за квартал".encode()}),
+                        "application/x-7z-compressed",
+                    )
+                ],
+            ),
+            RiskLevel.UNKNOWN,
+            labels=["sandbox", "listing_only", "benign_looking"],
+            notes=(
+                "7z разобран только по оглавлению: письмо не проверено до конца "
+                "и не должно получить LOW_RISK."
+            ),
+        )
+
+        # PDF с QR-кодом: страница рисуется песочницей, код читает второй изолированный процесс.
+        for case_id, build_pdf, payload, label in (
+            (
+                "SBX-007",
+                samples.pdf_with_embedded_qr,
+                "https://pay-invoice-secure.test/pay/4417",
+                "embedded_raster",
+            ),
+            (
+                "SBX-008",
+                samples.pdf_with_vector_qr,
+                "https://corp-portal-login.test/verify?id=8821",
+                "vector_drawn",
+            ),
+        ):
+            self._add(
+                case_id,
+                DatasetCategory.QR_PHISHING,
+                _build(
+                    subject="Счёт на оплату",
+                    from_addr=f"billing@{case_id.lower()}-pay.test",
+                    from_name="Отдел расчётов",
+                    text="Счёт во вложении. Для оплаты отсканируйте QR-код из PDF.",
+                    attachments=[("schet.pdf", build_pdf(payload), "application/pdf")],
+                    source_ip="198.51.100.230",
+                    **bad_sender,
+                ),
+                RiskLevel.SUSPICIOUS,
+                expected_rules=["URL-032"],
+                scenarios=["THR-PHISH-004"],
+                labels=["sandbox", "qr_phishing", "pdf", label],
+                notes=(
+                    "QR внутри PDF: страница отрисована изолированно, код прочитан, "
+                    "ссылка прошла конвейер URL."
+                ),
+            )
+
+        # PDF без кода от известного отправителя: проверка полная, ложных срабатываний нет.
+        self._add(
+            "SBX-009",
+            DatasetCategory.LEGITIMATE,
+            _build(
+                subject="Письмо-подтверждение",
+                from_addr="office@partner.example",
+                from_name="Офис партнёра",
+                text="Подтверждение во вложении.",
+                attachments=[("confirmation.pdf", samples.pdf_text_only(), "application/pdf")],
+            ),
+            RiskLevel.LOW_RISK,
+            forbidden_rules=["URL-032", "URL-030", "URL-031"],
+            labels=["sandbox", "pdf", "negative"],
+            notes="Обычный PDF без QR: отрисован целиком, кода нет, письмо проверено полностью.",
+        )
+
+        # PDF, который не удалось прочитать: это недостающее свидетельство, а не «QR нет».
+        for case_id, data, note, label in (
+            (
+                "SBX-010",
+                samples.pdf_encrypted(),
+                "Зашифрованный PDF: QR-коды в нём не искались.",
+                "encrypted_pdf",
+            ),
+            (
+                "SBX-011",
+                b"%PDF-1.4 truncated",
+                "Повреждённый PDF: QR-коды в нём не искались.",
+                "malformed_pdf",
+            ),
+        ):
+            self._add(
+                case_id,
+                DatasetCategory.MALFORMED,
+                _build(
+                    subject="Документ",
+                    from_addr="office@partner.example",
+                    from_name="Офис партнёра",
+                    text="Документ во вложении.",
+                    attachments=[("document.pdf", data, "application/pdf")],
+                ),
+                RiskLevel.UNKNOWN,
+                labels=["sandbox", "pdf", "unscannable", label],
+                notes=note + " Письмо не может получить чистый вердикт.",
+            )
+
     def _malformed_adversarial(self) -> None:
         """20 malformed and evasive messages (§47).
 
@@ -2113,6 +2304,7 @@ class GoldenCorpusBuilder:
         self._lookalike()
         self._short_domain_lookalike()
         self._malicious_attachment()
+        self._sandboxed_attachments()
         self._malformed_adversarial()
         self._gateway_conflict()
 

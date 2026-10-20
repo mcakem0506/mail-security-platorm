@@ -238,3 +238,7 @@ NEXT PHASE:
 Актуальные цифры по текущему HEAD — `python scripts/generate_acceptance_snapshot.py`. Показатель,
 который скрипту установить не удалось, помечается `unknown`: непроверенное не считается
 пройденным.
+
+## Этап MSP 1.1
+
+Приёмка основы шлюза — в [MSP_1_1_ACCEPTANCE.md](MSP_1_1_ACCEPTANCE.md). MSP 1.1 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.

@@ -858,3 +858,22 @@ def scan_attachments(job_id: str) -> dict[str, Any]:
             return {"skipped": "job not found"}
         findings = _scan_attachments(session, job, settings)
         return {"job_id": job_id, "malicious": len(findings)}
+
+
+@celery_app.task(name="msp.analyze_transport_message", bind=True, max_retries=3, default_retry_delay=60)
+def analyze_transport_message_task(self, message_id: str) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    """Анализ теневой копии письма со шлюза (ТЗ 1.1 §35).
+
+    Сбой анализа никогда не возвращается узлу: письмо давно доставлено, а потеря наблюдения
+    записывается в состоянии копии и видна в панели.
+    """
+    from msp_api.services.transport_analysis import analyze_transport_message
+
+    settings = get_settings()
+    with session_scope() as session:
+        outcome, job_id = analyze_transport_message(session, settings, message_id, build_storage(settings))
+    if outcome == "ANALYSED" and job_id:
+        enrich_analysis.delay(job_id)
+    elif outcome == "FAILED":
+        raise self.retry(exc=RuntimeError("анализ копии не выполнен"))
+    return {"message_id": message_id, "outcome": outcome, "job_id": job_id}

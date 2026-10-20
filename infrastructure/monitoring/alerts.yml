@@ -294,3 +294,98 @@ groups:
             Компонент необязательный, и его отсутствие — не отказ платформы. Но письма с
             QR-кодами при этом помечаются проверенными не до конца, и вердикт по ним не
             опускается до LOW_RISK. Состояние 3 означает, что компонент считался включённым.
+
+  # Транспорт почты (ТЗ 1.1 §46). Метрики отдаёт агент узла (msp_gateway.metrics). Принцип тот же:
+  # всё, что может тихо оставить границу организации без защиты или без почты, — critical.
+  - name: msp-gateway
+    interval: 30s
+    rules:
+      - alert: MspGatewayNodeDown
+        expr: up{job="msp-gateway"} == 0 or msp_gateway_node_up == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Узел шлюза не отвечает"
+          description: "Состояние очереди и доставки неизвестно. Сам Postfix может продолжать работать."
+
+      - alert: MspGatewayQueueGrowth
+        expr: sum(msp_gateway_queue_messages) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь шлюза растёт"
+          description: "Писем в очереди больше тысячи дольше десяти минут: Exchange не успевает принимать или недоступен."
+
+      - alert: MspGatewayOldestMessageTooOld
+        expr: max(msp_gateway_oldest_message_seconds) > 1800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "В очереди шлюза давно лежит письмо"
+          description: "Самое старое письмо ждёт доставки дольше получаса."
+
+      - alert: MspGatewayExchangeUnavailable
+        expr: min(msp_gateway_exchange_probe_ok) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Exchange недоступен для доставки"
+          description: "Проба упала на одном из уровней NETWORK, TLS, SMTP, DELIVERY (метка layer). Почта копится в очереди."
+
+      - alert: MspGatewayDiskPressure
+        expr: msp_gateway_pressure_state{state=~"PRESSURE|CRITICAL"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Давление на диск или очередь шлюза"
+          description: "Места на томе очереди мало или очередь выросла: см. msp_gateway_disk_free_bytes."
+
+      - alert: MspGatewayRecipientMapStale
+        expr: msp_gateway_recipient_map_age_seconds > 10800
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Справочник получателей безнадёжно устарел"
+          description: "Приём закрыт временным отказом, пока справочник не обновят."
+
+      - alert: MspGatewayCertificateExpiring
+        expr: min(msp_gateway_certificate_expiry_seconds) < 1209600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сертификат шлюза истекает меньше чем через две недели"
+          description: "Отрицательное значение — уже истёк: доставка с проверкой сертификата остановится."
+
+      - alert: MspGatewayShadowCollectorSilent
+        expr: msp_gateway_shadow_collector_report_age_seconds > 180
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сборщик теневых копий не отчитывается"
+          description: "Почта идёт как шла; копии для анализа не уходят."
+
+      - alert: MspGatewayConfigDrift
+        expr: msp_gateway_config_drift == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Конфигурация шлюза изменена вне панели"
+          description: "Файлы на узле расходятся с принятым описанием."
+
+      - alert: MspGatewayOpenRelaySelfTestFailed
+        expr: msp_gateway_open_relay_selftest_ok == 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Самопроверка: шлюз принял бы чужое письмо"
+          description: "Недоверенный источник смог адресовать внешнего получателя. Слить узел и разобраться немедленно."

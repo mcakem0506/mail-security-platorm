@@ -25,6 +25,7 @@ _SECRET_FIELDS = (
     "security_mailbox_password",
     "ews_password",
     "smtp_password",
+    "gateway_ingest_token",
 )
 
 
@@ -296,6 +297,22 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: Literal["json", "text"] = "json"
     metrics_enabled: bool = True
+
+    # Транспорт почты (ТЗ 1.1). Узлы шлюза обращаются к панели с общим секретом; пока он не задан,
+    # приёмные точки узлов закрыты, а не открыты для всех.
+    gateway_ingest_token: str = ""
+    gateway_ingest_token_file: str | None = None
+    #: Узел, не присылавший сигнал дольше этого, считается недоступным (секунды).
+    gateway_node_stale_seconds: int = 180
+    gateway_recipients_fresh_seconds: int = 3600
+    gateway_recipients_grace_seconds: int = 7200
+    # Пороги тревог транспорта (ТЗ 1.1 §46). Значения стартовые: их уточняют по пилоту.
+    gateway_queue_warn_messages: int = 1000
+    gateway_queue_critical_messages: int = 5000
+    gateway_oldest_warn_seconds: int = 1800
+    gateway_oldest_critical_seconds: int = 7200
+    gateway_collector_stale_seconds: int = 180
+    gateway_shadow_pending_warn_seconds: int = 900
 
     @field_validator("corporate_domains", "trusted_infrastructure_domains")
     @classmethod

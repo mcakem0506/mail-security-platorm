@@ -1812,3 +1812,7 @@ class ReanalysisJob(Base, IdMixin):
         if not self.total_messages:
             return None
         return min(1.0, self.processed / self.total_messages)
+
+
+# Транспорт почты (ТЗ 1.1): модели вынесены в отдельный модуль, метаданные общие.
+from . import models_transport  # noqa: E402, F401
