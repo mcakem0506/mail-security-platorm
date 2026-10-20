@@ -342,7 +342,7 @@ class SpamStack(Stack):
         """Записи, которые приёмник узла получил от Rspamd (до отправки в панель)."""
         script = (
             "import glob,json;print(json.dumps([json.load(open(p)) for p in sorted(glob.glob("
-            "'/var/lib/msp-rspamd/outbox/*.json'))]))"
+            "'/var/lib/msp-rspamd/outbox/*.json')+glob.glob('/var/lib/msp-rspamd/outbox/sent/*.json'))]))"
         )
         result = docker("exec", self.rspamd_container, "python3", "-c", script, check=False)
         try:
@@ -368,7 +368,12 @@ class SpamStack(Stack):
 
     def clear_scans(self) -> None:
         docker(
-            "exec", self.rspamd_container, "sh", "-c", "rm -f /var/lib/msp-rspamd/outbox/*.json", check=False
+            "exec",
+            self.rspamd_container,
+            "sh",
+            "-c",
+            "rm -f /var/lib/msp-rspamd/outbox/*.json /var/lib/msp-rspamd/outbox/sent/*.json",
+            check=False,
         )
 
     def analysis(self, message_id: str, *, timeout: float = 90.0, policy=None, **kwargs):  # type: ignore[no-untyped-def]

@@ -218,6 +218,8 @@ def cmd_status(_: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------------------------
 MAX_RECORD = 1024 * 1024
 OUTBOX_LIMIT = 5000
+#: Сколько уже отправленных записей хранится на узле.
+SENT_KEEP = 200
 
 
 class Receiver:
@@ -311,10 +313,23 @@ class Receiver:
                         break
             except (OSError, urllib.error.URLError):
                 break
-            path.unlink(missing_ok=True)
+            self._remember_sent(path)
             sent += 1
             self.sent += 1
         return sent
+
+    def _remember_sent(self, path: Path) -> None:
+        """Отправленная запись переходит в ``sent/``: последние SENT_KEEP штук остаются на узле для разбора
+        («дошло ли письмо до панели») и для проверок стенда; остальные удаляются."""
+        keep = self.directory / "sent"
+        try:
+            keep.mkdir(exist_ok=True)
+            path.replace(keep / path.name)
+            old = sorted(keep.glob("*.json"))
+            for stale in old[: max(0, len(old) - SENT_KEEP)]:
+                stale.unlink(missing_ok=True)
+        except OSError:
+            path.unlink(missing_ok=True)
 
 
 def serve_receiver(receiver: Receiver, host: str, port: int) -> None:

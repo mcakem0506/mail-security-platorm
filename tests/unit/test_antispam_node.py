@@ -264,3 +264,24 @@ class TestKeygen:
         assert key_file.read_bytes().startswith(b"-----BEGIN")
         with pytest.raises(FileExistsError):
             node.cmd_keygen(args)
+
+
+class TestSentRecordsAreKept:
+    """Отправленная запись остаётся на узле (ограниченно), а не исчезает: иначе «дошло ли» не проверить."""
+
+    def test_a_sent_record_moves_to_sent_and_the_oldest_are_trimmed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(node, "SENT_KEEP", 3)
+        receiver = node.Receiver(tmp_path / "outbox", "http://127.0.0.1:9/x", "t" * 40, "a" * 32)
+        for number in range(5):
+            path = tmp_path / "outbox" / f"{number:03d}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}", encoding="utf-8")
+            receiver._remember_sent(path)
+        assert not list((tmp_path / "outbox").glob("*.json"))
+        assert [p.name for p in sorted((tmp_path / "outbox" / "sent").glob("*.json"))] == [
+            "002.json",
+            "003.json",
+            "004.json",
+        ]
