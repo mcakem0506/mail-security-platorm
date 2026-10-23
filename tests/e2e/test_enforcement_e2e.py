@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 from datetime import timedelta
+from typing import ClassVar
 
 import pytest
 from msp_contracts import Role
@@ -462,7 +463,7 @@ class TestKillSwitch:
 
 # --- исключения -------------------------------------------------------------------------------
 class TestExceptions:
-    BODY = {
+    BODY: ClassVar[dict[str, str]] = {
         "scope": "SENDER",
         "control": "SPAM_REJECT",
         "value": "boss@partner.example",
