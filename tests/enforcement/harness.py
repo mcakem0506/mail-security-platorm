@@ -335,3 +335,53 @@ def not_delivered(lab: EnforcementStack, message_id: str, wait: float = 12.0) ->
         lab.exchange1.wait_for(f"<{message_id}>", timeout=1) is None
         and lab.exchange2.wait_for(f"<{message_id}>", timeout=1) is None
     )
+
+
+def diagnostics(lab: EnforcementStack) -> str:
+    """Что видно на стенде, когда ожидание не дождалось: журнал послеочередного шлюза и очередь Postfix."""
+    aq = docker("logs", "--tail", "30", lab.afterqueue_container, check=False)
+    queue = lab.exec("postqueue -p 2>&1 | tail -20", check=False).stdout
+    return f"--- afterqueue ---\n{(aq.stdout + aq.stderr)[-2500:]}\n--- postqueue ---\n{queue}"
+
+
+def wait_with_diagnostics(
+    lab: EnforcementStack, condition: Callable[[], bool], *, timeout: float, what: str
+) -> None:
+    try:
+        lab.wait_until(condition, timeout=timeout, what=what)
+    except TimeoutError as exc:
+        raise TimeoutError(f"{exc}\n{diagnostics(lab)}") from exc
+
+
+def wait_panel_quiet(lab: EnforcementStack, *, quiet: float = 10.0, timeout: float = 600.0) -> None:
+    """Дождаться, пока панель перестанет принимать теневые копии предыдущих проверок.
+
+    Панель стенда держит одну блокировку базы (SQLite): пока она разбирает очередь копий, запрос полного анализа ждёт своей очереди и
+    может упереться в тайм-аут шлюза — тогда письмо (штатно) доставляется, а не уходит в карантин. Боевая панель с PostgreSQL
+    такого общего замка не имеет; это свойство стенда, поэтому проверки карантина начинаются на тихой панели.
+    """
+    from msp_api.db.models_transport import TransportMessage
+
+    def count() -> int:
+        with lab.panel.database() as session:  # type: ignore[attr-defined]
+            return int(session.query(TransportMessage).count())
+
+    deadline = time.monotonic() + timeout
+    last, since = count(), time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        current = count()
+        if current != last:
+            last, since = current, time.monotonic()
+        elif time.monotonic() - since >= quiet:
+            return
+    raise TimeoutError("панель продолжает принимать копии писем")
+
+
+def wait_afterqueue_listening(lab: EnforcementStack, *, timeout: float = 90.0) -> None:
+    script = "import socket;socket.create_connection(('127.0.0.1',10025),3).close()"
+
+    def up() -> bool:
+        return docker("exec", lab.afterqueue_container, "python", "-c", script, check=False).returncode == 0
+
+    lab.wait_until(up, timeout=timeout, what="послеочередной шлюз принимает соединения")

@@ -196,3 +196,19 @@ class TestAccessAndMetrics:
 
     def test_health_endpoint(self, http: str) -> None:
         assert json.loads(urllib.request.urlopen(http + "/healthz", timeout=5).read())["ok"] is True
+
+
+def test_the_direction_comes_from_the_scanner_symbol_not_from_the_caller(
+    http: str, node: EnforcementNode
+) -> None:
+    record = spam_record()
+    record["symbols"] = [
+        *[sym for sym in record["symbols"] if sym["name"] != "MSP_DIRECTION_INBOUND"],
+        {"name": "MSP_DIRECTION_OUTBOUND", "score": 0.0, "options": [], "group": "msp"},
+    ]
+    _, body = post(http, record)
+    assert body["decision"] == "NO_DECISION"
+    rows = [
+        json.loads(p.read_text(encoding="utf-8")) for p in (node.cfg.state_dir / "decisions").glob("*.json")
+    ]
+    assert any("OUTBOUND_NOT_IN_SCOPE" in r["reason_codes"] for r in rows)

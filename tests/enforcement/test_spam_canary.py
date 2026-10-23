@@ -18,6 +18,7 @@ from .harness import (
     delivered,
     not_delivered,
     rejected_text,
+    wait_afterqueue_listening,
 )
 
 pytestmark = pytest.mark.usefixtures("canary_active")
@@ -114,6 +115,8 @@ class TestSpamCanary:
             assert result.get("ok"), "приём не зависит от послеочередного шлюза"
         finally:
             docker("start", lab.afterqueue_container)
+        wait_afterqueue_listening(lab)
+        lab.flush()
         assert delivered(lab, mid, timeout=240), (
             "после возвращения шлюза письмо доставлено из очереди Postfix"
         )

@@ -44,6 +44,9 @@ def input_from_record(
         recipient_count=len(rcpt),
     )
     evidence = analysis.evidence
+    # Направление определяет слушатель Postfix (символ MSP_DIRECTION_*), а не адрес в From (ТЗ 1.2 §5).
+    if evidence is not None and evidence.direction.value in ("INBOUND", "OUTBOUND"):
+        direction = evidence.direction.value
     qid = str(record.get("qid") or "")
     message_id = str(record.get("message_id") or "").strip("<>")
     reason_codes = tuple(analysis.signals.codes(risk_only=True)) if analysis.signals else ()

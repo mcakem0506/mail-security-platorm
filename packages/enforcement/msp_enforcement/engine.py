@@ -271,6 +271,12 @@ def evaluate_control(
             Decision.BYPASS, AppliedAction.SAFE_MODE, ("SAFE_MODE_STALE_POLICY", *reasons), suggested
         ), None
 
+    # Исходящая почта по умолчанию только наблюдается (ТЗ 1.3 §55): контроли входящего пути её не касаются.
+    if inp.direction == "OUTBOUND" and cp.control_type is not ControlType.OUTBOUND_BLOCK:
+        return make(
+            Decision.ALLOW, AppliedAction.OBSERVE_ONLY, ("OUTBOUND_NOT_IN_SCOPE", *reasons), suggested
+        ), None
+
     # 3. состояние контроля
     if cp.state not in ACTIVE_STATES:
         return make(

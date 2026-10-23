@@ -624,3 +624,31 @@ class TestDecisions:
 
     def test_no_policy_means_no_decision(self) -> None:
         assert decide(spam_input(), Runtime()).final is None
+
+
+class TestOutboundIsNotTouchedByInboundControls:
+    """ТЗ 1.3 §55: исходящая почта по умолчанию наблюдается; контроли входящего пути её не отклоняют."""
+
+    def test_a_spam_like_outbound_message_is_only_observed(self) -> None:
+        out = decide(spam_input(direction="OUTBOUND"), runtime())
+        assert out.final is None
+        assert "OUTBOUND_NOT_IN_SCOPE" in spam_decision(out).reason_codes
+
+    def test_the_outbound_control_itself_still_acts(self) -> None:
+        policy = make_policy(
+            controls=(
+                ControlPolicy(
+                    control_type=ControlType.OUTBOUND_BLOCK,
+                    state=ControlState.PILOT,
+                    canary_scope=CanaryScope(source_cidrs=("10.0.0.0/8",)),
+                ),
+            )
+        )
+        inp = spam_input(
+            direction="OUTBOUND",
+            source_ip="10.1.1.1",
+            recipients=("ext@partner.example",),
+            compromised_account=True,
+        )
+        out = decide(inp, runtime(policy))
+        assert out.final is not None and out.final.decision is Decision.TEMPFAIL

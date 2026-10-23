@@ -31,6 +31,8 @@ from .harness import (
     decisions,
     make_ready,
     pause,
+    wait_panel_quiet,
+    wait_with_diagnostics,
 )
 
 NODE = "00000000000000000000000000000001"
@@ -118,11 +120,13 @@ class TestQuarantineEndToEnd:
     def test_3_an_encrypted_archive_goes_to_quarantine_after_the_queue_and_not_to_exchange(
         self, lab, admin
     ) -> None:  # type: ignore[no-untyped-def]
+        wait_panel_quiet(lab, quiet=8)
         message_id, raw = encrypted_mail("e2e1")
         result = send(lab, raw)
         # Письмо принято (250): отказывать после очереди нельзя (ТЗ §10).
         assert result.get("ok"), result
-        lab.wait_until(
+        wait_with_diagnostics(
+            lab,
             lambda: any(i["internet_message_id"] == message_id for i in quarantine_items(admin)["items"]),
             timeout=120,
             what="письмо попало в карантин",
@@ -148,9 +152,11 @@ class TestQuarantineEndToEnd:
     def test_4_the_preview_is_safe_and_the_release_delivers_once_without_a_loop(
         self, lab, admin, analyst
     ) -> None:  # type: ignore[no-untyped-def]
+        wait_panel_quiet(lab, quiet=8)
         message_id, raw = encrypted_mail("e2e2")
         assert send(lab, raw).get("ok")
-        lab.wait_until(
+        wait_with_diagnostics(
+            lab,
             lambda: any(i["internet_message_id"] == message_id for i in quarantine_items(admin)["items"]),
             timeout=120,
             what="письмо попало в карантин",
@@ -221,6 +227,11 @@ class TestQuarantineEndToEnd:
 
 def _others(admin, exclude: str) -> int:  # type: ignore[no-untyped-def]
     return sum(1 for i in quarantine_items(admin, state="QUARANTINED")["items"] if i["id"] != exclude)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _quiet_panel(enf):  # type: ignore[no-untyped-def]
+    wait_panel_quiet(enf)
 
 
 @pytest.fixture(scope="module", autouse=True)

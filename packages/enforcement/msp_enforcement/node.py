@@ -65,10 +65,10 @@ class NodeConfig:
             if c.strip()
         )
         self.soft_ttl = timedelta(
-            seconds=int(kw.get("soft_ttl") or os.environ.get("MSP_POLICY_SOFT_TTL", 600))
+            seconds=int(str(kw.get("soft_ttl") or os.environ.get("MSP_POLICY_SOFT_TTL", 600)))
         )
         self.hard_ttl = timedelta(
-            seconds=int(kw.get("hard_ttl") or os.environ.get("MSP_POLICY_HARD_TTL", 21600))
+            seconds=int(str(kw.get("hard_ttl") or os.environ.get("MSP_POLICY_HARD_TTL", 21600)))
         )
 
 

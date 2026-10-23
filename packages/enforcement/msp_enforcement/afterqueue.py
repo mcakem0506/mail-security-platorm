@@ -288,7 +288,8 @@ async def handle(aq: AfterQueue, reader: asyncio.StreamReader, writer: asyncio.S
         writer.write(f"{code} {text}\r\n".encode())
         await writer.drain()
 
-    sender, rcpts = "", []
+    sender = ""
+    rcpts: list[str] = []
     try:
         await reply(220, "gateway-afterqueue ESMTP")
         while True:
