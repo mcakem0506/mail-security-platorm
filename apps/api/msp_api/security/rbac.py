@@ -121,6 +121,21 @@ class Permission(StrEnum):
     ACTIVATE_DKIM_KEY = "dkim:key:activate"
     RETIRE_DKIM_KEY = "dkim:key:retire"
 
+    # принуждение и карантин (ТЗ 1.3 §60). Исключения принуждения используют уже существующие
+    # create:exception и exception:approve.
+    VIEW_ENFORCEMENT = "enforcement:read"
+    SIMULATE_ENFORCEMENT = "enforcement:simulate"
+    CANARY_ENFORCEMENT = "enforcement:canary"
+    #: Пилот — повышенное согласование: второй человек с этим же правом (четыре глаза).
+    PILOT_ENFORCEMENT = "enforcement:pilot"
+    PAUSE_ENFORCEMENT = "enforcement:pause"
+    ROLLBACK_ENFORCEMENT = "enforcement:rollback"
+    #: Включить общий выключатель быстро и в одиночку; снять — только с подтверждением второго.
+    KILL_SWITCH = "enforcement:kill_switch"
+    VIEW_QUARANTINE = "quarantine:read"
+    RELEASE_QUARANTINE = "quarantine:release"
+    DELETE_QUARANTINE = "quarantine:delete"
+
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
@@ -140,6 +155,7 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.VIEW_SPAM,
     Permission.VIEW_AUTH,
     Permission.VIEW_REPUTATION,
+    Permission.VIEW_ENFORCEMENT,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.SIMULATE_SPAM_POLICY,
@@ -156,6 +172,9 @@ _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.DOWNLOAD_ATTACHMENT,
     Permission.EXPORT_DATA,
     Permission.REVIEW_REAL_FLOW,
+    Permission.SIMULATE_ENFORCEMENT,
+    Permission.VIEW_QUARANTINE,
+    Permission.RELEASE_QUARANTINE,
 }
 _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.APPROVE_EXCEPTION,
@@ -190,6 +209,12 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.GENERATE_DKIM_KEY,
     Permission.ACTIVATE_DKIM_KEY,
     Permission.RETIRE_DKIM_KEY,
+    Permission.CANARY_ENFORCEMENT,
+    Permission.PILOT_ENFORCEMENT,
+    Permission.PAUSE_ENFORCEMENT,
+    Permission.ROLLBACK_ENFORCEMENT,
+    Permission.KILL_SWITCH,
+    Permission.DELETE_QUARANTINE,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.
@@ -215,6 +240,10 @@ _PLATFORM_ADMIN: frozenset[Permission] = frozenset(
         Permission.VIEW_AUTH,
         Permission.VIEW_REPUTATION,
         Permission.VIEW_DKIM,
+        # Администратор платформы может остановить принуждение, но не включить его и не читать письма.
+        Permission.VIEW_ENFORCEMENT,
+        Permission.PAUSE_ENFORCEMENT,
+        Permission.KILL_SWITCH,
     }
 )
 

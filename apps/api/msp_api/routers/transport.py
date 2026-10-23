@@ -36,7 +36,7 @@ from ..db.models_transport import (
 from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import transport, transport_alerts
+from ..services import credentials, transport, transport_alerts
 from ..services.storage import build_storage
 
 logger = logging.getLogger(__name__)
@@ -500,20 +500,49 @@ def tls_status(session: DbSession, actor: TlsReader) -> dict[str, Any]:
 # ---------------------------------------------------------------------------------------------
 # Точки для узлов
 # ---------------------------------------------------------------------------------------------
+def scoped_node_auth(scope: str):  # type: ignore[no-untyped-def]
+    """Зависимость проверки токена компонента узла (ТЗ 1.3 §79). Токен другой области не принимается."""
+
+    def dependency(
+        session: DbSession,
+        settings: Annotated[Settings, Depends(get_settings)],
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> None:
+        scheme, _, presented = (authorization or "").partition(" ")
+        # Схема обязательна: токен без неё — не тот способ предъявления, который мы выдавали.
+        verdict = credentials.check(settings, scope, presented.strip() if scheme == "Bearer" else "")
+        if verdict.valid is None:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "приём от узлов не настроен")
+        if not verdict.valid:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "неверный токен узла")
+        if credentials.remember(session, scope, verdict.fingerprint):
+            # Новый отпечаток в области — начало ротации или новый компонент: событие аудита обязательно.
+            record(
+                session,
+                action=AuditAction.CREDENTIAL_FIRST_USE,
+                actor_email=f"node:{scope}",
+                object_type="component_credential",
+                object_id=verdict.fingerprint,
+                detail={"scope": scope, "shared_token": verdict.shared},
+            )
+            session.commit()
+
+    return dependency
+
+
 def node_auth(
+    session: DbSession,
     settings: Annotated[Settings, Depends(get_settings)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
-    scheme, _, presented = (authorization or "").partition(" ")
-    # Схема обязательна: токен без неё — не тот способ предъявления, который мы выдавали.
-    verdict = transport.node_token_valid(settings, presented.strip() if scheme == "Bearer" else "")
-    if verdict is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "приём от узлов не настроен")
-    if not verdict:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "неверный токен узла")
+    """Область по умолчанию — агент шлюза."""
+    scoped_node_auth("gateway-agent")(session, settings, authorization)
 
 
-NodeAuth = Annotated[None, Depends(node_auth)]
+NodeAuth = Annotated[None, Depends(scoped_node_auth("gateway-agent"))]
+ShadowAuth = Annotated[None, Depends(scoped_node_auth("shadow-collector"))]
+RecipientSyncAuth = Annotated[None, Depends(scoped_node_auth("recipient-sync"))]
+PolicyAuth = Annotated[None, Depends(scoped_node_auth("enforcement-policy"))]
 
 
 def _organization(session: DbSession) -> Organization:
@@ -577,7 +606,7 @@ def agent_shadow(
     raw: RawBody,
     session: DbSession,
     settings: AppSettings,
-    _auth: NodeAuth,
+    _auth: ShadowAuth,
     x_msp_idempotency_key: Annotated[str, Header(pattern=r"^[0-9a-f]{64}$")],
     x_msp_node_id: Annotated[str, Header(pattern=r"^[0-9a-f]{32}$")],
     x_msp_direction: Annotated[Literal["INBOUND", "OUTBOUND", "UNKNOWN"], Header()] = "UNKNOWN",

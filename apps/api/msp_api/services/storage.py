@@ -26,7 +26,7 @@ class StorageError(RuntimeError):
 
 def build_key(category: str, digest: str, *, organization_id: str, extension: str = "bin") -> str:
     """Deterministic, traversal-proof key: category/org/YYYY/MM/DD/<sha256>.<ext>."""
-    if category not in {"eml", "attachment", "body", "export", "report"}:
+    if category not in {"eml", "attachment", "body", "export", "report", "quarantine"}:
         raise ValueError(f"unknown storage category: {category}")
     if not re.fullmatch(r"[0-9a-f]{64}", digest or ""):
         raise ValueError("digest must be a hex sha256")

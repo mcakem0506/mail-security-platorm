@@ -495,6 +495,7 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
     active = ReleaseStore(ROOT).active_version() or ""
     state["config_version"] = active
     state["config_checksum"] = _checksum(active)
+    state["effective_actions"] = _effective_actions_summary(active)
     # Дрейф: действующий выпуск повреждён после применения либо отличается от ожидаемого (ТЗ 1.2 §27).
     intact = bool(active) and ReleaseStore(ROOT).verify(active)
     state["drift"] = drift_state(
@@ -503,6 +504,22 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
     with contextlib.suppress(OSError, ValueError, urllib.error.URLError):
         _panel_request(f"{panel_url}/rspamd-status", token, body={"node_id": node_id, "state": state})
     return state
+
+
+def _effective_actions_summary(version: str) -> dict:
+    """Итог аудита действий сканера для действующего выпуска (ТЗ 1.3 §50): чисто ли и сколько неизвестных."""
+    if not version:
+        return {"clean": None, "unknown": 0, "audited": False}
+    try:
+        report = json.loads(
+            (ReleaseStore(ROOT).releases / version / "effective_actions_report.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return {"clean": None, "unknown": 0, "audited": False}
+    unknown = [s for s in report.get("sources", []) if not s.get("approved")]
+    return {"clean": bool(report.get("clean")), "unknown": len(unknown), "audited": True}
 
 
 def _checksum(version: str) -> str:
@@ -567,7 +584,10 @@ def main(argv: list[str] | None = None) -> int:
     collector.add_argument(
         "--panel-url", default=os.environ.get("MSP_PANEL_SPAM_URL", "")
     )  # .../gateway-agent/spam-scans
-    collector.add_argument("--token-file", default=os.environ.get("MSP_PANEL_TOKEN_FILE", ""))
+    collector.add_argument(
+        "--token-file",
+        default=os.environ.get("MSP_SCAN_TOKEN_FILE", os.environ.get("MSP_PANEL_TOKEN_FILE", "")),
+    )
     collector.add_argument("--interval", type=float, default=2.0)
     collector.add_argument("--node-id", default=os.environ.get("MSP_NODE_ID", ""))
     collector.add_argument("--metrics-host", default="0.0.0.0")  # nosec B104 - порт доступен сети мониторинга узла  # noqa: S104

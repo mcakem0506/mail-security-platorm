@@ -26,6 +26,13 @@ _SECRET_FIELDS = (
     "ews_password",
     "smtp_password",
     "gateway_ingest_token",
+    "gateway_agent_token",
+    "recipient_sync_token",
+    "shadow_collector_token",
+    "enforcement_policy_token",
+    "metrics_token",
+    "enforcement_policy_signing_key",
+    "quarantine_encryption_key",
 )
 
 
@@ -302,6 +309,36 @@ class Settings(BaseSettings):
     # приёмные точки узлов закрыты, а не открыты для всех.
     gateway_ingest_token: str = ""
     gateway_ingest_token_file: str | None = None
+    # Раздельные учётные данные компонентов (ТЗ 1.3 §79, §80). Каждое значение — один токен или несколько
+    # через запятую: на время ротации действуют старый и новый одновременно, почта не прерывается.
+    gateway_agent_token: str = ""
+    gateway_agent_token_file: str | None = None
+    recipient_sync_token: str = ""
+    recipient_sync_token_file: str | None = None
+    shadow_collector_token: str = ""
+    shadow_collector_token_file: str | None = None
+    enforcement_policy_token: str = ""
+    enforcement_policy_token_file: str | None = None
+    metrics_token: str = ""
+    metrics_token_file: str | None = None
+    #: Общий токен этапа 1.1 принимается, пока включено; в рабочей установке его отключают.
+    gateway_shared_token_allowed: bool = True
+
+    # Принуждение (ТЗ 1.3). Глобального включения нет: ключ подписи нужен для публикации политики.
+    enforcement_policy_signing_key: str = ""
+    enforcement_policy_signing_key_file: str | None = None
+    #: Лабораторный режим допускает канарейку на лабораторной выборке; для пилота нужна реальная (§83).
+    enforcement_lab_mode: bool = False
+    enforcement_min_reviewed: int = 100
+    enforcement_max_fp_rate: float = 0.01
+    enforcement_policy_soft_ttl_seconds: int = 600
+    enforcement_policy_hard_ttl_seconds: int = 21600
+    enforcement_policy_valid_days: int = 7
+    quarantine_encryption_key: str = ""
+    quarantine_encryption_key_file: str | None = None
+    quarantine_retention_days: int = 30
+    quarantine_release_token_ttl_minutes: int = 30
+
     #: Узел, не присылавший сигнал дольше этого, считается недоступным (секунды).
     gateway_node_stale_seconds: int = 180
     gateway_recipients_fresh_seconds: int = 3600
