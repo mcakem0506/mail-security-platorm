@@ -60,7 +60,7 @@ def spam_record(score: float = 18.0, rcpt: str = "ivan@corp.example") -> dict[st
 @pytest.fixture
 def node(tmp_path: Path) -> EnforcementNode:
     n = make_node(tmp_path, allowed_clients="127.0.0.1")
-    n.cache.install(sign_policy(make_policy(), KEY), now=NOW)
+    n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC))
     return n
 
 
@@ -148,7 +148,7 @@ class TestDecide:
 
     def test_a_stale_policy_beyond_the_hard_ttl_enters_safe_mode(self, tmp_path: Path) -> None:
         n = make_node(tmp_path, "s", soft_ttl=1, hard_ttl=2)
-        n.cache.install(sign_policy(make_policy(), KEY), now=NOW - timedelta(hours=1))
+        n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC) - timedelta(hours=1))
         outcome = n.decide_record(spam_record())
         assert outcome.final is None
         assert outcome.decisions[0].applied_action.value == "SAFE_MODE"
@@ -156,7 +156,7 @@ class TestDecide:
     def test_a_policy_signed_with_another_key_is_never_used(self, tmp_path: Path) -> None:
         n = make_node(tmp_path, "forged")
         with pytest.raises(ValueError):
-            n.cache.install(sign_policy(make_policy(), b"z" * 40), now=NOW)
+            n.cache.install(sign_policy(make_policy(), b"z" * 40), now=datetime.now(UTC))
         assert n.decide_record(spam_record()).final is None
 
     def test_a_malformed_request_is_an_open_failure_not_a_reject(
@@ -175,7 +175,7 @@ class TestDecide:
 class TestAccessAndMetrics:
     def test_only_allowed_clients_may_ask(self, tmp_path: Path) -> None:
         n = make_node(tmp_path, "s", allowed_clients="10.99.0.0/24")
-        n.cache.install(sign_policy(make_policy(), KEY), now=NOW)
+        n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC))
         server = serve(n, "127.0.0.1", 0)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         try:

@@ -12,6 +12,7 @@ import dataclasses
 import json
 import statistics
 import time
+from typing import ClassVar
 
 import pytest
 
@@ -27,6 +28,7 @@ from .harness import (
     dns_for,
     ensure_canary,
     pause,
+    wait_panel_quiet,
 )
 
 #: Ограничение узла — 20 соединений от одного клиента (антизлоупотребление), поэтому по 18 с каждого из двух адресов.
@@ -146,6 +148,9 @@ def summarize(results):  # type: ignore[no-untyped-def]
 
 
 class TestLoad:
+    baseline: ClassVar[dict[str, float]] = {}
+    canary: ClassVar[dict[str, float]] = {}
+
     def test_1_shadow_baseline_loses_nothing(self, lab, admin) -> None:  # type: ignore[no-untyped-def]
         started = time.monotonic()
         results = burst(lab, build_items(lab, "b1"))
@@ -163,6 +168,8 @@ class TestLoad:
             ), r["message_id"]
 
     def test_2_canary_rejects_only_the_canary_spam_and_loses_nothing(self, lab, admin, admin2) -> None:  # type: ignore[no-untyped-def]
+        # Очередь теневых копий первой серии разобрана до активации: общий замок базы стенда не должен задерживать решения.
+        wait_panel_quiet(lab)
         ensure_canary(lab, admin, admin2)
         started = time.monotonic()
         results = burst(lab, build_items(lab, "c1"))
@@ -173,9 +180,12 @@ class TestLoad:
             "p95": sorted(r["seconds"] for r in results)[int(len(results) * 0.95) - 1],
         }
         # Спам получателям канарейки — общий 5xx; всё остальное принято без ошибок.
-        assert all((not r["ok"]) and str(r.get("code", "")).startswith("5") for r in by["spam_canary"]), by[
-            "spam_canary"
-        ][:3]
+        assert all((not r["ok"]) and str(r.get("code", "")).startswith("5") for r in by["spam_canary"]), (
+            [{k: r.get(k) for k in ("ok", "code", "error", "seconds")} for r in by["spam_canary"] if r["ok"]][
+                :5
+            ],
+            docker("logs", "--tail", "40", lab.enforcement_container, check=False).stderr[-2500:],
+        )
         assert all(r["ok"] for r in by["spam_other"] + by["legit_canary"]), [
             r for r in by["spam_other"] + by["legit_canary"] if not r["ok"]
         ][:3]

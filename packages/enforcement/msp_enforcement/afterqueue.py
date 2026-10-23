@@ -361,7 +361,7 @@ def cli(argv: list[str] | None = None) -> int:
     from .node import NodeConfig, background_loop
 
     parser = argparse.ArgumentParser(prog="msp_enforcement.afterqueue")
-    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104 - слушатель в изолированной сети узла
+    parser.add_argument("--host", default="0.0.0.0")  # noqa: S104  # nosec B104 - слушатель в изолированной сети узла
     parser.add_argument("--port", type=int, default=10025)
     parser.add_argument("--reinject-host", required=True)
     parser.add_argument("--reinject-port", type=int, default=10026)
@@ -375,7 +375,7 @@ def cli(argv: list[str] | None = None) -> int:
     # Метрики и проверка живости; решения для Rspamd здесь не принимаются (разрешённых клиентов нет).
     from .node import serve
 
-    metrics = serve(node, "0.0.0.0", 11390)  # noqa: S104 - в изолированной сети узла
+    metrics = serve(node, "0.0.0.0", 11390)  # noqa: S104  # nosec B104 - в изолированной сети узла
     threading.Thread(target=metrics.serve_forever, daemon=True).start()
     run(
         AfterQueue(
