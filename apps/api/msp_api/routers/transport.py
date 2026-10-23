@@ -558,6 +558,50 @@ class EventsRequest(BaseModel):
     events: list[dict[str, Any]] = Field(max_length=transport.MAX_EVENTS_PER_BATCH)
 
 
+@agent_router.post("/recipients/sync")
+def agent_recipients_sync(
+    body: RecipientSyncRequest, session: DbSession, _auth: RecipientSyncAuth
+) -> dict[str, Any]:
+    """Машинная выгрузка справочника (область токена ``recipient-sync``); проверка та же, что и в консоли."""
+    org = _organization(session)
+    result = transport.sync_recipients(
+        session,
+        organization_id=org.id,
+        text=body.content,
+        fmt=body.format,
+        source=body.source,
+        actor_email="node:recipient-sync",
+        source_generated_at=body.source_generated_at,
+        confirm_shrink=body.confirm_shrink,
+    )
+    run = result.run
+    record(
+        session,
+        action=AuditAction.TRANSPORT_RECIPIENTS_SYNC,
+        actor_email="node:recipient-sync",
+        organization_id=org.id,
+        object_type="recipient_sync",
+        object_id=run.id,
+        outcome="success" if run.status.value == "ACCEPTED" else "rejected",
+        detail={
+            "status": run.status.value,
+            "count": run.recipient_count,
+            "previous": run.previous_count,
+            "rejected": run.rejected_count,
+            "reason": run.reason,
+        },
+    )
+    if run.status.value != "ACCEPTED":
+        session.commit()
+        raise HTTPException(status.HTTP_409_CONFLICT, run.reason or "справочник не принят")
+    session.commit()
+    return {
+        "status": run.status.value,
+        "recipient_count": run.recipient_count,
+        "activated_version": result.activated_version,
+    }
+
+
 @agent_router.post("/events")
 def agent_events(body: EventsRequest, session: DbSession, _auth: NodeAuth) -> dict[str, Any]:
     org = _organization(session)

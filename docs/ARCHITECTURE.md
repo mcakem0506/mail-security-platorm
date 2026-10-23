@@ -439,3 +439,10 @@ Mode C частично реализован как **основа**: транс
 хранится отдельно от вердикта безопасности. Панель назначает узлу только оверлей конфигурации; узел сам определяет сети
 подписи, DNS, Redis и секреты. Подробно: [RSPAMD_ARCHITECTURE.md](RSPAMD_ARCHITECTURE.md),
 [SPAM_CLASSIFICATION.md](SPAM_CLASSIFICATION.md). Миграция `c860d5cdb90d`. **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
+
+## Дополнения этапа MSP 1.3
+
+Принуждение — отдельный слой: контроли с независимым жизненным циклом, неизменяемая подписанная политика, служба
+`gateway-enforcement` на узле (решение до очереди для Rspamd), послеочередной шлюз `gateway-afterqueue` (полный анализ MSP и
+карантин) и внутренний карантин в панели. Подробно: [ENFORCEMENT_ARCHITECTURE.md](ENFORCEMENT_ARCHITECTURE.md). Миграция `7d13e0f4a2b9`.
+Транспорт остаётся источником истины: письмо в очереди Postfix, пока шлюз не решит иначе, а любой сбой шлюза — открытый. **MSP 1.3 IS NOT APPROVED FOR GLOBAL PRODUCTION MX CUTOVER.**

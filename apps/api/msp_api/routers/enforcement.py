@@ -403,6 +403,35 @@ def control_rollback(
     return {"status": "ROLLED_BACK", "policy": enforcement.policy_view(policy)}
 
 
+@router.post("/enforcement/controls/{control_id}/shadow")
+def control_shadow(
+    control_id: str,
+    body: ReasonBody,
+    session: DbSession,
+    actor: Rollbacker,
+    request: Request,
+    settings: AppSettings,
+) -> dict[str, Any]:
+    try:
+        row = enforcement.get_control(session, actor.organization_id, control_id)
+        policy = enforcement.return_to_shadow(
+            session, settings, actor.organization_id, row, actor_email=actor.email, reason=body.reason
+        )
+    except EnforcementError as exc:
+        raise _fail(exc) from exc
+    _audit(
+        session,
+        actor,
+        request,
+        AuditAction.ENFORCEMENT_CONTROL_STATE,
+        "enforcement_control",
+        row.id,
+        {"state": "SHADOW", "policy_version": policy.version, "reason": body.reason},
+    )
+    session.commit()
+    return {"status": "SHADOW", "policy": enforcement.policy_view(policy)}
+
+
 # ---------------------------------------------------------------------------------------------
 # Политика, решения, безопасность
 # ---------------------------------------------------------------------------------------------

@@ -421,6 +421,22 @@ python scripts/evaluate_detection.py --gate
 | [POSTSCREEN_EVALUATION.md](docs/POSTSCREEN_EVALUATION.md) | Оценка postscreen |
 | [MSP_1_2_ACCEPTANCE.md](docs/MSP_1_2_ACCEPTANCE.md) | Приёмка |
 
+### Этап MSP 1.3 — контролируемое принуждение
+
+> **MSP 1.3 IS NOT APPROVED FOR GLOBAL PRODUCTION MX CUTOVER.** Восемь контролей с независимым жизненным циклом, подписанная политика, канарейка по согласованию двух людей, общий выключатель,
+> откат, внутренний карантин. Глобального переключателя нет; известные пробелы (GAP-005, GAP-006) блокируют контроли технически.
+
+| Документ | Назначение |
+|---|---|
+| [ENFORCEMENT_ARCHITECTURE.md](docs/ENFORCEMENT_ARCHITECTURE.md), [ENFORCEMENT_POLICY.md](docs/ENFORCEMENT_POLICY.md) | Архитектура и политика |
+| [ENFORCEMENT_READINESS.md](docs/ENFORCEMENT_READINESS.md), [ENFORCEMENT_CANARY.md](docs/ENFORCEMENT_CANARY.md) | Готовность и канарейка |
+| [ENFORCEMENT_KILL_SWITCH.md](docs/ENFORCEMENT_KILL_SWITCH.md), [ENFORCEMENT_ROLLBACK.md](docs/ENFORCEMENT_ROLLBACK.md) | Выключатель и откат |
+| [SMTP_ACTION_SEMANTICS.md](docs/SMTP_ACTION_SEMANTICS.md) | Что и когда отвечает SMTP |
+| [QUARANTINE_ARCHITECTURE.md](docs/QUARANTINE_ARCHITECTURE.md), [QUARANTINE_OPERATIONS.md](docs/QUARANTINE_OPERATIONS.md) | Карантин |
+| [FALSE_POSITIVE_EMERGENCY.md](docs/FALSE_POSITIVE_EMERGENCY.md), [ENFORCEMENT_EXCEPTIONS.md](docs/ENFORCEMENT_EXCEPTIONS.md) | Ложные срабатывания и исключения |
+| [ENFORCEMENT_SLO.md](docs/ENFORCEMENT_SLO.md), [ENFORCEMENT_PILOT_PLAN.md](docs/ENFORCEMENT_PILOT_PLAN.md) | Показатели и план пилота |
+| [MSP_1_3_ACCEPTANCE.md](docs/MSP_1_3_ACCEPTANCE.md) | Приёмка |
+
 ## Ограничения
 
 MSP 1.1 добавляет транспортный узел на Postfix, но **не одобрен для боевого переключения MX**: нет высокой доступности, антиспама, принуждения SPF/DKIM/DMARC и пользовательского карантина.

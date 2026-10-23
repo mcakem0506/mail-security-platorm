@@ -794,6 +794,34 @@ def rollback(
     return target
 
 
+def return_to_shadow(
+    session: Session,
+    settings: Settings,
+    organization_id: str,
+    control: EnforcementControlRecord,
+    *,
+    actor_email: str,
+    reason: str,
+) -> EnforcementPolicyRecord:
+    """Вернуть контроль в наблюдение (после паузы или отката). Включить его снова можно только новым запросом вдвоём."""
+    current = ControlState(control.state)
+    if current is ControlState.SHADOW:
+        raise EnforcementError("контроль уже в наблюдении", 409)
+    if ControlState.SHADOW not in TRANSITIONS[current]:
+        raise EnforcementError(f"из состояния {control.state} в наблюдение вернуться нельзя", 409)
+    _signing_key(settings)
+    control.state = ControlState.SHADOW.value
+    control.canary_scope = {}
+    control.pending_request = {}
+    return publish(
+        session,
+        settings,
+        organization_id,
+        owner=actor_email,
+        justification=f"возврат в наблюдение: {reason}"[:500],
+    )
+
+
 # ---------------------------------------------------------------------------------------------
 # Общий выключатель
 # ---------------------------------------------------------------------------------------------

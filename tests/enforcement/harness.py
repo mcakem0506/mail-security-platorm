@@ -293,3 +293,45 @@ def decisions(admin: Person, **params: str) -> list[dict[str, Any]]:
 
 def rejected_text(result: dict[str, object]) -> str:
     return f"{result.get('code')} {result.get('error')}"
+
+
+def ensure_canary(
+    enf: EnforcementStack,
+    admin: Person,
+    admin2: Person,
+    kind: str = "SPAM_REJECT",
+    *,
+    scope: dict[str, Any] | None = None,
+    thresholds: dict[str, float] | None = None,
+) -> None:
+    """Привести контроль в канарейку обычным путём (готовность, запрос, согласование вторым человеком)."""
+    view = admin.get(f"{BASE}/controls/{kind}").json()
+    if view["state"] == "CANARY":
+        return
+    if view["state"] in ("PAUSED", "ROLLED_BACK"):
+        response = admin.post(f"{BASE}/controls/{kind}/shadow", {"reason": "подготовка проверки"})
+        assert response.status_code == 200, response.text
+        enf.wait_policy(str(response.json()["policy"]["version"]))
+    make_ready(enf, admin, kind)
+    activate(
+        enf,
+        admin,
+        admin2,
+        kind,
+        scope=scope or {"recipients": [CANARY_RCPT]},
+        thresholds=thresholds if thresholds is not None else {"reject_score": 12.0},
+    )
+
+
+def delivered(lab: EnforcementStack, message_id: str, timeout: float = 90.0) -> Any:
+    return lab.exchange1.wait_for(f"<{message_id}>", timeout=timeout) or lab.exchange2.wait_for(
+        f"<{message_id}>", timeout=2
+    )
+
+
+def not_delivered(lab: EnforcementStack, message_id: str, wait: float = 12.0) -> bool:
+    time.sleep(wait)
+    return (
+        lab.exchange1.wait_for(f"<{message_id}>", timeout=1) is None
+        and lab.exchange2.wait_for(f"<{message_id}>", timeout=1) is None
+    )

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import statistics
@@ -19,24 +20,22 @@ from tests.spam.harness import OTHER_IP, SENDER_IP
 from tests.spam.zone import Zone
 
 from .harness import (
-    BASE,
     CANARY_RCPT,
     OTHER_RCPT,
-    activate,
     build_case,
     decisions,
     dns_for,
-    make_ready,
+    ensure_canary,
     pause,
 )
 
-CONCURRENCY = 25
+#: Ограничение узла — 20 соединений от одного клиента (антизлоупотребление), поэтому по 18 с каждого из двух адресов.
+CONCURRENCY = 18
 SPAM_TO_CANARY = 30
 SPAM_TO_OTHER = 15
 LEGIT_TO_CANARY = 15
 
-SCRIPT = (
-    """
+SCRIPT_TEMPLATE = """
 import json, smtplib, sys, threading, time
 items = json.loads(sys.stdin.read())
 results = [None] * len(items)
@@ -70,8 +69,8 @@ threads = [threading.Thread(target=worker) for _ in range(%d)]
 [t.join() for t in threads]
 print(json.dumps(results))
 """
-    % CONCURRENCY
-)
+
+SCRIPT = SCRIPT_TEMPLATE.replace("%d", str(CONCURRENCY))
 
 
 def build_items(lab, tag: str):  # type: ignore[no-untyped-def]
@@ -110,9 +109,10 @@ def build_items(lab, tag: str):  # type: ignore[no-untyped-def]
 
 
 def burst(lab, items):  # type: ignore[no-untyped-def]
-    """Отправка группами по адресу источника: адрес задаёт контейнер клиента."""
-    results = []
-    for ip in sorted({i["ip"] for i in items}):
+    """Отправка двумя группами одновременно: адрес источника задаёт контейнер клиента (36 сессий в сумме)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def run_group(ip: str):  # type: ignore[no-untyped-def]
         part = [i for i in items if i["ip"] == ip]
         run = docker(
             "run",
@@ -131,8 +131,11 @@ def burst(lab, items):  # type: ignore[no-untyped-def]
             timeout=600,
         )
         out = json.loads(run.stdout.strip().splitlines()[-1])
-        results.extend({**part[r["i"]], **r} for r in out)
-    return results
+        return [{**part[r["i"]], **r} for r in out]
+
+    ips = sorted({i["ip"] for i in items})
+    with ThreadPoolExecutor(max_workers=len(ips)) as pool:
+        return [row for group in pool.map(run_group, ips) for row in group]
 
 
 def summarize(results):  # type: ignore[no-untyped-def]
@@ -151,22 +154,16 @@ class TestLoad:
             "mean": statistics.mean(r["seconds"] for r in results),
             "p95": sorted(r["seconds"] for r in results)[int(len(results) * 0.95) - 1],
         }
-        assert all(r["ok"] for r in results), [r for r in results if not r["ok"]][:3]
+        assert all(r["ok"] for r in results), [
+            {k: r.get(k) for k in ("kind", "code", "error", "seconds")} for r in results if not r["ok"]
+        ][:5]
         for r in results:
             assert lab.exchange1.wait_for(f"<{r['message_id']}>", timeout=120) or lab.exchange2.wait_for(
                 f"<{r['message_id']}>", timeout=2
             ), r["message_id"]
 
     def test_2_canary_rejects_only_the_canary_spam_and_loses_nothing(self, lab, admin, admin2) -> None:  # type: ignore[no-untyped-def]
-        make_ready(lab, admin, "SPAM_REJECT")
-        activate(
-            lab,
-            admin,
-            admin2,
-            "SPAM_REJECT",
-            scope={"recipients": [CANARY_RCPT]},
-            thresholds={"reject_score": 12.0},
-        )
+        ensure_canary(lab, admin, admin2)
         started = time.monotonic()
         results = burst(lab, build_items(lab, "c1"))
         by = summarize(results)
@@ -224,8 +221,5 @@ class TestLoad:
 @pytest.fixture(scope="module", autouse=True)
 def _restore(enf, admin):  # type: ignore[no-untyped-def]
     yield
-    try:
+    with contextlib.suppress(Exception):
         pause(enf, admin, "SPAM_REJECT")
-    except Exception:
-        pass
-    _ = BASE

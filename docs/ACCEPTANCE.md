@@ -246,3 +246,7 @@ NEXT PHASE:
 ## Этап MSP 1.2
 
 Дополнения этапа MSP 1.2. Приёмка анти-спама, аутентификации и репутации — в [MSP_1_2_ACCEPTANCE.md](MSP_1_2_ACCEPTANCE.md). **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
+
+## Этап MSP 1.3
+
+Дополнения этапа MSP 1.3. Приёмка контролируемого принуждения — в [MSP_1_3_ACCEPTANCE.md](MSP_1_3_ACCEPTANCE.md). **MSP 1.3 IS NOT APPROVED FOR GLOBAL PRODUCTION MX CUTOVER.**

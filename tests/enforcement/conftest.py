@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 from unittest import mock
 
@@ -24,6 +25,8 @@ from .harness import (
     EnforcementStack,
     Person,
     after_queue_spec,
+    ensure_canary,
+    pause,
 )
 
 
@@ -83,3 +86,12 @@ def lab(enf):  # type: ignore[no-untyped-def]
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+@pytest.fixture(scope="module")
+def canary_active(enf, admin, admin2):  # type: ignore[no-untyped-def]
+    """Контроль SPAM_REJECT в канарейке для получателя ivan@; после модуля возвращается в паузу."""
+    ensure_canary(enf, admin, admin2)
+    yield
+    with contextlib.suppress(Exception):
+        pause(enf, admin, "SPAM_REJECT")

@@ -1192,3 +1192,41 @@ class TestAlertsAndMetrics:
         assert "msp_enforcement_policy_info{" in text and "msp_kill_switch_active 1.0" in text
         assert 'msp_enforcement_decisions_total{control="SPAM_REJECT",decision="REJECT"}' in text
         assert 'msp_enforcement_actions_total{action="SMTP_REJECT",control="SPAM_REJECT"}' in text
+
+
+class TestRecipientSyncScope:
+    ROWS: ClassVar[dict[str, str]] = {
+        "format": "csv",
+        "content": "address,kind,aliases\n" + "\n".join(f"user{i}@corp.example,USER," for i in range(3)),
+        "source": "e2e",
+    }
+
+    def test_the_machine_endpoint_takes_only_the_recipient_sync_token(self, client, enf, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        monkeypatch.setattr(enf, "gateway_shared_token_allowed", False)
+        monkeypatch.setattr(enf, "recipient_sync_token", "r" * 40)
+        monkeypatch.setattr(enf, "enforcement_policy_token", POLICY_TOKEN)
+        ok = client.post(
+            "/api/v1/gateway-agent/recipients/sync", json=self.ROWS, headers=node_headers("r" * 40)
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["status"] == "ACCEPTED" and ok.json()["recipient_count"] == 3
+        for other in (POLICY_TOKEN, TOKEN):
+            denied = client.post(
+                "/api/v1/gateway-agent/recipients/sync", json=self.ROWS, headers=node_headers(other)
+            )
+            assert denied.status_code in (401, 503), other
+
+    def test_the_sync_is_audited_as_the_node_component(self, client, enf, engine, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+        from msp_api.db.models import AuditEvent
+        from sqlalchemy import select
+        from sqlalchemy.orm import sessionmaker
+
+        monkeypatch.setattr(enf, "recipient_sync_token", "r" * 40)
+        client.post("/api/v1/gateway-agent/recipients/sync", json=self.ROWS, headers=node_headers("r" * 40))
+        with sessionmaker(bind=engine)() as session:
+            events = (
+                session.execute(select(AuditEvent).where(AuditEvent.actor_email == "node:recipient-sync"))
+                .scalars()
+                .all()
+            )
+        assert events
