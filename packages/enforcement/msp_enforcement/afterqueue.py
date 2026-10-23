@@ -39,6 +39,9 @@ from .model import Decision
 from .node import EnforcementNode
 
 MAX_ANALYSIS_BYTES = 25 * 1024 * 1024
+#: Служебные получатели транспорта (копия для теневого анализа, always_bcc): не получатели письма и в область
+#: канарейки, решения и карантин не входят.
+INTERNAL_RECIPIENT_DOMAINS = frozenset({"journal.msp.invalid"})
 _RECEIVED_ID = re.compile(r"\bid ([0-9A-Za-z]{6,20})\b")
 _RECEIVED_IP = re.compile(r"\[(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]{3,39})\]")
 _ADDR = re.compile(r"<([^<>]*)>")
@@ -152,6 +155,10 @@ class AfterQueue:
     def process(self, raw: bytes, sender: str, rcpts: list[str]) -> tuple[int, str]:
         """Вернуть ответ SMTP фильтра. Никогда не 5xx."""
         meta = self.parse(raw)
+        deliver_to = list(rcpts)
+        rcpts = [r for r in rcpts if r.rsplit("@", 1)[-1].lower() not in INTERNAL_RECIPIENT_DOMAINS] or list(
+            rcpts
+        )
         started = time.monotonic()
         verdict = self.gate(raw, meta)
         elapsed = (time.monotonic() - started) * 1000.0
@@ -191,7 +198,7 @@ class AfterQueue:
             if self.quarantine(raw, meta, sender, rcpts, outcome):
                 return 250, "2.0.0 Ok: queued"
             self.node.counters["quarantine_failopen"] += 1  # хранилище недоступно: письмо доставляется
-        if self.reinject(raw, sender, rcpts):
+        if self.reinject(raw, sender, deliver_to):
             return 250, "2.0.0 Ok: queued"
         return 451, "4.3.0 Reinjection failed, try again later"
 
