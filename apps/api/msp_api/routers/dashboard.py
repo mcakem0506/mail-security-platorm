@@ -336,7 +336,13 @@ metrics_router = APIRouter(tags=["metrics"])
 
 
 @metrics_router.get("/metrics")
-def metrics(settings: AppSettings) -> Response:
+def metrics(settings: AppSettings, session: DbSession) -> Response:
     if not settings.metrics_enabled:
         return Response(status_code=404)
+    try:
+        from ..services import enforcement as _enforcement
+
+        _enforcement.refresh_gauges(session)
+    except Exception:  # noqa: BLE001 - показатели принуждения не должны ломать выдачу остальных метрик
+        session.rollback()
     return Response(content=render_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")

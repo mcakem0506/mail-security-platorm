@@ -13,6 +13,7 @@ import contextlib
 import re
 import time
 from email.message import EmailMessage
+from email.policy import SMTP
 from unittest import mock
 
 import httpx
@@ -37,7 +38,7 @@ NODE = "00000000000000000000000000000001"
 
 def encrypted_mail(token: str, rcpt: str = CANARY_RCPT) -> tuple[str, bytes]:
     message_id = f"q-{token}@partner.example"
-    msg = EmailMessage()
+    msg = EmailMessage(policy=SMTP)
     msg["From"] = "partner@partner.example"
     msg["To"] = rcpt
     msg["Subject"] = f"Документы {token}"

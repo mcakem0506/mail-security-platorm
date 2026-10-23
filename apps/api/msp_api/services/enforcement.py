@@ -52,6 +52,7 @@ from msp_enforcement.readiness import (
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import observability as obs
 from ..config import Settings
 from ..db.base import utcnow
 from ..db.models import DetectionGapRecord
@@ -815,6 +816,7 @@ def activate_kill_switch(
     if row.kill_switch:
         return row
     row.kill_switch = True
+    obs.kill_switch_total.inc()
     row.reason = (reason or "без указания причины")[:1000]
     row.activated_by = actor_email
     row.activated_at = now()
@@ -898,6 +900,15 @@ def ingest_decisions(
             )
         )
         accepted += 1
+        applied = str(raw.get("applied_action", "OBSERVE_ONLY"))
+        obs.enforcement_decisions.labels(control.value, str(raw.get("decision", "NO_DECISION"))).inc()
+        if applied in ("SMTP_REJECT", "SMTP_TEMPFAIL", "QUARANTINED", "HELD"):
+            obs.enforcement_actions.labels(control.value, applied).inc()
+        if raw.get("fail_mode_applied"):
+            obs.enforcement_timeouts.labels(control.value).inc()
+        obs.enforcement_decision_seconds.labels(control.value).observe(
+            float(raw.get("latency_ms") or 0.0) / 1000.0
+        )
     session.flush()
     return {"accepted": accepted, "duplicate": duplicate, "rejected": rejected}
 
@@ -969,6 +980,8 @@ def review_decision(
     if outcome not in ("CORRECT", "FALSE_POSITIVE"):
         raise EnforcementError("исход: CORRECT или FALSE_POSITIVE", 422)
     row.review_outcome = outcome
+    if outcome == "FALSE_POSITIVE":
+        obs.enforcement_fp_total.labels(row.control_type).inc()
     row.review_critical = bool(critical and outcome == "FALSE_POSITIVE")
     row.reviewed_by = actor_email
     row.reviewed_at = now()
@@ -1511,6 +1524,10 @@ def note_node_state(session: Session, organization_id: str, node_id: str, state:
     node = get_or_create_node(session, organization_id, node_id)
     details = dict(node.details or {})
     previous = bool((details.get("enforcement") or {}).get("local_bypass"))
+    before_errors = int((details.get("enforcement") or {}).get("errors_total") or 0)
+    now_errors = int(state.get("errors_total") or 0)
+    if now_errors > before_errors:
+        obs.enforcement_errors.labels(node_id[:8]).inc(now_errors - before_errors)
     current = bool(state.get("local_bypass"))
     details["enforcement"] = {
         "policy_checksum": str(state.get("policy_checksum", ""))[:64],
@@ -1615,3 +1632,34 @@ def gate_analyze(
         "transport_message_id": message.id,
         "job_id": job_id,
     }
+
+
+def refresh_gauges(session: Session) -> None:
+    """Обновить показатели, зависящие от базы, перед выдачей метрик. Сбой базы метрики не ломает."""
+    organization = session.execute(select(EnforcementControlRecord.organization_id)).scalars().first()
+    if organization is None:
+        return
+    obs.enforcement_control_state.clear()
+    for row in ensure_controls(session, organization):
+        obs.enforcement_control_state.labels(row.control_type, row.state).set(1)
+    current = current_policy(session, organization)
+    obs.enforcement_policy_info.clear()
+    obs.enforcement_policy_drift.clear()
+    if current is not None:
+        obs.enforcement_policy_info.labels(current.version, current.checksum[:12]).set(1)
+        for node in session.execute(
+            select(TransportNode).where(TransportNode.organization_id == organization)
+        ).scalars():
+            reported = (node.details or {}).get("enforcement") or {}
+            if reported:
+                obs.enforcement_policy_drift.labels(node.node_id[:8]).set(
+                    0 if reported.get("policy_checksum") == current.checksum else 1
+                )
+    obs.kill_switch_active.set(1 if switch_row(session, organization).kill_switch else 0)
+    obs.quarantine_items.clear()
+    for state, count in session.execute(
+        select(QuarantineItemRecord.state, func.count())
+        .where(QuarantineItemRecord.organization_id == organization)
+        .group_by(QuarantineItemRecord.state)
+    ).all():
+        obs.quarantine_items.labels(state.value).set(count)

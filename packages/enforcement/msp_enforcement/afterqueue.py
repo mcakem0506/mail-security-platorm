@@ -47,6 +47,19 @@ _RECEIVED_IP = re.compile(r"\[(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-fA-F:]{3,39})\]")
 _ADDR = re.compile(r"<([^<>]*)>")
 
 
+_BARE_LF = re.compile(rb"(?<!\r)\n")
+
+
+def wire_form(raw: bytes) -> bytes:
+    """Письмо в том виде, в каком его передаёт SMTP: строки оканчиваются CRLF.
+
+    Postfix отвергает одиночный LF (``smtpd_forbid_bare_newline``). Письмо, которое он сам передал фильтру, уже в
+    таком виде и не меняется; ослабляется только хранимая копия, записанная с LF (например, пересобранная вручную).
+    Подписанное DKIM содержимое от этого не меняется: каноникализация DKIM работает с CRLF.
+    """
+    return _BARE_LF.sub(b"\r\n", raw)
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -141,6 +154,7 @@ class AfterQueue:
 
     # --- повторная подача -------------------------------------------------------------------
     def reinject(self, raw: bytes, sender: str, rcpts: list[str]) -> bool:
+        raw = wire_form(raw)
         try:
             with smtplib.SMTP(
                 self.reinject_host, self.reinject_port, timeout=60, local_hostname="gateway-afterqueue"
@@ -357,6 +371,11 @@ def cli(argv: list[str] | None = None) -> int:
     node = EnforcementNode(NodeConfig())
     node.sync_policy()
     threading.Thread(target=background_loop, args=(node,), daemon=True).start()
+    # Метрики и проверка живости; решения для Rspamd здесь не принимаются (разрешённых клиентов нет).
+    from .node import serve
+
+    metrics = serve(node, "0.0.0.0", 11390)  # noqa: S104 - в изолированной сети узла
+    threading.Thread(target=metrics.serve_forever, daemon=True).start()
     run(
         AfterQueue(
             node,

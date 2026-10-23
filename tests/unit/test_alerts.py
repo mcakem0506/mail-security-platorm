@@ -136,6 +136,10 @@ def _exported_metrics() -> set[str]:
     from msp_antispam.metrics import METRIC_NAMES
 
     names.update(METRIC_NAMES)
+    # Метрики службы принуждения узла (MSP 1.3).
+    from msp_enforcement.metrics import METRIC_NAMES as ENFORCEMENT_NAMES
+
+    names.update(ENFORCEMENT_NAMES)
     # Метрики анти-спама самой панели объявлены в observability.py и учтены выше.
     for name in list(names):
         if name == "msp_gateway_delivery_delay_seconds":

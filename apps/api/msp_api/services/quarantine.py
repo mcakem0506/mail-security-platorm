@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import observability as obs
 from ..config import Settings
 from ..db.base import utcnow
 from ..db.models_enforcement import QuarantineItemRecord, QuarantineState
@@ -347,7 +348,9 @@ def confirm_release(
         row.released_at = now()
         row.delivered_count += 1
         row.error = ""
+        obs.quarantine_release_total.labels("delivered").inc()
     else:
+        obs.quarantine_release_total.labels("failed").inc()
         row.release_token_hash = ""
         row.error = error[:300]
     return row
@@ -361,6 +364,7 @@ def delete_item(
     if row.content_object_ref:
         storage.delete(row.content_object_ref)
     row.state = QuarantineState.DELETED
+    obs.quarantine_delete_total.inc()
     row.deleted_by = actor_email
     row.release_token_hash = ""
     return row

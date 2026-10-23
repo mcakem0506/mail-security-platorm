@@ -132,6 +132,7 @@ ignore = [
 "apps/api/msp_api/services/enforcement.py" = ["E501"]
 "apps/api/msp_api/services/quarantine.py" = ["E501"]
 "apps/api/msp_api/services/credentials.py" = ["E501"]
+"apps/api/msp_api/services/enforcement_alerts.py" = ["E501"]
 "apps/api/msp_api/routers/enforcement.py" = ["E501"]
 "apps/api/msp_api/db/models_enforcement.py" = ["E501"]
 "tests/unit/test_enforcement_*.py" = ["E501"]

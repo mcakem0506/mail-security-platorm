@@ -274,6 +274,8 @@ class EnforcementNode:
             f"msp_enforcement_decisions_dropped_total {self.counters['decisions_dropped']}",
             f"msp_enforcement_panel_errors_total {self.counters['panel_errors']}",
             f"msp_enforcement_policy_stale {int(status in (PolicyStatus.STALE, PolicyStatus.SAFE_MODE))}",
+            f"msp_enforcement_gate_errors_total {self.counters['gate_errors']}",
+            f"msp_enforcement_quarantine_failopen_total {self.counters['quarantine_failopen']}",
         ]
         for key, value in sorted(self.counters.items()):
             if key.startswith("evaluated:"):

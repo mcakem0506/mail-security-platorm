@@ -1123,3 +1123,72 @@ class TestSafetyAndMetrics:
         )
         body = as_(client, people, "admin").get(f"{BASE}/metrics").json()["per_control"]["SPAM_REJECT"]
         assert (body["evaluated"], body["applied"], body["bypassed"]) == (3, 1, 1)
+
+
+class TestAlertsAndMetrics:
+    def alerts(self, client, people) -> dict[str, dict]:  # type: ignore[no-untyped-def]
+        body = as_(client, people, "admin").get("/api/v1/gateway/alerts").json()
+        return {a["code"]: a for a in body["items"]} if "items" in body else {a["code"]: a for a in body}
+
+    def test_the_kill_switch_raises_a_critical_alert(self, client, people, enf) -> None:  # type: ignore[no-untyped-def]
+        as_(client, people, "admin").get(f"{BASE}/controls")
+        assert "KILL_SWITCH_ACTIVE" not in self.alerts(client, people)
+        as_(client, people, "platform").post(f"{BASE}/kill-switch", {"reason": "проверка тревоги"})
+        found = self.alerts(client, people)["KILL_SWITCH_ACTIVE"]
+        assert found["severity"] == "CRITICAL"
+
+    def test_a_local_bypass_and_policy_drift_are_alerted(self, client, people, enf) -> None:  # type: ignore[no-untyped-def]
+        admin = as_(client, people, "admin")
+        admin.get(f"{BASE}/policies/current")
+        client.post(
+            "/api/v1/gateway-agent/enforcement/state",
+            json={
+                "node_id": NODE,
+                "state": {"local_bypass": True, "policy_checksum": "0" * 64, "policy_status": "STALE"},
+            },
+            headers=node_headers(),
+        )
+        codes = set(self.alerts(client, people))
+        assert {"LOCAL_BYPASS_ACTIVE", "POLICY_DRIFT", "POLICY_STALE"} <= codes
+
+    def test_a_hidden_rspamd_action_source_is_alerted(self, client, people, enf) -> None:  # type: ignore[no-untyped-def]
+        as_(client, people, "admin").get(f"{BASE}/controls")
+        report_clean_node(client, clean=False)
+        assert self.alerts(client, people)["HIDDEN_RSPAMD_ACTION"]["severity"] == "CRITICAL"
+
+    def test_an_open_incident_is_a_critical_alert_and_a_gap_blocked_active_control_too(  # type: ignore[no-untyped-def]
+        self, client, people, enf, engine
+    ) -> None:
+        from msp_api.db.models_enforcement import EnforcementControlRecord
+        from sqlalchemy import select
+        from sqlalchemy.orm import sessionmaker
+
+        admin = as_(client, people, "admin")
+        admin.post(f"{BASE}/incidents", {"control": "SPAM_REJECT", "title": "проверка тревоги инцидента"})
+        cid = control_id(admin, "DMARC_REJECT")
+        with sessionmaker(bind=engine, expire_on_commit=False)() as session:
+            row = session.execute(
+                select(EnforcementControlRecord).where(EnforcementControlRecord.id == cid)
+            ).scalar_one()
+            row.state = "CANARY"
+            session.commit()
+        codes = self.alerts(client, people)
+        assert codes["CRITICAL_FALSE_POSITIVE"]["severity"] == "CRITICAL"
+        assert codes["CONTROL_ACTIVE_WHILE_GAP_BLOCKED"]["severity"] == "CRITICAL"
+
+    def test_the_metrics_endpoint_reports_control_state_policy_and_the_switch(
+        self, client, people, enf
+    ) -> None:  # type: ignore[no-untyped-def]
+        admin = as_(client, people, "admin")
+        admin.get(f"{BASE}/policies/current")
+        as_(client, people, "platform").post(f"{BASE}/kill-switch", {"reason": "проверка метрик"})
+        post_decisions(
+            client,
+            decision(),
+            decision(transport_message_id="Q9", applied_action="OBSERVE_ONLY", decision="ALLOW"),
+        )
+        text = client.get("/metrics").text
+        assert 'msp_enforcement_control_state{control="SPAM_REJECT",state="SHADOW"} 1.0' in text
+        assert "msp_enforcement_policy_info{" in text and "msp_kill_switch_active 1.0" in text
+        assert 'msp_enforcement_decisions_total{control="SPAM_REJECT",decision="REJECT"}' in text
+        assert 'msp_enforcement_actions_total{action="SMTP_REJECT",control="SPAM_REJECT"}' in text
