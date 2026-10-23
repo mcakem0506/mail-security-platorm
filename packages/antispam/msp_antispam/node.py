@@ -86,6 +86,24 @@ def effective_actions_audit(staged: Path) -> tuple[bool, str]:
     except ValueError:
         return False, "не удалось получить итоговую конфигурацию (configdump)"
     report = audit(dump)
+    gate = staged / "local.d" / "msp_enforcement.conf"
+    if gate.is_file() and "enabled = true" in gate.read_text(encoding="utf-8"):
+        # Известный и принятый источник действия: шлюз принуждения этапа 1.3. Виден в отчёте, но не блокирует.
+        from .effective_actions import ActionSource, EffectiveActionsReport
+
+        report = EffectiveActionsReport(
+            clean=report.clean,
+            checked=report.checked,
+            sources=(
+                *report.sources,
+                ActionSource(
+                    module="msp_enforcement",
+                    kind="MSP_ENFORCEMENT_GATE",
+                    detail="предварительный результат по решению локальной службы принуждения",
+                    approved=True,
+                ),
+            ),
+        )
     with contextlib.suppress(OSError):
         (staged / "effective_actions_report.json").write_text(
             report.model_dump_json(indent=1), encoding="utf-8"

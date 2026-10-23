@@ -229,6 +229,10 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
                 f"  -o smtpd_milters={spec.milter.inbound_socket}",
                 f"  -o milter_macro_daemon_name={spec.hostname}",
             ]
+        if spec.afterqueue.enabled:
+            out.append(
+                f"  -o content_filter=smtp:[{spec.afterqueue.filter_host}]:{spec.afterqueue.filter_port}"
+            )
 
     if spec.internal.enabled:
         relay = (
@@ -255,6 +259,27 @@ def render_master_cf(spec: GatewaySpec, *, config_dir: str, state_dir: str) -> s
                 f"  -o smtpd_milters={spec.milter.outbound_socket}",
                 f"  -o milter_macro_daemon_name={spec.hostname}",
             ]
+        if spec.afterqueue.enabled and spec.afterqueue.outbound_filter_port:
+            aq = spec.afterqueue
+            out.append(f"  -o content_filter=smtp:[{aq.filter_host}]:{aq.outbound_filter_port}")
+
+    if spec.afterqueue.enabled:
+        # Слушатель повторной подачи: только от фильтра, без фильтра и сканера
+        # (повторного разбора и петли нет, ТЗ 1.3 §35).
+        out += [
+            f"{spec.afterqueue.reinject_host}:{spec.afterqueue.reinject_port} inet n - n - - smtpd",
+            "  -o syslog_name=postfix-reinject",
+            f"  -o mynetworks={spec.afterqueue.filter_host}/32",
+            "  -o content_filter=",
+            "  -o smtpd_milters=",
+            "  -o smtpd_tls_security_level=none",
+            "  -o smtpd_client_restrictions=permit_mynetworks,reject",
+            "  -o smtpd_helo_restrictions=",
+            "  -o smtpd_sender_restrictions=",
+            "  -o smtpd_relay_restrictions=permit_mynetworks,reject",
+            "  -o smtpd_recipient_restrictions=permit_mynetworks,reject",
+            "  -o smtpd_data_restrictions=",
+        ]
 
     out += _standard_services()
 

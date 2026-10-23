@@ -372,7 +372,7 @@ class TestDecisions:
         assert out.final is not None and out.final.decision is Decision.REJECT
         assert out.final.applied_action is AppliedAction.SMTP_REJECT
         assert out.final.policy_version == "v1" and out.final.evidence_ids == ("scan-1",)
-        assert out.smtp_reply.startswith("550 ")
+        assert out.smtp_reply.startswith("554 ")
         for secret in ("18", "BAYES", "SPAM_HIGH_SCORE", "rspamd", "RBL"):
             assert secret not in out.smtp_reply
 

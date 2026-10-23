@@ -1203,4 +1203,47 @@ def agent_quarantine_confirm(
     return {"state": row.state.value, "delivered_count": row.delivered_count}
 
 
+class GateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    node_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    queue_id: str = Field(default="", max_length=40)
+    message_id: str = Field(default="", max_length=998)
+    direction: Literal["INBOUND", "OUTBOUND"] = "INBOUND"
+    client_address: str = Field(default="", max_length=64)
+    raw_b64: str = Field(min_length=4)
+
+
+@agent_router.post("/enforcement/gate")
+def agent_gate(
+    body: GateBody, session: DbSession, settings: AppSettings, _auth: PolicyAuth
+) -> dict[str, Any]:
+    """Полный анализ письма для послеочередного шлюза. Ответ — свидетельства; решение принимает узел."""
+    org = _organization(session)
+    try:
+        raw = base64.b64decode(body.raw_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "письмо не в base64") from exc
+    if len(raw) > settings.limit_message_size:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "письмо больше предела анализа")
+    try:
+        result = enforcement.gate_analyze(
+            session,
+            settings,
+            build_storage(settings),
+            org.id,
+            node_id=body.node_id,
+            queue_id=body.queue_id,
+            message_id=body.message_id,
+            direction=body.direction,
+            raw=raw,
+            client_address=body.client_address,
+        )
+    except Exception as exc:  # noqa: BLE001 - сбой анализа не должен отвечать узлу ошибкой, ломающей почту
+        logger.warning("enforcement.gate_failed", extra={"error": type(exc).__name__})
+        session.rollback()
+        return {"risk_verdict": "UNKNOWN", "analysis": "FAILED"}
+    session.commit()
+    return result
+
+
 __all__ = ["agent_router", "router"]

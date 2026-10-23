@@ -213,6 +213,9 @@ MASTER_CF_OPTIONS = frozenset(
         "smtp_fallback_relay",
         "smtpd_milters",
         "milter_macro_daemon_name",
+        "content_filter",
+        "smtpd_helo_restrictions",
+        "smtpd_sender_restrictions",
     }
 )
 
@@ -221,6 +224,7 @@ MASTER_CF_OPTIONS = frozenset(
 ALLOWED_PIPE_EXECUTABLE = "/usr/local/bin/msp-journal-write"
 ALLOWED_PIPE_USER = "mspjournal"
 
+_FILTER = re.compile(r"smtp:\[[0-9]{1,3}(\.[0-9]{1,3}){3}\]:[0-9]{4,5}")
 _KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*) =( |$)")
 _SERVICE_TYPES = frozenset({"inet", "unix", "unix-dgram", "fifo", "pass"})
 
@@ -286,13 +290,16 @@ def _check_option(option: str, number: int) -> None:
     name, _, value = option.partition("=")
     if name not in MASTER_CF_OPTIONS:
         raise BundleError(f"master.cf:{number}: параметр -o вне белого списка")
-    if name == "smtpd_milters":
+    if name == "smtpd_milters" and value:
         # Сокет сканера — единственное значение с адресом: другая форма (список, макросы,
         # несколько сокетов) отвергается, а не нормализуется.
         try:
             validation.milter_socket(value, "smtpd_milters")
         except validation.ConfigValueError as error:
             raise BundleError(f"master.cf:{number}: сокет Milter не принят") from error
+    if name == "content_filter" and value and not _FILTER.fullmatch(value):
+        # Фильтр — единственный адрес вида smtp:[IPv4]:порт (или пусто для слушателя повторной подачи).
+        raise BundleError(f"master.cf:{number}: content_filter не принят")
     if name == "milter_macro_daemon_name":
         # Это значение сканер пишет в Authentication-Results как authserv-id: оно должно быть
         # именем узла, уникальным среди узлов (ТЗ 1.2 §12).

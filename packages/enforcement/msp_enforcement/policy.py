@@ -38,7 +38,7 @@ class ControlPolicy(Strict):
     fail_mode: FailMode | None = None
     hard_timeout_ms: int = Field(default=1500, ge=50, le=MAX_HARD_TIMEOUT_MS)
     #: Общий ответ SMTP без внутренних оценок, правил и топологии (§53).
-    reject_reply: str = "550 5.7.1 Message rejected by local policy"
+    reject_reply: str = "554 5.7.1 Message rejected by local policy"
     tempfail_reply: str = "451 4.7.1 Temporary local policy deferral, try again later"
 
     @model_validator(mode="after")

@@ -309,6 +309,7 @@ def pending_for_node(
                 "size_bytes": row.size_bytes,
                 "original_route": row.original_route,
                 "recipients": row.recipients,
+                "sender": row.sender,
                 "sha256": row.content_sha256,
                 "expires_at": row.release_token_expires_at.isoformat(),
             }

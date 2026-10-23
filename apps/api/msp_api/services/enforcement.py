@@ -1525,3 +1525,93 @@ def note_node_state(session: Session, organization_id: str, node_id: str, state:
     }
     node.details = details
     return current and not previous
+
+
+# ---------------------------------------------------------------------------------------------
+# Послеочередной шлюз: полный анализ MSP до решения о карантине (ТЗ 1.3 §11, §12, §31)
+# ---------------------------------------------------------------------------------------------
+def gate_analyze(
+    session: Session,
+    settings: Settings,
+    storage: Any,
+    organization_id: str,
+    *,
+    node_id: str,
+    queue_id: str,
+    message_id: str,
+    direction: str,
+    raw: bytes,
+    client_address: str = "",
+) -> dict[str, Any]:
+    """Синхронный полный анализ принятого письма. Письмо уже в очереди Postfix: сбой здесь не теряет почту."""
+    import hashlib
+
+    from msp_contracts import IntakeSource
+
+    from ..db.models import AnalysisResult
+    from ..db.models_transport import TransportMessage
+    from .intake import begin_intake
+    from .transport_analysis import analyze_transport_message
+
+    digest = hashlib.sha256(raw).hexdigest()
+    key = f"gate:{node_id}:{digest}"
+    message = session.execute(
+        select(TransportMessage).where(
+            TransportMessage.organization_id == organization_id, TransportMessage.idempotency_key == key
+        )
+    ).scalar_one_or_none()
+    if message is None:
+        message = TransportMessage(
+            organization_id=organization_id,
+            node_id=node_id,
+            idempotency_key=key,
+            direction=direction if direction in ("INBOUND", "OUTBOUND") else "UNKNOWN",
+            queue_id=queue_id[:40],
+            internet_message_id=message_id[:998],
+            content_sha256=digest,
+            size_bytes=len(raw),
+            client_address=client_address[:64],
+        )
+        session.add(message)
+        session.flush()
+        outcome = begin_intake(
+            session,
+            settings,
+            organization_id=organization_id,
+            source=IntakeSource.SHADOW,
+            source_id=f"gateway:{node_id}",
+            mailbox_uid=key[:64],
+            raw=raw,
+            internet_message_id=message_id,
+            content_sha256=digest,
+            storage=storage,
+        )
+        message.raw_storage_key = outcome.record.raw_storage_key
+    status, job_id = analyze_transport_message(session, settings, message.id, storage)
+    result = (
+        session.execute(select(AnalysisResult).where(AnalysisResult.job_id == job_id)).scalar_one_or_none()
+        if job_id
+        else None
+    )
+    if result is None:
+        return {"risk_verdict": "UNKNOWN", "analysis": status, "transport_message_id": message.id}
+    facts = result.facts or {}
+    codes = [
+        str(r.get("id") or r.get("code") or r) if isinstance(r, dict) else str(r)
+        for r in (result.reasons or [])
+    ]
+    return {
+        "risk_verdict": result.classification.value,
+        "risk_score": result.score,
+        "reasons": codes[:12],
+        "encrypted_unscannable": bool(
+            facts.get("attachment_encrypted_archive")
+            or facts.get("limit_archive_encrypted_unscannable")
+            or result.scan_completeness == "UNSCANNABLE"
+        ),
+        "malware_detected": bool(facts.get("av_detection")),
+        "scan_completeness": result.scan_completeness,
+        "analysis": status,
+        "transport_message_id": message.id,
+        "job_id": job_id,
+    }
