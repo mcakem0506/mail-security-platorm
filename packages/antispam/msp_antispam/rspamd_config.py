@@ -617,6 +617,7 @@ def apply_release(
     configtest: Callable[[Path], tuple[bool, str]],
     reload: Callable[[], None],
     healthcheck: Callable[[], bool],
+    audit: Callable[[Path], tuple[bool, str]] | None = None,
 ) -> ReleaseOutcome:
     """Выпустить конфигурацию. При любой неудаче рабочая версия остаётся прежней."""
     try:
@@ -627,6 +628,13 @@ def apply_release(
     ok, detail = configtest(staged)
     if not ok:
         return ReleaseOutcome("REJECTED", rendered.config_version, f"configtest: {detail[:200]}")
+    if audit is not None:
+        # Неизвестный источник reject или soft reject блокирует активацию (ТЗ 1.3 §50).
+        clean, audit_detail = audit(staged)
+        if not clean:
+            return ReleaseOutcome(
+                "REJECTED", rendered.config_version, f"effective actions: {audit_detail[:300]}"
+            )
     previous = store.active_version()
     store.activate(rendered.config_version)
     try:

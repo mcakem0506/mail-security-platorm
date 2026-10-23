@@ -66,6 +66,35 @@ def configtest(staged: Path) -> tuple[bool, str]:
     return ok, output[-1] if output else ""
 
 
+def effective_actions_audit(staged: Path) -> tuple[bool, str]:
+    """Итоговая конфигурация выпуска → отчёт о том, что может изменить судьбу письма (ТЗ 1.3 §50).
+
+    Отчёт сохраняется рядом с выпуском (``effective_actions_report.json``). Не удалось получить конфигурацию
+    — это тоже отказ: непроверенный выпуск не активируется.
+    """
+    from .effective_actions import audit
+
+    result = subprocess.run(  # noqa: S603  # nosec B603
+        [RSPAMADM, f"--var=LOCAL_CONFDIR={staged}", "configdump", "-c", ENTRY_CONFIG, "-j"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    try:
+        dump = json.loads(result.stdout)
+    except ValueError:
+        return False, "не удалось получить итоговую конфигурацию (configdump)"
+    report = audit(dump)
+    with contextlib.suppress(OSError):
+        (staged / "effective_actions_report.json").write_text(
+            report.model_dump_json(indent=1), encoding="utf-8"
+        )
+    if report.clean:
+        return True, ""
+    return False, "; ".join(f"{s.kind}: {s.detail}" for s in report.unknown)
+
+
 def rspamd_pid() -> int | None:
     """PID главного процесса. В режиме без форка файла PID нет, поэтому процесс ищется по названию."""
     try:
@@ -179,6 +208,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         cfg,
         configtest=configtest,
         reload=reload_rspamd,
+        audit=effective_actions_audit,
         # До первого запуска сканера проверять нечего: проверка здоровья имеет смысл после reload.
         healthcheck=verified if started else (lambda: True),
     )
@@ -448,6 +478,7 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
                 cfg,
                 configtest=configtest,
                 reload=reload_rspamd,
+                audit=effective_actions_audit,
                 healthcheck=healthcheck,
             )
             state["last_apply"] = {

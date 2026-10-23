@@ -76,6 +76,7 @@ where = [
   "packages/gateway",
   "packages/attachment-sandbox",
   "packages/antispam",
+  "packages/enforcement",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",
