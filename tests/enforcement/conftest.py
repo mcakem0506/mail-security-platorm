@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from unittest import mock
 
 import pytest
+from msp_gateway.spec import Limits
 
 from tests.gateway.harness import LAB_RECIPIENTS
 from tests.gateway.panel import Panel
@@ -51,7 +52,12 @@ def enf(tmp_path_factory):  # type: ignore[no-untyped-def]
     stack.panel = panel  # type: ignore[attr-defined]
     try:
         stack.write_enforcement_secrets()
-        stack.up(milter_spec(afterqueue=after_queue_spec()), LAB_RECIPIENTS)
+        # Ограничения шлюза на клиента (защита от злоупотребления) проверяются в tests/gateway; здесь они снимаются, чтобы
+        # нагрузочная проверка измеряла задержку решения, а не срабатывание anvil (мгновенные 421 на медленном CI).
+        limits = Limits(
+            max_connections_per_client=500, max_concurrent_connections=1000, connection_rate_limit=100_000
+        )
+        stack.up(milter_spec(afterqueue=after_queue_spec(), limits=limits), LAB_RECIPIENTS)
         yield stack
     finally:
         stack.down()
