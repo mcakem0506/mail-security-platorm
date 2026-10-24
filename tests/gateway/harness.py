@@ -584,7 +584,26 @@ class Stack:
             if condition():
                 return
             time.sleep(interval)
-        raise TimeoutError(f"не дождались: {what}\n{self.postfix_log()[-2500:]}")
+        raise TimeoutError(
+            f"не дождались: {what}\n{self.queue_snapshot()}\n{self.postfix_log_without_probes()[-2500:]}"
+        )
+
+    def queue_snapshot(self) -> str:
+        """Очередь по именам (active/deferred): видно, не пропустил ли сброс письма в обработке."""
+        rows = [f"{r.get('queue_id')} {r.get('queue_name')}" for r in self.queue()]
+        return "очередь: " + ("; ".join(rows) if rows else "пуста")
+
+    def postfix_log_without_probes(self) -> str:
+        """Журнал без пробных соединений проверки живости: они забивают хвост и прячут доставку."""
+        return "\n".join(
+            line
+            for line in self.postfix_log().splitlines()
+            if "relay-probe" not in line and "127.0.0.1" not in line
+        )
+
+    def deferred_size(self) -> int:
+        """Письма, ожидающие следующей попытки; обрабатываемые прямо сейчас (active) не считаются."""
+        return sum(1 for r in self.queue() if r.get("queue_name") == "deferred")
 
     def queue_ids(self) -> set[str]:
         return {str(item.get("queue_id")) for item in self.queue()}
