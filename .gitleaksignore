@@ -15,3 +15,9 @@ de76377c481af8191f506c48d84b61171c6ffc15:tests/security/test_real_flow_logging.p
 # вызове сборщика образца; это синтетический тестовый архив, не учётные данные. Отпечаток называет
 # коммит, файл, правило и строку.
 4f94ab049af3ce4d1e3e6493d3e57d90f4decf2a:tests/unit/test_attachment_pipeline.py:generic-api-key:71
+
+# MSP 1.3: пример конфигурации — пустое значение MSP_QUARANTINE_ENCRYPTION_KEY=, секрета в строке нет.
+25b5238f8be447a972a1d9ec672df8ab8cd818f3:.env.example:generic-api-key:324
+# MSP 1.3: снимок конфигурации Rspamd лабораторного стенда; значение ключа заменено заглушкой в следующем коммите,
+# ключ относился только к одноразовому лабораторному контейнеру.
+edeb44c5d53e279034359b2c45e374cd5c7aa583:tests/fixtures/rspamd/configdump_effective.json:generic-api-key:1
