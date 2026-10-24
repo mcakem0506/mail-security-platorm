@@ -150,6 +150,7 @@ def summarize(results):  # type: ignore[no-untyped-def]
 class TestLoad:
     baseline: ClassVar[dict[str, float]] = {}
     canary: ClassVar[dict[str, float]] = {}
+    baseline_finished: ClassVar[float] = 0.0
 
     def test_1_shadow_baseline_loses_nothing(self, lab, admin) -> None:  # type: ignore[no-untyped-def]
         started = time.monotonic()
@@ -159,6 +160,7 @@ class TestLoad:
             "mean": statistics.mean(r["seconds"] for r in results),
             "p95": sorted(r["seconds"] for r in results)[int(len(results) * 0.95) - 1],
         }
+        TestLoad.baseline_finished = time.monotonic()
         assert all(r["ok"] for r in results), [
             {k: r.get(k) for k in ("kind", "code", "error", "seconds")} for r in results if not r["ok"]
         ][:5]
@@ -171,6 +173,8 @@ class TestLoad:
         # Очередь теневых копий первой серии разобрана до активации: общий замок базы стенда не должен задерживать решения.
         wait_panel_quiet(lab)
         ensure_canary(lab, admin, admin2)
+        # Окно ограничения шлюза — 60 сессий в минуту с одного адреса: вторая серия не должна попасть в окно первой.
+        time.sleep(max(0.0, TestLoad.baseline_finished + 65.0 - time.monotonic()))
         started = time.monotonic()
         results = burst(lab, build_items(lab, "c1"))
         by = summarize(results)
@@ -181,9 +185,11 @@ class TestLoad:
         }
         # Спам получателям канарейки — общий 5xx; всё остальное принято без ошибок.
         assert all((not r["ok"]) and str(r.get("code", "")).startswith("5") for r in by["spam_canary"]), (
-            [{k: r.get(k) for k in ("ok", "code", "error", "seconds")} for r in by["spam_canary"] if r["ok"]][
-                :5
-            ],
+            [
+                {k: r.get(k) for k in ("ok", "code", "error", "seconds")}
+                for r in by["spam_canary"]
+                if not (not r["ok"] and str(r.get("code", "")).startswith("5"))
+            ][:5],
             docker("logs", "--tail", "40", lab.enforcement_container, check=False).stderr[-2500:],
         )
         assert all(r["ok"] for r in by["spam_other"] + by["legit_canary"]), [
