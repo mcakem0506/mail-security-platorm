@@ -29,7 +29,7 @@ from ..security.rbac import Permission
 from ..services import antispam
 from ..services.dns_lookup import txt_records
 from ..services.storage import build_storage
-from .transport import NodeAuth
+from .transport import NodeAuth, ShadowAuth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gateway", tags=["antispam"])
@@ -813,7 +813,7 @@ class ScansRequest(BaseModel):
 
 @agent_router.post("/spam-scans")
 def agent_spam_scans(
-    body: ScansRequest, session: DbSession, _auth: NodeAuth, settings: AppSettings
+    body: ScansRequest, session: DbSession, _auth: ShadowAuth, settings: AppSettings
 ) -> dict[str, Any]:
     org = _organization(session)
     outcome = antispam.ingest_scans(

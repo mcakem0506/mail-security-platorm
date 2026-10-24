@@ -152,6 +152,25 @@ class BayesSettings(_Strict):
     autolearn: bool = False
 
 
+class EnforcementGate(_Strict):
+    """Шлюз принуждения до очереди (ТЗ 1.3 §11, §13, §14). По умолчанию выключен.
+
+    Адрес — только IP узла и фиксированный путь: произвольный адрес сделал бы сканер клиентом чужого сервиса.
+    Тайм-аут ограничен сверху: ответ SMTP не должен ждать дольше (§14).
+    """
+
+    enabled: bool = False
+    url: str = "http://127.0.0.1:11390/v1/decide"
+    timeout_ms: int = Field(default=1500, ge=100, le=3000)
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, value: str) -> str:
+        if not re.fullmatch(r"http://[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{2,5}/v1/decide", value):
+            raise ConfigError("enforcement.url: ожидался http://IP:порт/v1/decide")
+        return value
+
+
 class RspamdNodeConfig(_Strict):
     """Желаемое состояние сканера на узле."""
 
@@ -170,6 +189,7 @@ class RspamdNodeConfig(_Strict):
     dkim_signing: DkimSigning = DkimSigning()
     bayes: BayesSettings = BayesSettings()
     greylisting: bool = False
+    enforcement: EnforcementGate = EnforcementGate()
     #: Версия правил отображения символов (§26): едет вместе с каждым анализом.
     symbol_mapping_version: str = "1"
     #: Сети, которые сканер считает «своими» и для которых не проверяет SPF/DKIM. Только
@@ -478,6 +498,18 @@ def _render_statistic(cfg: RspamdNodeConfig) -> str:
     )
 
 
+def _render_enforcement(cfg: RspamdNodeConfig) -> str:
+    g = cfg.enforcement
+    if not g.enabled:
+        return "# Шлюз принуждения выключен.\nenabled = false;\n"
+    return (
+        "# Сгенерировано MSP. Решение принимает локальная служба по подписанной политике.\n"
+        "enabled = true;\n"
+        f"url = {_q(g.url)};\n"
+        f"timeout = {g.timeout_ms / 1000:.3f};\n"
+    )
+
+
 def _render_greylist(cfg: RspamdNodeConfig) -> str:
     return f"enabled = {'true' if cfg.greylisting else 'false'};\n"
 
@@ -510,6 +542,7 @@ def render(cfg: RspamdNodeConfig) -> RenderedRspamd:
         "local.d/dkim.conf": _render_dkim_verify(),
         "local.d/redis.conf": _render_redis(cfg),
         "local.d/greylist.conf": _render_greylist(cfg),
+        "local.d/msp_enforcement.conf": _render_enforcement(cfg),
         "local.d/statistic.conf": _render_statistic(cfg),
         "override.d/rbl.conf": render_rbl(cfg),
         "maps.d/empty.map": "",
@@ -617,6 +650,7 @@ def apply_release(
     configtest: Callable[[Path], tuple[bool, str]],
     reload: Callable[[], None],
     healthcheck: Callable[[], bool],
+    audit: Callable[[Path], tuple[bool, str]] | None = None,
 ) -> ReleaseOutcome:
     """Выпустить конфигурацию. При любой неудаче рабочая версия остаётся прежней."""
     try:
@@ -627,6 +661,13 @@ def apply_release(
     ok, detail = configtest(staged)
     if not ok:
         return ReleaseOutcome("REJECTED", rendered.config_version, f"configtest: {detail[:200]}")
+    if audit is not None:
+        # Неизвестный источник reject или soft reject блокирует активацию (ТЗ 1.3 §50).
+        clean, audit_detail = audit(staged)
+        if not clean:
+            return ReleaseOutcome(
+                "REJECTED", rendered.config_version, f"effective actions: {audit_detail[:300]}"
+            )
     previous = store.active_version()
     store.activate(rendered.config_version)
     try:

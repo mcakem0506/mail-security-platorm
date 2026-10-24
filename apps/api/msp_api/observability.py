@@ -538,3 +538,76 @@ def record_qr_decode(stats: object) -> None:
     spawn = _stat(stats, "spawn_seconds")
     if spawn is not None:
         qr_worker_spawn_duration_seconds.observe(float(spawn))
+
+
+# --- Принуждение и карантин (ТЗ 1.3 §44, §64) ----------------------------------------------------
+enforcement_decisions = Counter(
+    "msp_enforcement_decisions_total",
+    "Enforcement decisions received from nodes",
+    ["control", "decision"],
+    registry=REGISTRY,
+)
+enforcement_actions = Counter(
+    "msp_enforcement_actions_total",
+    "Actions actually applied to mail",
+    ["control", "action"],
+    registry=REGISTRY,
+)
+enforcement_errors = Counter(
+    "msp_enforcement_errors_total",
+    "Decision-service errors reported by nodes (open failure)",
+    ["node"],
+    registry=REGISTRY,
+)
+enforcement_timeouts = Counter(
+    "msp_enforcement_timeouts_total",
+    "Decisions that hit the hard timeout (fail mode applied)",
+    ["control"],
+    registry=REGISTRY,
+)
+enforcement_decision_seconds = Histogram(
+    "msp_enforcement_decision_seconds",
+    "Decision latency reported by nodes",
+    ["control"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 1.5, 3.0, 5.0, 25.0),
+    registry=REGISTRY,
+)
+enforcement_control_state = Gauge(
+    "msp_enforcement_control_state",
+    "1 for the current state of each control",
+    ["control", "state"],
+    registry=REGISTRY,
+)
+enforcement_policy_info = Gauge(
+    "msp_enforcement_policy_info",
+    "Current published enforcement policy",
+    ["version", "checksum"],
+    registry=REGISTRY,
+)
+enforcement_policy_drift = Gauge(
+    "msp_enforcement_policy_drift",
+    "1 if the node reports another policy checksum than the current one",
+    ["node"],
+    registry=REGISTRY,
+)
+quarantine_items = Gauge("msp_quarantine_items", "Quarantine items by state", ["state"], registry=REGISTRY)
+quarantine_release_total = Counter(
+    "msp_quarantine_release_total", "Quarantine releases", ["outcome"], registry=REGISTRY
+)
+quarantine_delete_total = Counter("msp_quarantine_delete_total", "Quarantine deletions", registry=REGISTRY)
+kill_switch_active = Gauge(
+    "msp_kill_switch_active", "1 while the enforcement kill switch is on", registry=REGISTRY
+)
+kill_switch_total = Counter("msp_kill_switch_total", "Kill switch activations", registry=REGISTRY)
+enforcement_fp_total = Counter(
+    "msp_enforcement_fp_total",
+    "Analyst-confirmed enforcement false positives",
+    ["control"],
+    registry=REGISTRY,
+)
+enforcement_fn_total = Counter(
+    "msp_enforcement_fn_total",
+    "Analyst-confirmed misses of an enforcement control",
+    ["control"],
+    registry=REGISTRY,
+)

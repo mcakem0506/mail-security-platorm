@@ -201,4 +201,6 @@ def corpus():  # type: ignore[no-untyped-def]
 # В обычный прогон они не попадают: включаются явно, переменной MSP_GATEWAY_TESTS=1 — так в
 # основном отчёте нет «пропущенных» тестов, а шаг CI, запрещающий пропуски, остаётся честным.
 # Отдельные задания CI gateway-* включают их и сами проверяют, что Docker доступен.
-collect_ignore_glob = [] if os.environ.get("MSP_GATEWAY_TESTS") == "1" else ["gateway/*", "spam/*"]
+collect_ignore_glob = (
+    [] if os.environ.get("MSP_GATEWAY_TESTS") == "1" else ["gateway/*", "spam/*", "enforcement/*"]
+)

@@ -39,3 +39,35 @@ def test_a_score_above_the_advisory_reject_threshold_is_suggested_but_not_applie
     analysis = spam.analysis(mid)
     assert analysis.suggested_action is SuggestedAction.REJECT
     assert analysis.applied_action is AppliedAction.OBSERVE_ONLY
+
+
+def test_the_active_release_carries_a_clean_effective_actions_report(clean_spam) -> None:  # type: ignore[no-untyped-def]
+    import json
+
+    from tests.gateway.harness import docker
+
+    result = docker(
+        "exec",
+        clean_spam.rspamd_container,
+        "cat",
+        "/var/lib/msp-rspamd/active/effective_actions_report.json",
+        check=False,
+    )
+    report = json.loads(result.stdout)
+    assert report["clean"] is True, report
+
+
+def test_a_release_with_a_hidden_action_source_is_refused_and_the_old_one_stays(clean_spam) -> None:  # type: ignore[no-untyped-def]
+    spam = clean_spam
+    before = spam.reapply_rspamd(node_config())
+    bad = node_config(greylisting=True)
+    outcome = spam.reapply_rspamd(bad)
+    try:
+        assert outcome.get("outcome") == "REJECTED", outcome
+        assert "effective actions" in str(outcome.get("detail")), outcome
+        mid = "obs-after-refusal"
+        _, result = spam.send_inbound(mid, raw=build_message(mid, "a@example.test"))
+        assert result.get("ok") and spam.delivered(mid) is not None
+    finally:
+        spam.reapply_rspamd(node_config())
+    assert before.get("outcome") == "ACTIVE"

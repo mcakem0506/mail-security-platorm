@@ -1223,3 +1223,196 @@ jobs:
       - run: pip install -e ".[dev,qr,sandbox]"
       - name: Проверки
         run: pytest -q -rs -o addopts="" tests/unit/test_antispam_auth.py tests/unit/test_antispam_core.py tests/unit/test_antispam_corpus.py tests/e2e/test_antispam_e2e.py tests/e2e/test_antispam_analysis.py tests/e2e/test_antispam_alerts.py
+
+  enforcement-policy-tests:
+    name: Enforcement policy tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Повторов до зелёного нет (AGENTS.md §9).
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/unit/test_enforcement_core.py tests/unit/test_enforcement_node.py tests/unit/test_enforcement_afterqueue.py tests/unit/test_gateway_afterqueue.py tests/unit/test_alerts.py tests/e2e/test_enforcement_e2e.py
+
+  enforcement-gap-guards:
+    name: Enforcement gap guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Повторов до зелёного нет (AGENTS.md §9).
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/unit/test_enforcement_core.py tests/e2e/test_enforcement_e2e.py -k "gap or Gap or GAP or dmarc or spf or blocked"
+
+  enforcement-canary-tests:
+    name: Enforcement canary tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_canary_activation.py tests/enforcement/test_spam_canary.py
+
+  enforcement-killswitch-tests:
+    name: Enforcement kill switch tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_killswitch.py
+
+  enforcement-rollback-tests:
+    name: Enforcement rollback tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_rollback.py
+
+  smtp-action-tests:
+    name: SMTP action tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_security_live.py
+
+  quarantine-tests:
+    name: Quarantine tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_quarantine_e2e.py
+
+  quarantine-release-loop-tests:
+    name: Quarantine release loop tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Повторов до зелёного нет (AGENTS.md §9).
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/e2e/test_enforcement_e2e.py -k "Quarantine and (release or token or back_into or failed_delivery or twice)"
+
+  credential-scope-tests:
+    name: Credential scope tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Повторов до зелёного нет (AGENTS.md §9).
+      - name: Проверки
+        run: pytest -q -rs -o addopts="" tests/e2e/test_enforcement_e2e.py -k "CredentialScopes"
+
+  rspamd-effective-actions-audit:
+    name: Rspamd effective actions audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/unit/test_effective_actions.py tests/spam/test_observe_only.py
+
+  enforcement-load-smoke:
+    name: Enforcement load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      - name: Доступность Docker
+        run: docker version
+      # Критические проверки принуждения детерминированы: повторов до зелёного нет (AGENTS.md §9, ТЗ 1.3 §86).
+      - name: Проверки стенда
+        env:
+          MSP_GATEWAY_TESTS: "1"
+        run: pytest -q -rs -o addopts="" tests/enforcement/test_load_smoke.py

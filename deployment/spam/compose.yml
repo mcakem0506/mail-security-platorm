@@ -64,6 +64,74 @@ services:
       gwnet:
         ipv4_address: 10.77.0.52
 
+  # --- MSP 1.3: принуждение (профиль enforcement-test; поверх профилей gateway-test и spam-security-test) ------
+  #   10.77.0.53  gateway-enforcement — решение до очереди для Rspamd (HTTP :11390)
+  #   10.77.0.54  gateway-afterqueue  — послеочередной шлюз для Postfix (SMTP :10025) и выпуск из карантина
+  gateway-enforcement:
+    build:
+      context: ../..
+      dockerfile: infrastructure/enforcement/Dockerfile
+    image: msp-enforcement:test
+    profiles: [enforcement-test]
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    command: ["python", "-m", "msp_enforcement.node", "serve", "--host", "0.0.0.0", "--port", "11390"]
+    environment:
+      MSP_PANEL_URL: ${ENF_PANEL_URL:-}
+      MSP_ENFORCEMENT_TOKEN_FILE: /run/secrets/enforcement/policy.token
+      MSP_ENFORCEMENT_KEY_FILE: /run/secrets/enforcement/signing.key
+      MSP_NODE_ID: ${SPAM_NODE_ID:-00000000000000000000000000000001}
+      MSP_ENFORCEMENT_ALLOWED: "10.77.0.50"
+      MSP_POLICY_SOFT_TTL: ${ENF_SOFT_TTL:-600}
+      MSP_POLICY_HARD_TTL: ${ENF_HARD_TTL:-21600}
+    volumes:
+      - ${GW_TEST_DIR:?укажите каталог стенда}/secrets/enforcement:/run/secrets/enforcement:ro
+      - enforcement-state:/var/lib/msp-enforcement
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.53
+    ports:
+      - "127.0.0.1:${ENF_METRICS_PORT:-19390}:11390"
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  gateway-afterqueue:
+    image: msp-enforcement:test
+    profiles: [enforcement-test]
+    restart: "no"
+    depends_on:
+      gateway-enforcement: {condition: service_started}
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;socket.create_connection(('127.0.0.1',10025),3).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    command: ["python", "-m", "msp_enforcement.afterqueue", "--port", "10025", "--reinject-host", "10.77.0.10",
+              "--reinject-port", "10026", "--gate-timeout", "${ENF_GATE_TIMEOUT:-25}", "--hold-ttl", "${ENF_HOLD_TTL:-60}"]
+    environment:
+      MSP_PANEL_URL: ${ENF_PANEL_URL:-}
+      MSP_ENFORCEMENT_TOKEN_FILE: /run/secrets/enforcement/policy.token
+      MSP_ENFORCEMENT_KEY_FILE: /run/secrets/enforcement/signing.key
+      MSP_NODE_ID: ${SPAM_NODE_ID:-00000000000000000000000000000001}
+      MSP_ENFORCEMENT_STATE: /var/lib/msp-enforcement-aq
+      MSP_POLICY_SOFT_TTL: ${ENF_SOFT_TTL:-600}
+      MSP_POLICY_HARD_TTL: ${ENF_HARD_TTL:-21600}
+    volumes:
+      - ${GW_TEST_DIR}/secrets/enforcement:/run/secrets/enforcement:ro
+      - enforcement-aq-state:/var/lib/msp-enforcement-aq
+    networks:
+      gwnet:
+        ipv4_address: 10.77.0.54
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
 volumes:
   rspamd-state:
   rspamd-data:
+  enforcement-state:
+  enforcement-aq-state:

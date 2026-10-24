@@ -66,6 +66,53 @@ def configtest(staged: Path) -> tuple[bool, str]:
     return ok, output[-1] if output else ""
 
 
+def effective_actions_audit(staged: Path) -> tuple[bool, str]:
+    """Итоговая конфигурация выпуска → отчёт о том, что может изменить судьбу письма (ТЗ 1.3 §50).
+
+    Отчёт сохраняется рядом с выпуском (``effective_actions_report.json``). Не удалось получить конфигурацию
+    — это тоже отказ: непроверенный выпуск не активируется.
+    """
+    from .effective_actions import audit
+
+    result = subprocess.run(  # noqa: S603  # nosec B603
+        [RSPAMADM, f"--var=LOCAL_CONFDIR={staged}", "configdump", "-c", ENTRY_CONFIG, "-j"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    try:
+        dump = json.loads(result.stdout)
+    except ValueError:
+        return False, "не удалось получить итоговую конфигурацию (configdump)"
+    report = audit(dump)
+    gate = staged / "local.d" / "msp_enforcement.conf"
+    if gate.is_file() and "enabled = true" in gate.read_text(encoding="utf-8"):
+        # Известный и принятый источник действия: шлюз принуждения этапа 1.3. Виден в отчёте, но не блокирует.
+        from .effective_actions import ActionSource, EffectiveActionsReport
+
+        report = EffectiveActionsReport(
+            clean=report.clean,
+            checked=report.checked,
+            sources=(
+                *report.sources,
+                ActionSource(
+                    module="msp_enforcement",
+                    kind="MSP_ENFORCEMENT_GATE",
+                    detail="предварительный результат по решению локальной службы принуждения",
+                    approved=True,
+                ),
+            ),
+        )
+    with contextlib.suppress(OSError):
+        (staged / "effective_actions_report.json").write_text(
+            report.model_dump_json(indent=1), encoding="utf-8"
+        )
+    if report.clean:
+        return True, ""
+    return False, "; ".join(f"{s.kind}: {s.detail}" for s in report.unknown)
+
+
 def rspamd_pid() -> int | None:
     """PID главного процесса. В режиме без форка файла PID нет, поэтому процесс ищется по названию."""
     try:
@@ -179,6 +226,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         cfg,
         configtest=configtest,
         reload=reload_rspamd,
+        audit=effective_actions_audit,
         # До первого запуска сканера проверять нечего: проверка здоровья имеет смысл после reload.
         healthcheck=verified if started else (lambda: True),
     )
@@ -448,6 +496,7 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
                 cfg,
                 configtest=configtest,
                 reload=reload_rspamd,
+                audit=effective_actions_audit,
                 healthcheck=healthcheck,
             )
             state["last_apply"] = {
@@ -464,6 +513,7 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
     active = ReleaseStore(ROOT).active_version() or ""
     state["config_version"] = active
     state["config_checksum"] = _checksum(active)
+    state["effective_actions"] = _effective_actions_summary(active)
     # Дрейф: действующий выпуск повреждён после применения либо отличается от ожидаемого (ТЗ 1.2 §27).
     intact = bool(active) and ReleaseStore(ROOT).verify(active)
     state["drift"] = drift_state(
@@ -472,6 +522,22 @@ def sync_once(panel_url: str, token: str, node_id: str, last: dict) -> dict:
     with contextlib.suppress(OSError, ValueError, urllib.error.URLError):
         _panel_request(f"{panel_url}/rspamd-status", token, body={"node_id": node_id, "state": state})
     return state
+
+
+def _effective_actions_summary(version: str) -> dict:
+    """Итог аудита действий сканера для действующего выпуска (ТЗ 1.3 §50): чисто ли и сколько неизвестных."""
+    if not version:
+        return {"clean": None, "unknown": 0, "audited": False}
+    try:
+        report = json.loads(
+            (ReleaseStore(ROOT).releases / version / "effective_actions_report.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return {"clean": None, "unknown": 0, "audited": False}
+    unknown = [s for s in report.get("sources", []) if not s.get("approved")]
+    return {"clean": bool(report.get("clean")), "unknown": len(unknown), "audited": True}
 
 
 def _checksum(version: str) -> str:
@@ -536,7 +602,10 @@ def main(argv: list[str] | None = None) -> int:
     collector.add_argument(
         "--panel-url", default=os.environ.get("MSP_PANEL_SPAM_URL", "")
     )  # .../gateway-agent/spam-scans
-    collector.add_argument("--token-file", default=os.environ.get("MSP_PANEL_TOKEN_FILE", ""))
+    collector.add_argument(
+        "--token-file",
+        default=os.environ.get("MSP_SCAN_TOKEN_FILE", os.environ.get("MSP_PANEL_TOKEN_FILE", "")),
+    )
     collector.add_argument("--interval", type=float, default=2.0)
     collector.add_argument("--node-id", default=os.environ.get("MSP_NODE_ID", ""))
     collector.add_argument("--metrics-host", default="0.0.0.0")  # nosec B104 - порт доступен сети мониторинга узла  # noqa: S104

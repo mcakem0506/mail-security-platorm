@@ -446,6 +446,14 @@ sudo chown 10001:10001 infrastructure/compose/secrets/msp_secret_key
 Закрытые ключи DKIM лежат только в хранилище секретов узла (`docs/DKIM_SIGNING.md`). Принуждения нет ни в
 одном режиме. **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
 
+Голова на момент MSP 1.3 — `7d13e0f4a2b9`. Новые таблицы принуждения и карантина (`models_enforcement.py`): контроли, неизменяемые
+версии политики, решения, исключения, общий выключатель, карантин, инциденты, отпечатки токенов компонентов. Службы узла —
+`infrastructure/enforcement` (образ), лабораторный профиль `enforcement-test` в `deployment/spam/compose.yml`. Для публикации
+политики нужны `MSP_ENFORCEMENT_POLICY_SIGNING_KEY` и токен области `MSP_ENFORCEMENT_POLICY_TOKEN`; для карантина —
+`MSP_QUARANTINE_ENCRYPTION_KEY`. Токены компонентов разделяются, общий токен 1.1 отключается
+(`MSP_GATEWAY_SHARED_TOKEN_ALLOWED=false`); на узле у каждого компонента свой файл токена. **MSP 1.3 IS NOT APPROVED FOR GLOBAL
+PRODUCTION MX CUTOVER.**
+
 Таблица `validation_messages` живёт отдельно от `mail_messages` намеренно: обычное письмо
 удаляется по сроку хранения почты, запись валидации — по своему, и объединение означало бы либо
 потерю измерений вместе с почтой, либо хранение почты ради измерений.

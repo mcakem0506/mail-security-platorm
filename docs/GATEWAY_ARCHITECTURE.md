@@ -160,3 +160,10 @@ GatewaySpec (проверяемая модель) ─► render ─► паке�
 Каждый слушатель Postfix передаёт письмо Rspamd через Milter; направление определяет слушатель, а не заголовок From.
 При недоступности Rspamd письмо принимается (fail-open). Конфигурация сканера выпускается тем же конвейером, что и Postfix
 (создать → проверить → поставить → активировать → проверка здоровья → откат). См. [RSPAMD_ARCHITECTURE.md](RSPAMD_ARCHITECTURE.md). **MSP 1.2 IS NOT APPROVED FOR PRODUCTION MX CUTOVER.**
+
+## 10. Принуждение (MSP 1.3)
+
+К Milter добавлены два пути: до очереди Rspamd запрашивает решение у службы принуждения узла (только 5xx/4xx в исходной сессии),
+после очереди Postfix передаёт письмо послеочередному шлюзу (`content_filter`), который возвращает его на отдельный слушатель
+повторной подачи либо отправляет в карантин. Конфигурация типизирована (`AfterQueue` в спецификации шлюза), проверка узла принимает
+только `content_filter=smtp:[IPv4]:порт`. Общей записываемой очереди между узлами нет. См. [ENFORCEMENT_ARCHITECTURE.md](ENFORCEMENT_ARCHITECTURE.md). **MSP 1.3 IS NOT APPROVED FOR GLOBAL PRODUCTION MX CUTOVER.**

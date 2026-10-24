@@ -242,4 +242,7 @@ def compute(session: Session, organization_id: str, settings: Settings) -> list[
     from . import antispam_alerts
 
     alerts.extend(antispam_alerts.compute(session, organization_id, settings))
+    from . import enforcement_alerts
+
+    alerts.extend(enforcement_alerts.compute(session, organization_id, settings))
     return sorted(alerts, key=lambda a: (_ORDER[a.severity], a.code, a.node_id))

@@ -1651,6 +1651,7 @@ def remember_node_state(session: Session, organization_id: str, node_id: str, st
             "dkim_missing_keys",
             "drift",
             "expected_checksum",
+            "effective_actions",
         )
     }
     details = dict(node.details or {})

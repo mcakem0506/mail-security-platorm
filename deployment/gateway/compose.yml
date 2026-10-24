@@ -80,7 +80,7 @@ services:
       - "2"
     environment:
       MSP_INGEST_URL: ${GW_INGEST_URL:-}
-      MSP_INGEST_TOKEN_FILE: ${GW_PANEL_TOKEN_FILE:-}
+      MSP_INGEST_TOKEN_FILE: ${GW_INGEST_TOKEN_FILE:-${GW_PANEL_TOKEN_FILE:-}}
       MSP_COLLECTOR_STATUS: /var/lib/msp/status/collector.json
       MSP_JOURNAL_DIR: /var/lib/msp/journal
       MSP_IDENTITY_DIR: /var/lib/msp

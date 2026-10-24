@@ -79,7 +79,7 @@ class TestTemporaryFailureOfExchange:
             "шлюз принимает письмо: Exchange временно недоступен — не причина отказывать отправителю"
         )
 
-        clean.wait_until(lambda: clean.queue_size() >= 1, what="письмо в очереди")
+        clean.wait_until(lambda: clean.deferred_size() >= 1, what="письмо ждёт повтора (deferred)")
         assert count_at(clean.exchange1, mid) == 0
 
         both(clean, "accept")
@@ -106,7 +106,7 @@ class TestTemporaryFailureOfExchange:
         both(clean, "tempfail")
         for mid in ids:
             send(clean, mid)
-        clean.wait_until(lambda: clean.queue_size() >= len(ids), what="все письма в очереди")
+        clean.wait_until(lambda: clean.deferred_size() >= len(ids), what="все письма ждут повтора (deferred)")
         both(clean, "accept")
         clean.flush()
         clean.wait_until(
@@ -123,7 +123,7 @@ class TestTemporaryFailureOfExchange:
         clean.stop_service("fake-exchange")
         clean.stop_service("fake-exchange-2")
         assert send(clean, mid) == {}
-        clean.wait_until(lambda: clean.queue_size() >= 1, what="письмо в очереди")
+        clean.wait_until(lambda: clean.deferred_size() >= 1, what="письмо ждёт повтора (deferred)")
         clean.start_service("fake-exchange")
         clean.flush()
         assert clean.exchange1.wait_for(full_id(mid), timeout=90) is not None
@@ -151,7 +151,7 @@ class TestTheGatewayItselfFails:
         mid = new_id()
         both(stack, "tempfail")
         assert send(stack, mid) == {}
-        stack.wait_until(lambda: stack.queue_size() >= 1, what="письмо в очереди")
+        stack.wait_until(lambda: stack.deferred_size() >= 1, what="письмо ждёт повтора (deferred)")
         return mid, stack.queue_ids()
 
     def test_a_graceful_restart_keeps_the_queue(self, clean) -> None:  # type: ignore[no-untyped-def]
@@ -246,7 +246,7 @@ class TestDisconnects:
         mid = new_id()
         both(clean, "disconnect")
         send(clean, mid)
-        clean.wait_until(lambda: clean.queue_size() >= 1, what="письмо в очереди")
+        clean.wait_until(lambda: clean.deferred_size() >= 1, what="письмо ждёт повтора (deferred)")
         assert count_at(clean.exchange1, mid) == 0, "оборванная передача не должна считаться доставкой"
         both(clean, "accept")
         clean.flush()
@@ -293,7 +293,7 @@ class TestQueueLifetime:
         mid = new_id()
         both(clean, "tempfail")
         send(clean, mid)
-        clean.wait_until(lambda: clean.queue_size() >= 1, what="письмо в очереди")
+        clean.wait_until(lambda: clean.deferred_size() >= 1, what="письмо ждёт повтора (deferred)")
         time.sleep(65)
         clean.flush()
         clean.wait_until(

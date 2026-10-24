@@ -467,3 +467,108 @@ groups:
           summary: "Аналитики находят ложные срабатывания спама"
           description: "Прежде чем обсуждать отказ в этапе 1.3, разберите причины: символы и пороги."
 
+  # --- MSP 1.3: принуждение и карантин ------------------------------------------------------------
+  - name: msp-enforcement
+    rules:
+      - alert: MspEnforcementRejectSpike
+        expr: sum(increase(msp_enforcement_actions_total{action="SMTP_REJECT"}[15m])) > 50
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Всплеск отказов SMTP по политике принуждения"
+          description: "Проверьте, не ложные ли это срабатывания. Выключатель: POST /api/v1/enforcement/kill-switch."
+
+      - alert: MspEnforcementTempfailSpike
+        expr: sum(increase(msp_enforcement_actions_total{action="SMTP_TEMPFAIL"}[15m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Всплеск временных отказов по политике принуждения"
+
+      - alert: MspQuarantineSpike
+        expr: sum(increase(msp_enforcement_actions_total{action="QUARANTINED"}[15m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Всплеск писем в карантине"
+
+      - alert: MspEnforcementDecisionTimeouts
+        expr: sum(increase(msp_enforcement_timeouts_total[10m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Решения принуждения упираются в тайм-аут"
+          description: "Применён режим сбоя (письма идут дальше). Проверьте службу принуждения и анализ."
+
+      - alert: MspEnforcementServiceErrors
+        expr: increase(msp_enforcement_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Служба принуждения узла отвечает ошибками"
+          description: "Ошибка даёт «решения нет»: письмо не блокируется, но принуждение не работает."
+
+      - alert: MspEnforcementPolicyDrift
+        expr: max(msp_enforcement_policy_drift) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Узел применяет не текущую политику принуждения"
+
+      - alert: MspEnforcementPolicyStale
+        expr: max(msp_enforcement_policy_stale) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Политика принуждения на узле устарела"
+          description: "По истечении жёсткого срока узел перейдёт в безопасный режим: принуждение прекратится."
+
+      - alert: MspEnforcementKillSwitchActive
+        expr: max(msp_kill_switch_active) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Общий выключатель принуждения включён"
+          description: "Все контроли действуют как наблюдение. Снять выключатель может второй человек."
+
+      - alert: MspEnforcementLocalBypassActive
+        expr: max(msp_enforcement_local_bypass_active) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "На узле включён локальный обход принуждения"
+
+      - alert: MspEnforcementCriticalFalsePositive
+        expr: increase(msp_enforcement_fp_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Подтверждено ложное срабатывание принуждения"
+          description: "Откройте инцидент (docs/FALSE_POSITIVE_EMERGENCY.md): контроль не включается снова без разбора."
+
+      - alert: MspEnforcementGateErrors
+        expr: increase(msp_enforcement_gate_errors_total[15m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Послеочередной шлюз не получает полный анализ"
+          description: "Письма доставляются без проверки (открытый сбой)."
+
+      - alert: MspQuarantineStoreFailOpen
+        expr: increase(msp_enforcement_quarantine_failopen_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Карантин недоступен: письма доставляются вместо карантина"

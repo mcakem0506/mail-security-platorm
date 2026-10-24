@@ -76,6 +76,7 @@ where = [
   "packages/gateway",
   "packages/attachment-sandbox",
   "packages/antispam",
+  "packages/enforcement",
   "packages/mail-parser",
   "packages/detection-engine",
   "packages/detection-eval",
@@ -127,6 +128,17 @@ ignore = [
 "scripts/record_spam_corpus.py" = ["E501"]
 "scripts/evaluate_spam.py" = ["E501"]
 "packages/antispam/msp_antispam/corpus.py" = ["E501"]
+"packages/enforcement/**" = ["E501"]
+"apps/api/msp_api/services/enforcement.py" = ["E501"]
+"apps/api/msp_api/services/quarantine.py" = ["E501"]
+"apps/api/msp_api/services/credentials.py" = ["E501"]
+"apps/api/msp_api/services/enforcement_alerts.py" = ["E501"]
+"apps/api/msp_api/routers/enforcement.py" = ["E501"]
+"apps/api/msp_api/db/models_enforcement.py" = ["E501"]
+"tests/unit/test_enforcement_*.py" = ["E501"]
+"tests/enforcement/**" = ["E501"]
+"tests/unit/test_gateway_afterqueue.py" = ["E501"]
+"tests/e2e/test_enforcement_*.py" = ["E501", "F811"]
 "tests/unit/test_antispam_*.py" = ["E501"]
 "tests/unit/test_gateway_milter.py" = ["E501"]
 "tests/e2e/test_antispam_e2e.py" = ["E501", "F811"]

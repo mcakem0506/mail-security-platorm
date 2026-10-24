@@ -1294,3 +1294,160 @@ export const antispamApi = {
   providerAction: (id: string, action: "request-activation" | "approve" | "reject" | "suspend", body?: unknown) =>
     post<ReputationProviderRow>(`${G}/spam/providers/${id}/${action}`, body ?? {}),
 };
+
+// --- Принуждение и карантин (MSP 1.3) ----------------------------------------------------------
+export interface EnforcementControl {
+  id: string;
+  type: string;
+  state: string;
+  policy_version: string;
+  readiness_status: string;
+  readiness_reasons: string[];
+  readiness_warnings: string[];
+  blocking_gaps: string[];
+  eligibility: { can_canary?: boolean; can_pilot?: boolean };
+  canary_scope: Record<string, unknown>;
+  thresholds: Record<string, number>;
+  fail_mode: string;
+  activated_by: string;
+  approved_by: string;
+  rollback_version: string;
+  pending_request: {
+    target: string;
+    requested_by: string;
+    justification: string;
+    scope: Record<string, unknown>;
+  } | null;
+}
+
+export interface EnforcementDecisionRow {
+  id: string;
+  transport_message_id: string;
+  control_type: string;
+  decision: string;
+  suggested_action: string;
+  applied_action: string;
+  reason_codes: string[];
+  evidence_ids: string[];
+  policy_version: string;
+  fail_mode_applied: string | null;
+  latency_ms: number;
+  recipient_count: number;
+  review_outcome: string | null;
+  decided_at: string;
+}
+
+export interface EnforcementExceptionRow {
+  id: string;
+  scope: string;
+  control: string | null;
+  value: string;
+  reason: string;
+  owner: string;
+  approved_by: string | null;
+  needs_four_eyes: boolean;
+  approved: boolean;
+  active: boolean;
+  expires_at: string;
+  uses: number;
+  max_uses: number | null;
+}
+
+export interface EnforcementSafety {
+  controls: {
+    control: string;
+    state: string;
+    real_flow_sample: boolean;
+    reject_safety: {
+      reviewed_rejects: number;
+      confirmed_fp: number;
+      fp_rate: number | null;
+      fp_upper_bound: number | null;
+      ready_for_canary: boolean;
+      ready_for_pilot: boolean;
+      reasons: string[];
+    };
+  }[];
+  policy: { version: string; checksum: string; published_at: string | null } | null;
+  nodes: { node_id: string; policy_checksum: string | null; policy_status: string | null; in_sync: boolean; local_bypass: boolean }[];
+  active_exceptions: EnforcementExceptionRow[];
+  kill_switch: boolean;
+  emergency_bypass_nodes: string[];
+  warning: string;
+}
+
+export interface KillSwitchState {
+  active: boolean;
+  reason: string;
+  activated_by: string | null;
+  clear_requested_by: string | null;
+  activation_count: number;
+  status?: string;
+}
+
+export interface QuarantineRow {
+  id: string;
+  sender: string;
+  recipients: string[];
+  subject: string;
+  reason_codes: string[];
+  policy_version: string;
+  state: string;
+  quarantined_at: string;
+  expires_at: string;
+  size_bytes: number;
+  needs_approval: boolean;
+  release_requested_by: string | null;
+  release_approved_by: string | null;
+  delivered_count: number;
+}
+
+export interface QuarantinePreview {
+  headers: Record<string, string>;
+  text: string;
+  attachments: { name: string }[];
+  active_content_removed: boolean;
+}
+
+export interface EnforcementIncident {
+  id: string;
+  control_type: string;
+  state: string;
+  title: string;
+  opened_by: string;
+  root_cause: string;
+  regression_case: string;
+}
+
+const E = "/api/v1/enforcement";
+
+export const enforcementApi = {
+  controls: () => request<{ items: EnforcementControl[]; warning: string }>(`${E}/controls`),
+  activate: (id: string, stage: "canary" | "pilot", body: Record<string, unknown>) =>
+    post<{ status: string }>(`${E}/controls/${id}/${stage}`, body),
+  pause: (id: string, reason: string) => post<{ status: string }>(`${E}/controls/${id}/pause`, { reason }),
+  rollback: (id: string, reason: string) => post<{ status: string }>(`${E}/controls/${id}/rollback`, { reason }),
+  simulate: (id: string, scanId: string) => post<Record<string, unknown>>(`${E}/controls/${id}/simulate`, { scan_id: scanId }),
+  replay: (id: string, hours: number) => post<Record<string, unknown>>(`${E}/controls/${id}/replay`, { hours }),
+  decisions: (params: { control?: string; applied?: string } = {}) =>
+    request<{ items: EnforcementDecisionRow[] }>(`${E}/decisions${query({ limit: 100, ...params })}`),
+  reviewDecision: (id: string, outcome: "CORRECT" | "FALSE_POSITIVE", critical: boolean) =>
+    post<{ decision: EnforcementDecisionRow }>(`${E}/decisions/${id}/review`, { outcome, critical }),
+  safety: () => request<EnforcementSafety>(`${E}/safety`),
+  killSwitch: () => request<KillSwitchState>(`${E}/kill-switch`),
+  killSwitchOn: (reason: string) => post<KillSwitchState>(`${E}/kill-switch`, { reason }),
+  killSwitchClear: (reason: string) => post<KillSwitchState>(`${E}/kill-switch/clear`, { reason }),
+  exceptions: () => request<{ items: EnforcementExceptionRow[] }>(`${E}/exceptions`),
+  createException: (body: Record<string, unknown>) => post<EnforcementExceptionRow>(`${E}/exceptions`, body),
+  approveException: (id: string) => post<EnforcementExceptionRow>(`${E}/exceptions/${id}/approve`, {}),
+  revokeException: (id: string) => post<EnforcementExceptionRow>(`${E}/exceptions/${id}/revoke`, {}),
+  incidents: () => request<{ items: EnforcementIncident[] }>(`${E}/incidents`),
+  quarantine: (params: { state?: string; q?: string } = {}) =>
+    request<{ items: QuarantineRow[]; total: number; counts: Record<string, number> }>(
+      `/api/v1/quarantine${query({ limit: 100, ...params })}`,
+    ),
+  preview: (id: string) => request<QuarantinePreview>(`/api/v1/quarantine/${id}/preview`),
+  release: (id: string, action: "request" | "approve" | "cancel") =>
+    post<QuarantineRow>(`/api/v1/quarantine/${id}/release`, { action }),
+  deleteItem: (id: string, reason: string) => post<QuarantineRow>(`/api/v1/quarantine/${id}/delete`, { reason }),
+};

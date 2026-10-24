@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from enum import StrEnum
 from typing import Annotated, Self
 
@@ -384,6 +385,34 @@ class Milter(StrictModel):
         return validation.milter_socket(value, f"milter.{info.field_name}")
 
 
+class AfterQueue(StrictModel):
+    """Послеочередной шлюз принуждения (ТЗ 1.3 §11, §12, §54, §56).
+
+    Письмо принимается и ложится в очередь Postfix; затем Postfix передаёт его фильтру
+    (``content_filter``), а фильтр возвращает его на отдельный слушатель повторной подачи — без фильтра и без
+    сканера, так что петли нет. Адреса — только IPv4: имя хоста при сбое разрешения остановило бы приём
+    (как и у Milter). Слушатель повторной подачи принимает письма только от адреса фильтра. Выключен
+    по умолчанию.
+    """
+
+    enabled: bool = False
+    filter_host: str = "127.0.0.1"
+    filter_port: int = Field(default=10025, ge=1024, le=65535)
+    #: Отдельный фильтр для исходящего пути; пусто — исходящее не фильтруется (по умолчанию SHADOW).
+    outbound_filter_port: int | None = Field(default=None, ge=1024, le=65535)
+    reinject_host: str = "127.0.0.1"
+    reinject_port: int = Field(default=10026, ge=1024, le=65535)
+
+    @field_validator("filter_host", "reinject_host")
+    @classmethod
+    def _ipv4(cls, value: str, info) -> str:  # type: ignore[no-untyped-def]
+        try:
+            ipaddress.IPv4Address(value)
+        except ValueError as error:
+            raise validation.ConfigValueError(f"afterqueue.{info.field_name}: ожидался IPv4-адрес") from error
+        return value
+
+
 # ---------------------------------------------------------------------------------------------
 # Целиком
 # ---------------------------------------------------------------------------------------------
@@ -403,6 +432,7 @@ class GatewaySpec(StrictModel):
     outbound: Outbound = Outbound()
     shadow: Shadow = Shadow()
     milter: Milter = Milter()
+    afterqueue: AfterQueue = AfterQueue()
     #: Предел числа пересылок (Received). Защита от петли, не зависящая от заголовков,
     #: которые можно подделать (ТЗ §29).
     hopcount_limit: int = Field(default=20, ge=5, le=50)
@@ -456,6 +486,16 @@ class GatewaySpec(StrictModel):
                 "maximal_queue_lifetime_seconds: вне лаборатории срок жизни очереди не короче суток — "
                 "короткий срок превращает кратковременный сбой Exchange в потерю почты"
             )
+        if self.afterqueue.enabled:
+            ports = [self.afterqueue.filter_port, self.afterqueue.reinject_port]
+            if self.afterqueue.outbound_filter_port:
+                ports.append(self.afterqueue.outbound_filter_port)
+            if len(ports) != len(set(ports)) or {self.inbound.port, self.internal.port} & set(ports):
+                raise validation.ConfigValueError(
+                    "afterqueue: порты фильтра и повторной подачи должны быть различны"
+                )
+            if self.afterqueue.outbound_filter_port and not self.internal.enabled:
+                raise validation.ConfigValueError("afterqueue: исходящий фильтр без внутреннего слушателя")
         return self
 
     def owned_domains(self) -> tuple[str, ...]:

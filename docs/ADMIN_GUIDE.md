@@ -362,6 +362,24 @@
 * **Политика:** кандидат проходит DRAFT → SHADOW → VALIDATION → APPROVED → ACTIVE_SHADOW (`spam:policy:edit`, `spam:policy:approve`).
 * **Не делайте:** не кладите закрытые ключи и секретные зоны в Git, базу или журналы; не публикуйте контроллер Rspamd наружу; не включайте зону без лицензии.
 
+## 6.5 Принуждение и карантин (MSP 1.3)
+
+> Дополнения этапа MSP 1.3. **MSP 1.3 IS NOT APPROVED FOR GLOBAL PRODUCTION MX CUTOVER.** Общего переключателя нет.
+
+* **Страницы:** «Принуждение» (контроли, решения, исключения, безопасность, инциденты) и «Карантин».
+* **Настройки:** `MSP_ENFORCEMENT_POLICY_SIGNING_KEY` (≥ 32 байт; без него политика не публикуется), `MSP_QUARANTINE_ENCRYPTION_KEY`,
+  `MSP_ENFORCEMENT_LAB_MODE`, `MSP_ENFORCEMENT_MIN_REVIEWED`, `MSP_ENFORCEMENT_MAX_FP_RATE`, `MSP_ENFORCEMENT_POLICY_SOFT_TTL_SECONDS`,
+  `MSP_ENFORCEMENT_POLICY_HARD_TTL_SECONDS`, `MSP_ENFORCEMENT_POLICY_VALID_DAYS`, `MSP_QUARANTINE_RETENTION_DAYS`,
+  `MSP_QUARANTINE_RELEASE_TOKEN_TTL_MINUTES`; токены компонентов `MSP_GATEWAY_AGENT_TOKEN`, `MSP_RECIPIENT_SYNC_TOKEN`,
+  `MSP_SHADOW_COLLECTOR_TOKEN`, `MSP_ENFORCEMENT_POLICY_TOKEN`, `MSP_METRICS_TOKEN` (через запятую — на время ротации),
+  `MSP_GATEWAY_SHARED_TOKEN_ALLOWED=false` в рабочей установке.
+* **Включить контроль:** готовность → запрос (право `enforcement:canary`) → согласование другим администратором ([ENFORCEMENT_CANARY.md](ENFORCEMENT_CANARY.md)).
+* **Аварийно:** «Остановить принуждение» (выключатель, в одиночку), на узле — `python -m msp_enforcement.node bypass on`;
+  снять выключатель должен второй человек ([ENFORCEMENT_KILL_SWITCH.md](ENFORCEMENT_KILL_SWITCH.md)).
+* **Откат:** [ENFORCEMENT_ROLLBACK.md](ENFORCEMENT_ROLLBACK.md). **Ложные срабатывания:** [FALSE_POSITIVE_EMERGENCY.md](FALSE_POSITIVE_EMERGENCY.md).
+* **Не делайте:** не включайте контроль без выборки; не выдавайте исключения без срока; не публикуйте порт службы принуждения наружу;
+  не храните ключи в Git; не переключайте MX глобально.
+
 ## Смотрите также
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — установка, обновление, откат, эксплуатация
