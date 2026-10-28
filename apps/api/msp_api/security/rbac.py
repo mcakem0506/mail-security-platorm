@@ -136,6 +136,13 @@ class Permission(StrEnum):
     RELEASE_QUARANTINE = "quarantine:release"
     DELETE_QUARANTINE = "quarantine:delete"
 
+    # пилот реального потока (ТЗ 1.3P §24): чтение метрик и готовности; ведение подтверждений, решений и
+    # остановок;
+    # подтверждение решения о фазе. Ни одно из этих прав не включает контроль принуждения.
+    VIEW_PILOT = "pilot:read"
+    MANAGE_PILOT = "pilot:manage"
+    APPROVE_PILOT = "pilot:approve"
+
 
 _EMPLOYEE: frozenset[Permission] = frozenset(
     {Permission.ANALYZE_OWN_MESSAGE, Permission.VIEW_OWN_RESULT, Permission.REPORT_PHISHING}
@@ -156,6 +163,7 @@ _VIEWER: frozenset[Permission] = _EMPLOYEE | {
     Permission.VIEW_AUTH,
     Permission.VIEW_REPUTATION,
     Permission.VIEW_ENFORCEMENT,
+    Permission.VIEW_PILOT,
 }
 _ANALYST: frozenset[Permission] = _VIEWER | {
     Permission.SIMULATE_SPAM_POLICY,
@@ -215,6 +223,8 @@ _SECURITY_ADMIN: frozenset[Permission] = _ANALYST | {
     Permission.ROLLBACK_ENFORCEMENT,
     Permission.KILL_SWITCH,
     Permission.DELETE_QUARANTINE,
+    Permission.MANAGE_PILOT,
+    Permission.APPROVE_PILOT,
 }
 # Platform Admin runs the infrastructure and is deliberately NOT granted message content access
 # by default (ТЗ 23). Granting it is a policy decision recorded in the audit trail.

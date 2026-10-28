@@ -1818,5 +1818,6 @@ class ReanalysisJob(Base, IdMixin):
 from . import (  # noqa: E402
     models_antispam,  # noqa: F401
     models_enforcement,  # noqa: F401
+    models_pilot,  # noqa: F401
     models_transport,  # noqa: F401
 )
