@@ -164,13 +164,35 @@ def _node_roles(session: Session, organization_id: str) -> dict[str, str]:
     }
 
 
-def reject_evidence(
-    session: Session, settings: Settings, organization_id: str, control: ControlType
-) -> tuple[Any, bool]:
-    """Выборка просмотренных кандидатов на отказ по контролю: (отчёт, выборка реального потока)."""
-    roles = _node_roles(session, organization_id)
-    correct = fp = 0
-    real_reviewed = 0
+@dataclass
+class ReviewedReject:
+    """Просмотренный кандидат на отказ: одно письмо — одна запись, откуда бы ни пришёл просмотр."""
+
+    node_id: str
+    correct: bool
+    critical: bool = False
+
+
+def reviewed_rejects(
+    session: Session, organization_id: str, control: ControlType
+) -> dict[str, ReviewedReject]:
+    """Просмотренные кандидаты на отказ по контролю, по одному на письмо (ТЗ 1.3P §13).
+
+    Просмотр записывается и в журнал сканирования (``SpamReview``), и в журнал решений принуждения. Письмо, просмотренное
+    в обоих местах, считается один раз: иначе порог «не менее 100 просмотренных» достигался бы 50 письмами. Если записи
+    расходятся, письмо считается ложным срабатыванием, а критичность берётся наибольшая.
+    """
+    found: dict[str, ReviewedReject] = {}
+
+    def add(identity: str, node_id: str, correct: bool, critical: bool) -> None:
+        current = found.get(identity)
+        if current is None:
+            found[identity] = ReviewedReject(node_id=node_id, correct=correct, critical=critical)
+            return
+        current.correct = current.correct and correct
+        current.critical = current.critical or critical
+        current.node_id = current.node_id or node_id
+
     if control is ControlType.SPAM_REJECT:
         rows = session.execute(
             select(SpamReview, SpamScan)
@@ -178,12 +200,7 @@ def reject_evidence(
             .where(SpamReview.organization_id == organization_id, SpamScan.suggested_action == "REJECT")
         ).all()
         for review, scan in rows:
-            if review.verdict == "SPAM":
-                correct += 1
-            else:
-                fp += 1
-            if roles.get(scan.node_id, TransportNodeRole.LAB.value) != TransportNodeRole.LAB.value:
-                real_reviewed += 1
+            add(scan.internet_message_id or f"scan:{scan.id}", scan.node_id, review.verdict == "SPAM", False)
     drows = session.execute(
         select(EnforcementDecisionRecord).where(
             EnforcementDecisionRecord.organization_id == organization_id,
@@ -192,15 +209,52 @@ def reject_evidence(
             EnforcementDecisionRecord.review_outcome != "",
         )
     ).scalars()
-    critical = 0
     for d in drows:
-        if d.review_outcome == "CORRECT":
-            correct += 1
-        else:
-            fp += 1
-            critical += 1 if d.review_critical else 0
-        if roles.get(d.node_id, TransportNodeRole.LAB.value) != TransportNodeRole.LAB.value:
-            real_reviewed += 1
+        correct = d.review_outcome == "CORRECT"
+        add(
+            d.internet_message_id or f"decision:{d.id}",
+            d.node_id,
+            correct,
+            (not correct) and d.review_critical,
+        )
+    return found
+
+
+def reject_candidates(session: Session, organization_id: str, control: ControlType) -> dict[str, str]:
+    """Кандидаты на отказ по контролю (предложено ``REJECT``): идентичность письма → узел. Просмотр не обязателен."""
+    found: dict[str, str] = {}
+    if control is ControlType.SPAM_REJECT:
+        for scan in session.execute(
+            select(SpamScan).where(
+                SpamScan.organization_id == organization_id, SpamScan.suggested_action == "REJECT"
+            )
+        ).scalars():
+            found.setdefault(scan.internet_message_id or f"scan:{scan.id}", scan.node_id)
+    for d in session.execute(
+        select(EnforcementDecisionRecord).where(
+            EnforcementDecisionRecord.organization_id == organization_id,
+            EnforcementDecisionRecord.control_type == control.value,
+            EnforcementDecisionRecord.suggested_action == "REJECT",
+        )
+    ).scalars():
+        found.setdefault(d.internet_message_id or f"decision:{d.id}", d.node_id)
+    return found
+
+
+def reject_evidence(
+    session: Session, settings: Settings, organization_id: str, control: ControlType
+) -> tuple[Any, bool]:
+    """Выборка просмотренных кандидатов на отказ по контролю: (отчёт, выборка реального потока)."""
+    roles = _node_roles(session, organization_id)
+    rows = reviewed_rejects(session, organization_id, control)
+    correct = sum(1 for r in rows.values() if r.correct)
+    fp = len(rows) - correct
+    critical = sum(1 for r in rows.values() if not r.correct and r.critical)
+    real_reviewed = sum(
+        1
+        for r in rows.values()
+        if roles.get(r.node_id, TransportNodeRole.LAB.value) != TransportNodeRole.LAB.value
+    )
     reviewed = correct + fp
     report = build_reject_safety(
         reviewed=reviewed,

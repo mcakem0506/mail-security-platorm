@@ -25,6 +25,7 @@ from .routers import (
     gateways,
     incidents,
     investigations,
+    pilot,
     real_flow,
     remediation,
     reports,
@@ -120,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(antispam.agent_router, prefix=api_prefix)
     app.include_router(enforcement.router, prefix=api_prefix)
     app.include_router(enforcement.agent_router, prefix=api_prefix)
+    app.include_router(pilot.router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)
     app.include_router(admin.router, prefix=f"{api_prefix}/admin")
     app.include_router(dashboard.router, prefix=api_prefix)

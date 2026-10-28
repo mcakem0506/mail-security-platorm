@@ -21,6 +21,7 @@ import { ReevaluationPage } from "./pages/ReevaluationPage";
 import { TransportPage } from "./pages/TransportPage";
 import { AntispamPage } from "./pages/AntispamPage";
 import { EnforcementPage } from "./pages/EnforcementPage";
+import { PilotPage } from "./pages/PilotPage";
 import { QuarantinePage } from "./pages/QuarantinePage";
 
 interface NavItem {
@@ -69,6 +70,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/antispam", label: "Анти-спам и аутентификация", permission: "spam:read" },
       { to: "/enforcement", label: "Принуждение", permission: "enforcement:read" },
       { to: "/quarantine", label: "Карантин", permission: "quarantine:read" },
+      { to: "/pilot", label: "Пилот реального потока", permission: "pilot:read" },
     ],
   },
   {
@@ -184,6 +186,7 @@ export function App() {
             <Route path="/transport" element={<TransportPage user={user} />} />
             <Route path="/antispam" element={<AntispamPage user={user} />} />
             <Route path="/enforcement" element={<EnforcementPage user={user} />} />
+            <Route path="/pilot" element={<PilotPage />} />
             <Route path="/quarantine" element={<QuarantinePage user={user} />} />
             <Route path="/reports" element={<ReportsPage user={user} />} />
             <Route path="/remediation" element={<RemediationPage user={user} />} />

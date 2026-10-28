@@ -427,6 +427,45 @@ def _ingest_report(session, settings, organization_id, source_id, report, summar
     return "ack"
 
 
+@celery_app.task(name="msp.poll_journal_mailbox")
+def poll_journal_mailbox() -> dict[str, Any]:
+    """Опрос журнального ящика Exchange (MSP 1.3P): отчёт, оригинал, приём, анализ, набор валидации.
+
+    Сначала запись и фиксация транзакции, потом перенос письма в «Обработанные» — как у ящика
+    безопасности. Работает только в теневом режиме и с заданной солью отпечатка; иначе опрос
+    пропускается, письма остаются в ящике.
+    """
+    settings = get_settings()
+    if not settings.journal_mailbox_enabled or not settings.journal_mailbox_host:
+        return {"skipped": "journal mailbox not configured"}
+
+    from msp_api.services import real_flow_feed
+    from msp_exchange import SecurityMailboxConfig, SecurityMailboxProvider
+
+    provider = SecurityMailboxProvider(
+        SecurityMailboxConfig(
+            host=settings.journal_mailbox_host,
+            port=settings.journal_mailbox_port,
+            username=settings.journal_mailbox_user,
+            password=settings.journal_mailbox_password,
+            folder=settings.journal_mailbox_folder,
+            use_ssl=settings.journal_mailbox_ssl,
+            ca_file=settings.journal_mailbox_ca_file,
+            max_message_size=int(settings.limit_message_size * real_flow_feed.REPORT_OVERHEAD_FACTOR),
+            unwrap_forwarded=False,
+        )
+    )
+    try:
+        return real_flow_feed.process_batch(
+            session_scope, settings, provider, storage=build_storage(settings)
+        )
+    except real_flow_feed.FeedError as exc:
+        return {"skipped": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - недоступный ящик не должен ронять воркер; письма остаются на месте
+        logger.warning("worker.journal_poll_failed", extra={"error": type(exc).__name__})
+        return {"error": type(exc).__name__}
+
+
 @celery_app.task(name="msp.sync_directory")
 def sync_directory() -> dict[str, Any]:
     """Read-only Active Directory sync (ТЗ 10)."""
