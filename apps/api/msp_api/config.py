@@ -34,6 +34,7 @@ _SECRET_FIELDS = (
     "enforcement_policy_signing_key",
     "quarantine_encryption_key",
     "real_flow_fingerprint_salt",
+    "journal_mailbox_password",
 )
 
 
@@ -161,6 +162,17 @@ class Settings(BaseSettings):
     security_mailbox_user: str = ""
     security_mailbox_password: str = ""
     security_mailbox_password_file: str | None = None
+    #: Журнальный ящик Exchange (MSP 1.3P): отдельный ящик со своими учётными данными;
+    #: платформа читает его и переносит обработанное.
+    journal_mailbox_enabled: bool = False
+    journal_mailbox_host: str = ""
+    journal_mailbox_port: int = 993
+    journal_mailbox_user: str = ""
+    journal_mailbox_password: str = ""
+    journal_mailbox_password_file: str | None = None
+    journal_mailbox_folder: str = "INBOX"
+    journal_mailbox_ssl: bool = True
+    journal_mailbox_ca_file: str | None = None
     security_mailbox_folder: str = "INBOX"
     security_mailbox_ssl: bool = True
     security_mailbox_ca_file: str | None = None

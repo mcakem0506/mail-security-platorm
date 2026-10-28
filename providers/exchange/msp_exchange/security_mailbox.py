@@ -49,6 +49,9 @@ class SecurityMailboxConfig:
     timeout_seconds: float = 30.0
     max_message_size: int = 30 * 1024 * 1024
     batch_size: int = 25
+    #: False для журнального ящика (MSP 1.3P): отчёт отдаётся целиком, оригинал извлекает приём журнала
+    #: со своими проверками (отчёт в отчёте, размер, нет вложения). Для ящика безопасности — True.
+    unwrap_forwarded: bool = True
 
 
 @dataclass
@@ -317,6 +320,13 @@ class SecurityMailboxProvider:
                 oversized=True,
                 actual_size=len(raw),
                 warnings=[f"report exceeds max_message_size ({len(raw)})"],
+            )
+        if not self.config.unwrap_forwarded:
+            return IngestedReport(
+                uid=uid,
+                raw_mime=raw,
+                actual_size=len(raw),
+                content_sha256=hashlib.sha256(raw).hexdigest(),
             )
         outer = email.message_from_bytes(raw[:65536], policy=policy.compat32)
         from email.utils import getaddresses

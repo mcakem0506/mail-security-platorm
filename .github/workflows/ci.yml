@@ -1452,4 +1452,4 @@ jobs:
         run: >-
           pytest -q -rs -o addopts=""
           tests/unit/test_journal_report.py tests/unit/test_quarantine_key_check.py
-          tests/e2e/test_pilot_intake_e2e.py
+          tests/integration/test_journal_poll.py tests/e2e/test_pilot_intake_e2e.py

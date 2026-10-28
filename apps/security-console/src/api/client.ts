@@ -1451,3 +1451,82 @@ export const enforcementApi = {
     post<QuarantineRow>(`/api/v1/quarantine/${id}/release`, { action }),
   deleteItem: (id: string, reason: string) => post<QuarantineRow>(`/api/v1/quarantine/${id}/delete`, { reason }),
 };
+
+// Пилот реального потока (MSP 1.3P). Только чтение: решения и подтверждения ведутся по API и runbook.
+
+export interface PilotStatistics {
+  sample_size: number;
+  failures: number;
+  observed_fp_rate: number | null;
+  wilson_upper_95: number | null;
+  max_upper: number;
+  sample_for_zero_failures: number;
+  status: string;
+}
+
+export interface PilotControlRow {
+  control: string;
+  state: string;
+  pilot_readiness: string;
+  can_canary_on_real: boolean;
+  reasons: string[];
+  real_reviewed_rejects: number;
+  real_confirmed_fp: number;
+  statistics: PilotStatistics;
+  blocked_by_gap: boolean;
+}
+
+export interface PilotPhaseRow {
+  phase: string;
+  go_possible: boolean;
+  blocking: string[];
+  decision: { state: string; outcome: string; approvals: { role: string }[]; required_roles: string[] } | null;
+}
+
+export interface PilotAttestationRow {
+  key: string;
+  title: string;
+  phase: string;
+  status: string;
+  evidence_ref: string;
+}
+
+export interface PilotReadiness {
+  decision: string;
+  decision_reasons: string[];
+  stopped: boolean;
+  phases: PilotPhaseRow[];
+  controls: PilotControlRow[];
+  attestations: PilotAttestationRow[];
+  warning: string;
+}
+
+export interface PilotMetrics {
+  sample: {
+    real_unique: number;
+    real_reviewed: number;
+    real_by_source: Record<string, number>;
+    biased_real_security_mailbox: number;
+    imported_analyst_upload: number;
+    drills: number;
+    unknown_per_1000: number | null;
+    unscannable_per_1000: number | null;
+    ingest_delay_p95_seconds: number | null;
+  };
+  synthetic_lab_scans: number;
+  applied: {
+    applied_rejects: number;
+    applied_rejects_reviewed: number;
+    applied_rejects_review_coverage: number | null;
+    applied_quarantines: number;
+    applied_quarantines_reviewed: number;
+    applied_quarantines_review_coverage: number | null;
+  };
+  critical_fp: number;
+  targets: { real_unique: number; reviewed_real: number; reviewed_reject_candidates: number };
+}
+
+export const pilotApi = {
+  readiness: () => request<PilotReadiness>("/api/v1/pilot/readiness"),
+  metrics: () => request<PilotMetrics>("/api/v1/pilot/metrics"),
+};

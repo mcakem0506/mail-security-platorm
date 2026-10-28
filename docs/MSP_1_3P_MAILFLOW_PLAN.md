@@ -13,12 +13,16 @@
 | Надёжный приём (`IntakeRecord`), анализ, запись набора валидации с источником и дедупликацией | `IMPLEMENTED` (1.3P) | `services/real_flow_feed.py`, `POST /api/v1/pilot/intake/journal` |
 | Ящик безопасности (EWS, чтение, перемещение после записи) | `ALREADY_IMPLEMENTED` | воркер `msp.poll_security_mailbox` |
 | Теневая копия шлюза (SMTP, `always_bcc`) | `ALREADY_IMPLEMENTED` (1.1) | `gateway-agent/shadow` |
-| Постоянный сборщик журнального ящика по EWS | `BLOCKED_EXTERNAL`: нужен настоящий Exchange; сегодня журнальные отчёты подаются в `intake/journal` | — |
-| Приём `EWS_READONLY` по произвольным ящикам | `BLOCKED_EXTERNAL`: то же | — |
+| Постоянный опрос журнального ящика по IMAP (тот же провайдер, что у ящика безопасности; перенос после фиксации) | `IMPLEMENTED` (1.3P); проверен на поддельном ящике, на настоящем Exchange `BLOCKED_EXTERNAL` | воркер `msp.poll_journal_mailbox`, `real_flow_feed.process_batch` |
+| Сборщик по EWS и приём `EWS_READONLY` по произвольным ящикам | `NOT_IMPLEMENTED` / `BLOCKED_EXTERNAL`: нужен настоящий Exchange | — |
 | Изоляция пилотного маршрута, два узла, SMTP-канарейка | `ALREADY_IMPLEMENTED` на стенде (1.3); на реальной среде `NOT_TESTED` | `tests/enforcement` |
 
-Поэтому постоянный сбор реальных писем сегодня требует внешней подачи (скрипт или сборщик организации, вызывающий `intake/journal`) —
-это зафиксировано как внешний блокер приёмки, а не скрыто.
+Журнальный ящик настраивается отдельно (`MSP_JOURNAL_MAILBOX_ENABLED`, `MSP_JOURNAL_MAILBOX_HOST`, `MSP_JOURNAL_MAILBOX_USER`, пароль из файла
+`MSP_JOURNAL_MAILBOX_PASSWORD_FILE`, `MSP_JOURNAL_MAILBOX_CA_FILE`) и требует включённого IMAP4 на Exchange. Воркер раз в минуту берёт
+отчёты **без отметки «прочитано»**, записывает и анализирует их, фиксирует транзакцию и только потом переносит письмо в «Processed»; при
+сбое анализа письмо остаётся в ящике, после исчерпания повторов уходит в «Failed». Отчёт сверх предела размера не скачивается и
+записывается как непроверенный. Опрос выключен, пока не включён теневой режим и не задана соль отпечатка. Проверка на настоящем Exchange
+остаётся внешним блокером; до неё отчёты можно подавать вручную через `intake/journal`.
 
 ## Топология A — существующий шлюз (KSMG/другой SEG), основная
 

@@ -147,6 +147,7 @@ ignore = [
 "tests/e2e/test_pilot_e2e.py" = ["E501", "F811"]
 "tests/integration/test_pilot_sample.py" = ["E501"]
 "tests/integration/test_pilot_gate.py" = ["E501"]
+"tests/integration/test_journal_poll.py" = ["E501"]
 "apps/api/msp_api/services/pilot.py" = ["E501"]
 "apps/api/msp_api/routers/pilot.py" = ["E501"]
 "apps/api/msp_api/db/models_pilot.py" = ["E501"]

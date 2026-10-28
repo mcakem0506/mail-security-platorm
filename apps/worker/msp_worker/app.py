@@ -61,6 +61,7 @@ celery_app.conf.update(
         "msp.refresh_campaign": {"queue": QUEUE_CAMPAIGN},
         "msp.send_notification": {"queue": QUEUE_NOTIFICATIONS},
         "msp.poll_security_mailbox": {"queue": QUEUE_MAIL_PARSE},
+        "msp.poll_journal_mailbox": {"queue": QUEUE_MAIL_PARSE},
         "msp.sync_directory": {"queue": QUEUE_MAINTENANCE},
         "msp.run_retention": {"queue": QUEUE_MAINTENANCE},
         "msp.recheck_indicators": {"queue": QUEUE_MAINTENANCE},
@@ -70,6 +71,11 @@ celery_app.conf.update(
     task_soft_time_limit=180,
     task_time_limit=300,
     beat_schedule={
+        "poll-journal-mailbox": {
+            "task": "msp.poll_journal_mailbox",
+            "schedule": 60.0,
+            "options": {"queue": QUEUE_MAIL_PARSE, "expires": 55},
+        },
         "poll-security-mailbox": {
             "task": "msp.poll_security_mailbox",
             "schedule": 60.0,

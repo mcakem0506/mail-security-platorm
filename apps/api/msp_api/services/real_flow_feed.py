@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -54,6 +56,8 @@ class FeedOutcome:
     intake_id: str | None = None
     created: bool = False
     problems: tuple[str, ...] = ()
+    #: Повторы исчерпаны: письмо переносится в папку неудач, а не берётся снова при каждом опросе.
+    dead_lettered: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -213,8 +217,8 @@ def _ingest_usable(
         job.state = JobState.FAILED
         job.status = AnalysisStatus.ERROR
         job.error = type(exc).__name__
-        mark_failed(record, type(exc).__name__)
-        return FeedOutcome("FAILED", None, record.id, False, ("ANALYSIS_FAILED",))
+        dead = mark_failed(record, type(exc).__name__)
+        return FeedOutcome("FAILED", None, record.id, False, ("ANALYSIS_FAILED",), dead_lettered=dead)
     attach_job(record, job)
     verdict, rules, ruleset, engine = _verdict(session, job)
     validation, created = real_flow.ingest(
@@ -292,3 +296,133 @@ def _ingest_unscannable(
         ),
     )
     return FeedOutcome("UNSCANNABLE", validation.id, record.id, created, tuple(reasons))
+
+
+def ingest_oversized(
+    session: Session,
+    settings: Settings,
+    organization_id: str,
+    *,
+    uid: str,
+    size: int,
+    storage: ObjectStorage,
+    source: ValidationSource = ValidationSource.JOURNAL_COPY,
+    source_id: str = "journal",
+) -> FeedOutcome:
+    """Отчёт, который не скачивался из-за размера: записывается как непроверенный, без усечения."""
+    require_ready(settings)
+    outcome = begin_intake(
+        session,
+        settings,
+        organization_id=organization_id,
+        source=IntakeSource.SHADOW,
+        source_id=f"journal:{source_id}",
+        mailbox_uid=f"oversized:{uid}"[:128],
+        raw=b"",
+        oversized=True,
+        actual_size=size,
+        warnings=["ORIGINAL_OVERSIZED"],
+        storage=storage,
+    )
+    record = outcome.record
+    if not (outcome.is_duplicate or (not outcome.created and record.analysis_job_id)):
+        unscannable_job(
+            session,
+            organization_id=organization_id,
+            record=record,
+            reason=f"журнальный отчёт размером {size} байт не загружался: предел анализа превышен",
+        )
+    print_ = (
+        "report:"
+        + hashlib.sha256(
+            settings.real_flow_fingerprint_salt.encode() + f"{source_id}:{uid}".encode()
+        ).hexdigest()[:32]
+    )
+    validation, created = real_flow.ingest(
+        session,
+        real_flow.IngestRequest(
+            organization_id=organization_id,
+            source=source,
+            message_fingerprint=print_,
+            production_verdict=None,
+            unscannable_reasons=["ORIGINAL_OVERSIZED"],
+            sampling_reasons=[f"source:{source.value}", "unscannable"],
+            raw_retention_days=settings.raw_message_retention_days,
+        ),
+    )
+    return FeedOutcome("UNSCANNABLE", validation.id, record.id, created, ("ORIGINAL_OVERSIZED",))
+
+
+def process_batch(
+    scope: Callable[[], AbstractContextManager[Session]],
+    settings: Settings,
+    provider: Any,
+    *,
+    storage: ObjectStorage,
+    source_id: str = "journal",
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Один опрос журнального ящика: записать, зафиксировать, и только потом сказать ящику.
+
+    Порядок тот же, что у ящика безопасности: письмо записано и сохранено, транзакция зафиксирована, и лишь затем письмо
+    переносится в «Обработанные». Рабочий процесс, упавший до фиксации, оставляет письмо на месте — следующий опрос его возьмёт;
+    упавший после — вызовет повторную выборку, которую дедупликация превращает в пустую операцию.
+    """
+    from ..db.models import Organization
+
+    require_ready(settings)
+    reports = provider.fetch_unprocessed(limit)
+    summary: dict[str, Any] = {
+        "fetched": len(reports),
+        "analysed": 0,
+        "duplicates": 0,
+        "unscannable": 0,
+        "retry": 0,
+        "dead_lettered": 0,
+        "errors": 0,
+    }
+    moves: list[tuple[str, str]] = []
+    for report in reports:
+        try:
+            with scope() as session:
+                org = session.execute(select(Organization)).scalars().first()
+                if org is None:
+                    return {**summary, "skipped": "организация не настроена"}
+                if report.oversized:
+                    outcome = ingest_oversized(
+                        session,
+                        settings,
+                        org.id,
+                        uid=report.uid,
+                        size=report.actual_size,
+                        storage=storage,
+                        source_id=source_id,
+                    )
+                else:
+                    outcome = ingest_journal_report(
+                        session, settings, org.id, report.raw_mime, storage=storage, source_id=source_id
+                    )
+        except FeedError:
+            raise
+        except Exception:
+            logger.exception("real_flow.journal_poll_error", extra={"uid": report.uid})
+            summary["errors"] += 1
+            continue
+        if outcome.status == "FAILED":
+            if outcome.dead_lettered:
+                summary["dead_lettered"] += 1
+                moves.append((report.uid, "fail"))
+            else:
+                summary["retry"] += 1
+            continue
+        key = {"ANALYSED": "analysed", "DUPLICATE": "duplicates", "UNSCANNABLE": "unscannable"}[
+            outcome.status
+        ]
+        summary[key] += 1
+        moves.append((report.uid, "ack"))
+    for uid, disposition in moves:
+        try:
+            provider.ack(uid) if disposition == "ack" else provider.fail(uid)
+        except Exception:  # noqa: BLE001 - неудачный перенос лишь вызывает безвредную повторную выборку
+            logger.warning("real_flow.journal_move_failed", extra={"uid": uid})
+    return summary

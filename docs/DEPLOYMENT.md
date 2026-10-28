@@ -457,7 +457,8 @@ PRODUCTION MX CUTOVER.**
 Голова на момент MSP 1.3P — `a3f1c9d27b64`. Миграция только **добавляет** три таблицы (`pilot_attestations`, `pilot_phase_decisions`,
 `pilot_stops`) и не трогает существующие, поэтому откат (`alembic downgrade -1`) безопасен и не теряет данные этапов 1.1–1.3; записи пилота при
 откате удаляются вместе с таблицами. Новая настройка — `MSP_REAL_FLOW_FINGERPRINT_SALT` (секрет, не короче 16 символов; без неё приём журнального
-отчёта отклоняется). Приём реальной почты работает только при `MSP_REAL_FLOW_SHADOW=true`. **MSP 1.3P НЕ РАЗРЕШАЕТ ГЛОБАЛЬНОЕ ПЕРЕКЛЮЧЕНИЕ
+отчёта отклоняется). Приём реальной почты работает только при `MSP_REAL_FLOW_SHADOW=true`. Журнальный ящик Exchange опрашивается по IMAP, если задан
+`MSP_JOURNAL_MAILBOX_ENABLED=true` и `MSP_JOURNAL_MAILBOX_HOST` (учётные данные — `MSP_JOURNAL_MAILBOX_USER` и файл `MSP_JOURNAL_MAILBOX_PASSWORD_FILE`). **MSP 1.3P НЕ РАЗРЕШАЕТ ГЛОБАЛЬНОЕ ПЕРЕКЛЮЧЕНИЕ
 PRODUCTION MX.**
 
 Таблица `validation_messages` живёт отдельно от `mail_messages` намеренно: обычное письмо
