@@ -33,6 +33,7 @@ _SECRET_FIELDS = (
     "metrics_token",
     "enforcement_policy_signing_key",
     "quarantine_encryption_key",
+    "real_flow_fingerprint_salt",
 )
 
 
@@ -195,6 +196,9 @@ class Settings(BaseSettings):
     #: Это не «режим пониженной функциональности», а осознанное состояние пилота: платформа
     #: смотрит на настоящую почту и ничего с ней не делает, пока ей не начали доверять.
     real_flow_shadow: bool = False
+    #: Соль отпечатка письма реального потока (HMAC). Без неё приём журнала отключён: пустая соль сделала бы
+    #: отпечаток воспроизводимым любым человеком, а смена соли разорвала бы дедупликацию.
+    real_flow_fingerprint_salt: str = ""
     remediation_dry_run_only: bool = True
     remediation_second_approver_threshold: int = 10  # ТЗ 20.1
 

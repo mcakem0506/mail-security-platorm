@@ -99,6 +99,7 @@ class AuditAction:
     PILOT_STOP_OPENED = "pilot.stop_opened"
     PILOT_STOP_RESOLVED = "pilot.stop_resolved"
     PILOT_EVIDENCE_EXPORTED = "pilot.evidence_exported"
+    PILOT_INTAKE = "pilot.journal_intake"
     QUARANTINE_STORED = "quarantine.stored"
     QUARANTINE_RELEASE_REQUESTED = "quarantine.release_requested"
     QUARANTINE_RELEASED = "quarantine.released"

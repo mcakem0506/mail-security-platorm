@@ -127,6 +127,7 @@ ignore = [
 "tests/spam/**" = ["E501"]
 "scripts/record_spam_corpus.py" = ["E501"]
 "scripts/evaluate_spam.py" = ["E501"]
+"scripts/quarantine_key_check.py" = ["E501"]
 "packages/antispam/msp_antispam/corpus.py" = ["E501"]
 "packages/enforcement/**" = ["E501"]
 "apps/api/msp_api/services/enforcement.py" = ["E501"]
@@ -148,6 +149,10 @@ ignore = [
 "apps/api/msp_api/services/pilot.py" = ["E501"]
 "apps/api/msp_api/routers/pilot.py" = ["E501"]
 "apps/api/msp_api/db/models_pilot.py" = ["E501"]
+"apps/api/msp_api/services/real_flow_feed.py" = ["E501"]
+"packages/mail-parser/msp_mail_parser/journal.py" = ["E501"]
+"tests/unit/test_journal_report.py" = ["E501"]
+"tests/e2e/test_pilot_intake_e2e.py" = ["E501", "F811"]
 "apps/api/msp_api/migrations/**" = ["E501", "I"]
 
 [tool.mypy]

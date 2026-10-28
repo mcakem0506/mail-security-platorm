@@ -15,8 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..deps import Actor, AppSettings, DbSession, client_ip, require_permission
 from ..security.audit import AuditAction, record
 from ..security.rbac import Permission
-from ..services import pilot
+from ..services import pilot, real_flow_feed
 from ..services.pilot import PilotError
+from ..services.storage import build_storage
 
 router = APIRouter(prefix="/pilot", tags=["pilot"])
 
@@ -313,3 +314,40 @@ def evidence(
     _audit(session, actor, request, AuditAction.PILOT_EVIDENCE_EXPORTED, "pilot_evidence", "export", {})
     session.commit()
     return data
+
+
+@router.post("/intake/journal")
+async def intake_journal(
+    request: Request, session: DbSession, actor: PilotManager, settings: AppSettings
+) -> dict[str, Any]:
+    """Принять один журнальный отчёт Exchange (тело запроса — RFC 822) в набор валидации реального потока.
+
+    Работает только при ``MSP_REAL_FLOW_SHADOW=true`` и заданной соли отпечатка. Оригинал извлекается из вложения;
+    повтор того же письма выборку не увеличивает; непроверяемое записывается как ``UNKNOWN/UNSCANNABLE``.
+    """
+    limit = int(settings.limit_message_size * real_flow_feed.REPORT_OVERHEAD_FACTOR) + 1
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, "журнальный отчёт слишком велик")
+    body = await request.body()
+    if not body:
+        raise HTTPException(422, "пустое тело запроса")
+    if len(body) > limit:
+        raise HTTPException(413, "журнальный отчёт слишком велик")
+    try:
+        outcome = real_flow_feed.ingest_journal_report(
+            session, settings, actor.organization_id, body, storage=build_storage(settings)
+        )
+    except real_flow_feed.FeedError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    _audit(
+        session,
+        actor,
+        request,
+        AuditAction.PILOT_INTAKE,
+        "pilot_intake",
+        outcome.intake_id or "none",
+        {"status": outcome.status, "created": outcome.created, "problems": list(outcome.problems)},
+    )
+    session.commit()
+    return outcome.as_dict()
