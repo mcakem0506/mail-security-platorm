@@ -894,7 +894,12 @@ def propose_decision(
             _guard_controls_for_p4(session, settings, organization_id, names, risk)
     # Новое предложение закрывает прежние неподтверждённые по этой фазе.
     for old in list_decisions(session, organization_id):
-        if old.phase == target.value and old.state == PilotDecisionState.PROPOSED.value:
+        if old.phase != target.value:
+            continue
+        if old.state == PilotDecisionState.PROPOSED.value:
+            old.state = PilotDecisionState.SUPERSEDED.value
+        elif result is PilotDecisionOutcome.NO_GO and old.state == PilotDecisionState.EFFECTIVE.value:
+            # Отказ отменяет действующее разрешение на эту фазу: NO_GO, оставивший в силе прежнее GO, ничего бы не останавливал.
             old.state = PilotDecisionState.SUPERSEDED.value
     row = PilotPhaseDecisionRecord(
         organization_id=organization_id,

@@ -312,6 +312,27 @@ class TestPhaseDecisions:
         assert decision["state"] == "EFFECTIVE"
         assert decision["outcome"] == "NO_GO"
 
+    def test_a_no_go_withdraws_the_effective_go_for_the_same_phase(self, client, people, team) -> None:  # type: ignore[no-untyped-def]
+        admin = as_(client, people, "admin")
+        attest_all(admin, P1_KEYS)
+        decision = admin.post(f"{BASE}/phases/P1/decision", {"outcome": "GO", "reasons": ["ok"]}).json()
+        person(client, team["mail"]).post(
+            f"{BASE}/decisions/{decision['id']}/approve", {"role": "MAIL_ADMIN"}
+        )
+        person(client, team["secops"]).post(
+            f"{BASE}/decisions/{decision['id']}/approve", {"role": "SECURITY_OWNER"}
+        )
+        admin = as_(client, people, "admin")
+        phases = admin.get(f"{BASE}/readiness").json()["phases"]
+        assert next(p for p in phases if p["phase"] == "P1")["decision"]["state"] == "EFFECTIVE"
+
+        admin.post(f"{BASE}/phases/P1/decision", {"outcome": "NO_GO", "reasons": ["новое обстоятельство"]})
+
+        phases = admin.get(f"{BASE}/readiness").json()["phases"]
+        assert next(p for p in phases if p["phase"] == "P1")["decision"] is None, (
+            "NO_GO не отменил действующее GO"
+        )
+
     def test_p0_cannot_be_decided(self, client, people) -> None:  # type: ignore[no-untyped-def]
         assert (
             as_(client, people, "admin")
