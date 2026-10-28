@@ -180,10 +180,11 @@ EVIDENCE_ARCHIVE_SHA256:   NOT_PROVIDED
 
 Windows 11, Docker, Python 3.13:
 
-* `tests/unit tests/security tests/integration tests/e2e`: **2519 проверок, 0 провалов, 47 пропущено** (проверки, зависящие от Linux, выполняет CI). Было 2440 в приёмке 1.3;
+* `tests/unit tests/security tests/integration tests/e2e`: **2535 проверок, 0 провалов, 47 пропущено** (проверки, зависящие от Linux, выполняет CI). Было 2440 в приёмке 1.3;
   новые — статистика пилота (16), разбор журнального отчёта (15), проверка ключа карантина (11), гейты и разделение выборки (14), API пилота (38),
-  приём журнала (18), защита от действий пилота (12), дедупликация просмотров (2).
+  приём журнала (18), опрос журнального ящика (15), защита от действий пилота (12), дедупликация просмотров (2).
 * `ruff check`, `ruff format --check`, `mypy packages apps/api/msp_api apps/worker providers` — без замечаний.
 * Миграция `a3f1c9d27b64` на PostgreSQL 16: `upgrade → downgrade → upgrade → alembic check` — чисто; миграция только добавляет таблицы.
 * Живой стенд принуждения 1.3 в этом этапе не менялся (изменения 1.3P его не затрагивают); его CI-задания сохранены.
+* Консоль: `tsc --noEmit`, сборка и проверка монтирования (`npm run smoke`) проходят; `npm audit` — 0 уязвимостей.
 * Новые задания CI: `Pilot readiness tests`, `Pilot real-flow intake tests` (всего 51); повторов до зелёного нет (`tests/unit/test_ci_no_retry.py`).
