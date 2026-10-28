@@ -22,6 +22,8 @@ REQUIRED_JOBS = {
     "credential-scope-tests",
     "rspamd-effective-actions-audit",
     "enforcement-load-smoke",
+    "pilot-readiness-tests",
+    "pilot-real-flow-intake-tests",
 }
 
 

@@ -67,6 +67,18 @@ IMPORTED_SOURCES = frozenset({ValidationSource.ANALYST_UPLOAD})
 #: (проверяется отдельно).
 PILOT_CONTROLS = tuple(ControlType)
 
+#: Контроли, действующие отказом: для них нужна статистика ложных срабатываний. Карантин, временный отказ и исходящий контроль
+#: проверяются другими условиями (выпуск, просмотр каждого действия, отдельный план).
+REJECT_CONTROLS = frozenset(
+    {
+        ControlType.SPAM_REJECT.value,
+        ControlType.RBL_REJECT.value,
+        ControlType.MALWARE_REJECT.value,
+        ControlType.PHISHING_REJECT.value,
+        ControlType.DMARC_REJECT.value,
+    }
+)
+
 #: Роли, чьё подтверждение нужно решению. Идентичность берётся из сессии: одна учётная запись — одна роль.
 ROLE_MAIL_ADMIN = "MAIL_ADMIN"
 ROLE_SECURITY_OWNER = "SECURITY_OWNER"
@@ -818,7 +830,7 @@ def _p4_checks(
                 "; ".join(row["reasons"]),
             )
         )
-        if name != ControlType.QUARANTINE.value and name != ControlType.OUTBOUND_BLOCK.value:
+        if name in REJECT_CONTROLS:
             checks.append(
                 _check(
                     f"control:{name}:statistics",

@@ -1416,3 +1416,40 @@ jobs:
         env:
           MSP_GATEWAY_TESTS: "1"
         run: pytest -q -rs -o addopts="" tests/enforcement/test_load_smoke.py
+
+  pilot-readiness-tests:
+    name: Pilot readiness tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Статистика, гейты фаз, решения, остановки, разделение реального и лабораторного: повторов до зелёного нет (AGENTS.md §9).
+      - name: Проверки
+        run: >-
+          pytest -q -rs -o addopts=""
+          tests/unit/test_pilot_stats.py tests/unit/test_pilot_no_actions.py
+          tests/integration/test_pilot_sample.py tests/integration/test_pilot_gate.py
+          tests/e2e/test_pilot_e2e.py
+
+  pilot-real-flow-intake-tests:
+    name: Pilot real-flow intake tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,qr,sandbox]"
+      # Журнальный отчёт Exchange, дедупликация, непроверяемое = UNKNOWN, проверка резервной копии ключа карантина.
+      - name: Проверки
+        run: >-
+          pytest -q -rs -o addopts=""
+          tests/unit/test_journal_report.py tests/unit/test_quarantine_key_check.py
+          tests/e2e/test_pilot_intake_e2e.py

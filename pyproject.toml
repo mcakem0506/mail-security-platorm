@@ -146,12 +146,16 @@ ignore = [
 # Пилот 1.3P: фикстуры client/people берутся из соседнего модуля; русские сообщения проверок длиннее предела.
 "tests/e2e/test_pilot_e2e.py" = ["E501", "F811"]
 "tests/integration/test_pilot_sample.py" = ["E501"]
+"tests/integration/test_pilot_gate.py" = ["E501"]
 "apps/api/msp_api/services/pilot.py" = ["E501"]
 "apps/api/msp_api/routers/pilot.py" = ["E501"]
 "apps/api/msp_api/db/models_pilot.py" = ["E501"]
 "apps/api/msp_api/services/real_flow_feed.py" = ["E501"]
 "packages/mail-parser/msp_mail_parser/journal.py" = ["E501"]
 "tests/unit/test_journal_report.py" = ["E501"]
+"tests/unit/test_pilot_no_actions.py" = ["E501"]
+"tests/unit/test_quarantine_key_check.py" = ["E501"]
+"tests/unit/test_pilot_stats.py" = ["E501"]
 "tests/e2e/test_pilot_intake_e2e.py" = ["E501", "F811"]
 "apps/api/msp_api/migrations/**" = ["E501", "I"]
 

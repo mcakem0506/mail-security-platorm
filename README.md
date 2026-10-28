@@ -437,6 +437,18 @@ python scripts/evaluate_detection.py --gate
 | [ENFORCEMENT_SLO.md](docs/ENFORCEMENT_SLO.md), [ENFORCEMENT_PILOT_PLAN.md](docs/ENFORCEMENT_PILOT_PLAN.md) | Показатели и план пилота |
 | [MSP_1_3_ACCEPTANCE.md](docs/MSP_1_3_ACCEPTANCE.md) | Приёмка |
 
+### Этап MSP 1.3P — пилот реального потока
+
+> **MSP 1.3P НЕ РАЗРЕШАЕТ ГЛОБАЛЬНОЕ ПЕРЕКЛЮЧЕНИЕ PRODUCTION MX.** Средства и процедуры пилота: метрики реального потока отдельно от лабораторного, гейты фаз, решения с
+> подтверждением ролей, остановки, приём журнального отчёта Exchange. Реальных писем в репозитории нет; итог при нулевой выборке — `NOT_READY`.
+
+| Документ | Назначение |
+|---|---|
+| [MSP_1_3P_SCOPE.md](docs/MSP_1_3P_SCOPE.md), [MSP_1_3P_DATA_APPROVAL.md](docs/MSP_1_3P_DATA_APPROVAL.md) | Границы и допуск к переписке |
+| [MSP_1_3P_INFRASTRUCTURE.md](docs/MSP_1_3P_INFRASTRUCTURE.md), [MSP_1_3P_MAILFLOW_PLAN.md](docs/MSP_1_3P_MAILFLOW_PLAN.md) | Инфраструктура и топологии |
+| [MSP_1_3P_PILOT_RUNBOOK.md](docs/MSP_1_3P_PILOT_RUNBOOK.md), [MSP_1_3P_DAILY_REPORT.md](docs/MSP_1_3P_DAILY_REPORT.md) | Runbook и ежедневный отчёт |
+| [MSP_1_3P_EVIDENCE_INDEX.md](docs/MSP_1_3P_EVIDENCE_INDEX.md), [MSP_1_3P_ACCEPTANCE.md](docs/MSP_1_3P_ACCEPTANCE.md) | Доказательства и приёмка |
+
 ## Ограничения
 
 MSP 1.1 добавляет транспортный узел на Postfix, но **не одобрен для боевого переключения MX**: нет высокой доступности, антиспама, принуждения SPF/DKIM/DMARC и пользовательского карантина.
