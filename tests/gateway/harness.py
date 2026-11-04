@@ -25,6 +25,7 @@ import textwrap
 import time
 import urllib.request
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,10 +196,30 @@ LAB_RECIPIENTS = [
 # ---------------------------------------------------------------------------------------------
 # Стенд
 # ---------------------------------------------------------------------------------------------
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def _free_ports(count: int) -> list[int]:
+    """Несколько свободных портов, гарантированно разных.
+
+    Сокеты держатся открытыми, пока не выданы все номера. Если закрывать каждый сразу, ядро может вернуть один
+    и тот же номер дважды, и compose падал на «port is already allocated» (так упали «ARC tests» в CI).
+    """
+    sockets = [socket.socket() for _ in range(count)]
+    try:
+        for sock in sockets:
+            sock.bind(("127.0.0.1", 0))
+        return [int(sock.getsockname()[1]) for sock in sockets]
+    finally:
+        for sock in sockets:
+            sock.close()
+
+
+def _free_port(exclude: Iterable[int] = ()) -> int:
+    """Свободный порт, не совпадающий с уже выданными стенду (``exclude``)."""
+    taken = set(exclude)
+    for _ in range(50):
+        port = _free_ports(1)[0]
+        if port not in taken:
+            return port
+    raise RuntimeError("не нашёлся свободный порт, отличный от выданных")
 
 
 class Control:
@@ -274,14 +295,15 @@ class Stack:
         self.panel_port = panel_port
         self.panel_token = panel_token
         self.project = f"gwt{uuid.uuid4().hex[:8]}"
-        self.ports = {
-            "GW_PORT_IN": _free_port(),
-            "GW_PORT_INTERNAL": _free_port(),
-            "GW_PORT_METRICS": _free_port(),
-            "EX1_CONTROL": _free_port(),
-            "EX2_CONTROL": _free_port(),
-            "SINK_CONTROL": _free_port(),
-        }
+        names = (
+            "GW_PORT_IN",
+            "GW_PORT_INTERNAL",
+            "GW_PORT_METRICS",
+            "EX1_CONTROL",
+            "EX2_CONTROL",
+            "SINK_CONTROL",
+        )
+        self.ports = dict(zip(names, _free_ports(len(names)), strict=True))
         self.authority = Authority.create()
         self._bundle_counter = 0
         for sub in ("bootstrap", "bundles", "secrets/gateway", "secrets/exchange"):
