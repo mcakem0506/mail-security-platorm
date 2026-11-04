@@ -40,7 +40,8 @@ APPROVERS: NOT_PROVIDED
 | **Дефект найден и исправлен:** один просмотр кандидата на отказ засчитывался дважды (скан и решение) и надувал выборку | `FIXED` (тест раньше исправления) | `enforcement.reviewed_rejects` |
 | Опрос журнального ящика по IMAP: перенос после фиксации, повтор, «Failed», большие и дубли | `IMPLEMENTED`; на поддельном ящике проверен, на настоящем Exchange `BLOCKED_EXTERNAL` | воркер `msp.poll_journal_mailbox`, `real_flow_feed.process_batch` |
 | Сборщик по EWS и приём `EWS_READONLY` по произвольным ящикам | `NOT_IMPLEMENTED` / `BLOCKED_EXTERNAL` | нужен настоящий Exchange |
-| Асимметричная подпись политики | `NOT_IMPLEMENTED`: для изолированного пилота допускается принятие риска (`policy_signing_risk_accept`) | см. [MSP_1_3P_INFRASTRUCTURE.md](MSP_1_3P_INFRASTRUCTURE.md) |
+| Асимметричная подпись политики Ed25519: закрытый ключ у панели, открытый на узле, узел с открытым ключом отвергает HMAC и сообщает режим проверки | `IMPLEMENTED`; режим по умолчанию остаётся HMAC и включается настройкой. На настоящих узлах `NOT_TESTED_REAL` | `msp_enforcement/policy.py`, `scripts/policy_keygen.py`, [MSP_1_3P_INFRASTRUCTURE.md](MSP_1_3P_INFRASTRUCTURE.md) |
+| **Дефект узла найден и исправлен:** отказ 403/404 без чтения тела запроса давал разрыв соединения (`ConnectionAbortedError` на Windows) вместо ответа | `FIXED` | `msp_enforcement/node.py` (`_drain`) |
 | Автоматическая смена ключа карантина | `NOT_IMPLEMENTED` (известное ограничение 1.3) | — |
 | Страница консоли «Пилот реального потока» | `IMPLEMENTED`: только чтение (итог, выборка, фазы, контроли, подтверждения); кнопок решений и переключения контролей нет | `apps/security-console/src/pages/PilotPage.tsx` |
 

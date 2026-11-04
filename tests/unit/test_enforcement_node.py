@@ -212,3 +212,80 @@ def test_the_direction_comes_from_the_scanner_symbol_not_from_the_caller(
         json.loads(p.read_text(encoding="utf-8")) for p in (node.cfg.state_dir / "decisions").glob("*.json")
     ]
     assert any("OUTBOUND_NOT_IN_SCOPE" in r["reason_codes"] for r in rows)
+
+
+class TestAsymmetricVerification:
+    """Узел с открытым ключом: принимает только Ed25519, отвергает HMAC и не возвращается к общему секрету молча."""
+
+    def public_node(self, tmp_path: Path, public_text: str | None) -> EnforcementNode:
+        key_file = tmp_path / "signing.key"
+        key_file.write_bytes(KEY)
+        kwargs: dict[str, Any] = {"state_dir": tmp_path / "pub", "key_file": str(key_file)}
+        if public_text is not None:
+            pub = tmp_path / "policy.pub"
+            pub.write_text(public_text, encoding="utf-8")
+            kwargs["public_key_file"] = str(pub)
+        return EnforcementNode(NodeConfig(**kwargs))
+
+    def test_the_node_installs_an_ed25519_policy_and_reports_how_it_verifies(self, tmp_path: Path) -> None:
+        import base64
+
+        from msp_enforcement import policy as pol
+
+        private, public = pol.generate_ed25519_keypair()
+        n = self.public_node(tmp_path, base64.b64encode(public).decode())
+        n.cache.install(pol.sign_policy_ed25519(make_policy(), private), now=datetime.now(UTC))
+
+        state = n.state_report()
+        assert state["policy_status"] == "FRESH"
+        assert state["policy_verification"] == "ED25519"
+
+    def test_the_node_refuses_a_hmac_policy_when_it_has_a_public_key(self, tmp_path: Path) -> None:
+        import base64
+
+        from msp_enforcement import policy as pol
+
+        _, public = pol.generate_ed25519_keypair()
+        n = self.public_node(tmp_path, base64.b64encode(public).decode())
+        with pytest.raises(pol.PolicyError):
+            n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC))
+        assert n.state_report()["policy_status"] in ("SAFE_MODE", "INVALID")
+
+    def test_a_corrupt_public_key_file_closes_verification_and_does_not_fall_back_to_hmac(
+        self, tmp_path: Path
+    ) -> None:
+        from msp_enforcement import policy as pol
+
+        n = self.public_node(tmp_path, "это не base64!!")
+        with pytest.raises(pol.PolicyError):
+            n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC))
+        assert n.state_report()["policy_verification"] == "ED25519", (
+            "узел с испорченным ключом вернулся к HMAC"
+        )
+
+    def test_a_node_without_a_public_key_verifies_with_hmac_as_before(self, tmp_path: Path) -> None:
+        n = self.public_node(tmp_path, None)
+        n.cache.install(sign_policy(make_policy(), KEY), now=datetime.now(UTC))
+        assert n.state_report()["policy_verification"] == "HMAC-SHA256"
+
+
+class TestRefusalsAreAnswered:
+    """Отказ должен дойти до клиента ответом, а не обрывом соединения (на Windows — ConnectionAbortedError)."""
+
+    def test_a_denied_client_with_a_large_body_still_gets_a_clean_403(self, tmp_path: Path) -> None:
+        n = make_node(tmp_path, "s", allowed_clients="10.99.0.0/24")
+        server = serve(n, "127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            big = dict(spam_record(), padding="x" * 200_000)
+            for _ in range(20):
+                assert post(base, big)[0] == 403
+        finally:
+            server.shutdown()
+
+    def test_an_unknown_path_with_a_body_gets_a_clean_404(self, node: EnforcementNode, http: str) -> None:
+        request = urllib.request.Request(http + "/v1/other", data=b"x" * 100_000, method="POST")
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request, timeout=5)
+        assert caught.value.code == 404

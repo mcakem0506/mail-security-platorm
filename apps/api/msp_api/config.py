@@ -32,6 +32,7 @@ _SECRET_FIELDS = (
     "enforcement_policy_token",
     "metrics_token",
     "enforcement_policy_signing_key",
+    "enforcement_policy_signing_private_key",
     "quarantine_encryption_key",
     "real_flow_fingerprint_salt",
     "journal_mailbox_password",
@@ -343,6 +344,10 @@ class Settings(BaseSettings):
     # Принуждение (ТЗ 1.3). Глобального включения нет: ключ подписи нужен для публикации политики.
     enforcement_policy_signing_key: str = ""
     enforcement_policy_signing_key_file: str | None = None
+    #: Закрытый ключ Ed25519 подписи политики (32 байта, base64). Если задан, политика подписывается
+    #: Ed25519, а HMAC не используется; узлу достаточно открытого ключа (MSP_ENFORCEMENT_PUBLIC_KEY_FILE).
+    enforcement_policy_signing_private_key: str = ""
+    enforcement_policy_signing_private_key_file: str | None = None
     #: Лабораторный режим допускает канарейку на лабораторной выборке; для пилота нужна реальная (§83).
     enforcement_lab_mode: bool = False
     enforcement_min_reviewed: int = 100

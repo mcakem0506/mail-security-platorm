@@ -37,7 +37,7 @@ from typing import Any
 from .engine import Outcome, Runtime, Switches, decide
 from .evidence import Stopwatch, input_from_record
 from .model import AppliedAction
-from .policy import PolicyBundle, PolicyCache, PolicyError, PolicyStatus
+from .policy import ALG_ED25519, ALG_HMAC, PolicyBundle, PolicyCache, PolicyError, PolicyStatus, decode_key
 
 ENGINE_VERSION = "msp-enforcement/1.3"
 MAX_BODY = 1024 * 1024
@@ -56,6 +56,10 @@ class NodeConfig:
         self.panel_url = (kw.get("panel_url") or os.environ.get("MSP_PANEL_URL", "")).rstrip("/")
         self.token_file = kw.get("token_file") or os.environ.get("MSP_ENFORCEMENT_TOKEN_FILE", "")
         self.key_file = kw.get("key_file") or os.environ.get("MSP_ENFORCEMENT_KEY_FILE", "")
+        # Открытый ключ Ed25519 панели. Если задан, узел принимает только подпись Ed25519 и отвергает HMAC.
+        self.public_key_file = kw.get("public_key_file") or os.environ.get(
+            "MSP_ENFORCEMENT_PUBLIC_KEY_FILE", ""
+        )
         self.node_id = kw.get("node_id") or os.environ.get("MSP_NODE_ID", "0" * 32)
         self.allowed_clients = tuple(
             c.strip()
@@ -79,13 +83,30 @@ def _read(path: str) -> str:
         return ""
 
 
+def _public_key(path: str) -> bytes | None:
+    """Открытый ключ узла. Файл не задан — ``None`` (режим HMAC). Задан, но нечитаем или испорчен — пустой ключ:
+    проверка подписи закрыта, узел не принимает ничего, а не молча возвращается к общему секрету."""
+    if not path:
+        return None
+    try:
+        return decode_key(_read(path))
+    except PolicyError:
+        return b""
+
+
 class EnforcementNode:
     def __init__(self, cfg: NodeConfig) -> None:
         self.cfg = cfg
         self.cfg.state_dir.mkdir(parents=True, exist_ok=True)
         (cfg.state_dir / "decisions").mkdir(exist_ok=True)
         key = _read(cfg.key_file).encode()
-        self.cache = PolicyCache(cfg.state_dir / "policy", key, soft_ttl=cfg.soft_ttl, hard_ttl=cfg.hard_ttl)
+        self.cache = PolicyCache(
+            cfg.state_dir / "policy",
+            key,
+            public_key=_public_key(cfg.public_key_file),
+            soft_ttl=cfg.soft_ttl,
+            hard_ttl=cfg.hard_ttl,
+        )
         self.counters: Counter[str] = Counter()
         self.lock = threading.Lock()
         self._seq = 0
@@ -242,20 +263,24 @@ class EnforcementNode:
             path.unlink(missing_ok=True)
         return len(rows)
 
-    def report_state(self) -> None:
-        if not self.cfg.panel_url:
-            return
+    def state_report(self) -> dict[str, Any]:
         policy, status = self.cache.load(_now())
-        state = {
+        return {
             "policy_checksum": policy.checksum() if policy else "",
             "policy_version": policy.version if policy else "",
             "policy_status": status.value,
+            "policy_verification": ALG_ED25519 if self.cache.public_key is not None else ALG_HMAC,
             "local_bypass": self.switches().local_bypass,
             "kill_switch_seen": self.switches().kill_switch,
             "decisions_total": sum(v for k, v in self.counters.items() if k.startswith("evaluated:")),
             "errors_total": self.counters["errors"],
             "timeouts_total": self.counters["timeouts"],
         }
+
+    def report_state(self) -> None:
+        if not self.cfg.panel_url:
+            return
+        state = self.state_report()
         with contextlib.suppress(OSError, urllib.error.URLError, ValueError):
             self._request(
                 "/gateway-agent/enforcement/state", body={"node_id": self.cfg.node_id, "state": state}
@@ -318,11 +343,27 @@ def make_handler(node: EnforcementNode) -> type[BaseHTTPRequestHandler]:
             else:
                 self._send(404, b'{"error":"not found"}')
 
+        def _drain(self) -> None:
+            """Дочитать тело запроса до ответа об отказе.
+
+            Ответ без чтения тела и закрытие соединения с непрочитанными данными сбрасывают соединение (RST): клиент
+            видит обрыв вместо ответа 403/404, на Windows это ``ConnectionAbortedError``. Читается не больше ``MAX_BODY``.
+            """
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                return
+            if 0 < length <= MAX_BODY:
+                with contextlib.suppress(OSError):
+                    self.rfile.read(length)
+
         def do_POST(self) -> None:
             if self.path != "/v1/decide":
+                self._drain()
                 return self._send(404, b'{"error":"not found"}')
             if not _client_allowed(node.cfg.allowed_clients, self.client_address[0]):
                 node.counters["denied_clients"] += 1
+                self._drain()
                 return self._send(403, b'{"error":"forbidden"}')
             try:
                 length = int(self.headers.get("Content-Length", "0"))

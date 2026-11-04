@@ -128,6 +128,7 @@ ignore = [
 "scripts/record_spam_corpus.py" = ["E501"]
 "scripts/evaluate_spam.py" = ["E501"]
 "scripts/quarantine_key_check.py" = ["E501"]
+"scripts/policy_keygen.py" = ["E501"]
 "packages/antispam/msp_antispam/corpus.py" = ["E501"]
 "packages/enforcement/**" = ["E501"]
 "apps/api/msp_api/services/enforcement.py" = ["E501"]
@@ -157,6 +158,8 @@ ignore = [
 "tests/unit/test_pilot_no_actions.py" = ["E501"]
 "tests/unit/test_quarantine_key_check.py" = ["E501"]
 "tests/unit/test_pilot_stats.py" = ["E501"]
+"tests/unit/test_policy_asymmetric.py" = ["E501"]
+"tests/e2e/test_policy_signing_e2e.py" = ["E501", "F811"]
 "tests/e2e/test_pilot_intake_e2e.py" = ["E501", "F811"]
 "apps/api/msp_api/migrations/**" = ["E501", "I"]
 

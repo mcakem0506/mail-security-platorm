@@ -113,6 +113,8 @@ _NON_SETTINGS = frozenset(
         "MSP_EXPORT_ENCRYPTION_KEY",
         "MSP_API_BASE",
         "MSP_SECURITY_MAILBOX",
+        # Читает служба принуждения на узле шлюза (``msp_enforcement.node``), а не панель.
+        "MSP_ENFORCEMENT_PUBLIC_KEY_FILE",
     }
 )
 

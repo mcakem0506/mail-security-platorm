@@ -32,6 +32,7 @@ from typing import Any
 from msp_contracts import RiskLevel, ValidationSource
 from msp_enforcement import pilot_stats
 from msp_enforcement.model import ControlType
+from msp_enforcement.policy import ALG_ED25519
 from msp_enforcement.readiness import RESOLVED, assess
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -498,6 +499,7 @@ def _nodes(session: Session, organization_id: str) -> list[dict[str, Any]]:
                 "reported_recently": fresh,
                 "policy_in_sync": bool(current and state.get("policy_checksum") == current.checksum),
                 "local_bypass": bool(state.get("local_bypass")),
+                "policy_verification": str(state.get("policy_verification", "")),
             }
         )
     return out
@@ -630,6 +632,8 @@ def platform_facts(session: Session, settings: Settings, organization_id: str) -
         "quarantine_key_configured": len((settings.quarantine_encryption_key or "").strip()) >= 32,
         "nodes": nodes,
         "nodes_ready": len(ready_nodes),
+        "nodes_asymmetric": sum(1 for n in ready_nodes if n["policy_verification"] == ALG_ED25519),
+        "signing_algorithm": enforcement.signing_algorithm(settings),
         "kill_switch_active": bool(switch and switch.kill_switch),
         "controls_enforcing": active,
         "gaps": gaps,
@@ -714,8 +718,21 @@ def gate(
         )
 
     for key, spec in ATTESTATIONS.items():
-        if spec.phase is phase:
-            checks.append(attestation_check(latest, key))
+        if spec.phase is not phase:
+            continue
+        if key == "policy_signing_risk_accept" and _asymmetric_signing(facts):
+            # Подпись Ed25519 у панели и проверка открытым ключом на всех готовых узлах заменяют принятие риска.
+            checks.append(
+                _check(
+                    "policy_signing",
+                    "Политика подписана Ed25519, узлы проверяют открытым ключом",
+                    True,
+                    facts["signing_algorithm"],
+                    ALG_ED25519,
+                )
+            )
+            continue
+        checks.append(attestation_check(latest, key))
 
     if phase is PilotPhase.P3:
         m = metrics(session, settings, organization_id)
@@ -758,6 +775,15 @@ def gate(
         "blocking": [c.key for c in blocking],
         "required_roles": list(required_roles(phase)),
     }
+
+
+def _asymmetric_signing(facts: dict[str, Any]) -> bool:
+    """Панель подписывает Ed25519, и каждый готовый узел сообщает, что проверяет открытым ключом (и таких узлов не меньше одного)."""
+    return (
+        facts["signing_algorithm"] == ALG_ED25519
+        and facts["nodes_ready"] >= 1
+        and facts["nodes_asymmetric"] == facts["nodes_ready"]
+    )
 
 
 def required_roles(phase: PilotPhase) -> tuple[str, ...]:
