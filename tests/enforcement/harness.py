@@ -11,7 +11,7 @@ import dataclasses
 import json
 import runpy
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +85,7 @@ class EnforcementStack(SpamStack):
 
     def __init__(self, workdir: Path, **kwargs: object) -> None:
         super().__init__(workdir, **kwargs)  # type: ignore[arg-type]
-        self.ports["ENF_METRICS_PORT"] = _free()
+        self.ports["ENF_METRICS_PORT"] = _free(self.ports.values())
         (workdir / "secrets" / "enforcement").mkdir(parents=True, exist_ok=True)
         self.node_cfg = node_config(enforcement=gate())
 
@@ -189,10 +189,10 @@ class EnforcementStack(SpamStack):
         return message_id, result
 
 
-def _free() -> int:
+def _free(exclude: Iterable[int] = ()) -> int:
     from tests.gateway.harness import _free_port
 
-    return int(_free_port())
+    return int(_free_port(exclude))
 
 
 # --- общие действия над панелью ---------------------------------------------------------------

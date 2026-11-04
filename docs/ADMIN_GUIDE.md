@@ -394,6 +394,10 @@
 * **Журнальный ящик:** `MSP_JOURNAL_MAILBOX_ENABLED`, `MSP_JOURNAL_MAILBOX_HOST`, `MSP_JOURNAL_MAILBOX_PORT`, `MSP_JOURNAL_MAILBOX_USER`,
   `MSP_JOURNAL_MAILBOX_PASSWORD_FILE`, `MSP_JOURNAL_MAILBOX_FOLDER`, `MSP_JOURNAL_MAILBOX_SSL`, `MSP_JOURNAL_MAILBOX_CA_FILE` — отдельный ящик со своими
   учётными данными; опрос раз в минуту, без отметки «прочитано», перенос в «Processed» только после записи. Опрос не идёт без теневого режима и соли.
+* **Подпись политики Ed25519 (рекомендуется):** `python scripts/policy_keygen.py --private <файл> --public <файл>`; закрытый ключ панели —
+  `MSP_ENFORCEMENT_POLICY_SIGNING_PRIVATE_KEY_FILE`, открытый ключ узла — `MSP_ENFORCEMENT_PUBLIC_KEY_FILE` на узле. Узел с открытым ключом
+  принимает только Ed25519. Включайте в таком порядке: сначала открытый ключ на **всех** узлах, потом закрытый на панели; иначе узлы, ещё
+  проверяющие HMAC, отвергнут новую политику и уйдут в безопасный режим.
 * **Итог пилота вычисляется** (`GET /api/v1/pilot/readiness`) и вручную не назначается. При нуле реальных писем он всегда `NOT_READY`.
 * **Решение о фазе:** автор предлагает, люди других ролей (`MAIL_ADMIN`, `SECURITY_OWNER`, для P4 ещё `BUSINESS_OWNER`) подтверждают каждый под своей
   учётной записью. Роли — это разные люди; автор подтверждать своё решение не может. Для роли владельца бизнеса нужна учётная запись Security Admin.

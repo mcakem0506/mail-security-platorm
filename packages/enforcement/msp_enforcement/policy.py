@@ -90,38 +90,146 @@ class EnforcementPolicy(Strict):
         return hashlib.sha256(self.canonical()).hexdigest()
 
 
+ALG_HMAC = "HMAC-SHA256"
+ALG_ED25519 = "ED25519"
+_ED25519_CONTEXT = b"msp-enforcement-policy-v1|ED25519|"
+
+
 class PolicyBundle(Strict):
-    """Пакет распространения: политика, контрольная сумма и подпись (§21)."""
+    """Пакет распространения: политика, контрольная сумма и подпись (§21).
+
+    ``algorithm`` по умолчанию HMAC: пакеты, выпущенные до появления асимметричной подписи, остаются читаемыми.
+    """
 
     policy: str  # каноническая JSON-строка
     checksum: str
     signature: str
     issued_at: datetime
+    algorithm: str = ALG_HMAC
+
+
+def _digest(policy: EnforcementPolicy) -> tuple[str, str]:
+    body = policy.canonical().decode()
+    return body, hashlib.sha256(body.encode()).hexdigest()
+
+
+def decode_key(text: str) -> bytes:
+    """Ключ из base64 (так он хранится в настройках и файлах). Не base64 — ошибка политики, а не молчаливая пустота."""
+    import base64
+    import binascii
+
+    try:
+        return base64.b64decode(text.strip(), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise PolicyError("ключ не в формате base64") from exc
+
+
+def generate_ed25519_keypair() -> tuple[bytes, bytes]:
+    """Новая пара: (закрытый ключ 32 байта, открытый ключ 32 байта)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    raw_private = private.private_bytes(
+        serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption()
+    )
+    raw_public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return raw_private, raw_public
+
+
+def _private_key(raw: bytes):  # type: ignore[no-untyped-def]
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    if len(raw) != 32:
+        raise PolicyError("закрытый ключ Ed25519 должен быть длиной 32 байта")
+    return Ed25519PrivateKey.from_private_bytes(raw)
+
+
+def public_key_from_private(private_key: bytes) -> bytes:
+    from cryptography.hazmat.primitives import serialization
+
+    return (
+        _private_key(private_key)
+        .public_key()
+        .public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    )
+
+
+def _message(algorithm: str, digest: str, issued_at: datetime) -> bytes:
+    prefix = _ED25519_CONTEXT if algorithm == ALG_ED25519 else b""
+    return prefix + f"{digest}|{issued_at.isoformat()}".encode()
 
 
 def sign_policy(policy: EnforcementPolicy, key: bytes, *, issued_at: datetime | None = None) -> PolicyBundle:
+    """Подпись общим секретом (HMAC). Секрет есть и у панели, и у узла: см. ``sign_policy_ed25519``."""
     if len(key) < 32:
         raise PolicyError("ключ подписи политики короче 32 байт")
-    body = policy.canonical().decode()
+    body, digest = _digest(policy)
     issued = issued_at or utcnow()
-    digest = hashlib.sha256(body.encode()).hexdigest()
-    mac = hmac.new(key, f"{digest}|{issued.isoformat()}".encode(), hashlib.sha256).hexdigest()
-    return PolicyBundle(policy=body, checksum=digest, signature=mac, issued_at=issued)
+    mac = hmac.new(key, _message(ALG_HMAC, digest, issued), hashlib.sha256).hexdigest()
+    return PolicyBundle(policy=body, checksum=digest, signature=mac, issued_at=issued, algorithm=ALG_HMAC)
 
 
-def verify_bundle(bundle: PolicyBundle, key: bytes) -> EnforcementPolicy:
-    """Контрольная сумма и подпись обязательны; подменённый или неподписанный пакет не принимается."""
+def sign_policy_ed25519(
+    policy: EnforcementPolicy, private_key: bytes, *, issued_at: datetime | None = None
+) -> PolicyBundle:
+    """Подпись Ed25519: закрытый ключ только у панели, узлу достаточно открытого."""
+    key = _private_key(private_key)
+    body, digest = _digest(policy)
+    issued = issued_at or utcnow()
+    signature = key.sign(_message(ALG_ED25519, digest, issued)).hex()
+    return PolicyBundle(
+        policy=body, checksum=digest, signature=signature, issued_at=issued, algorithm=ALG_ED25519
+    )
+
+
+def verify_bundle(
+    bundle: PolicyBundle, key: bytes = b"", *, public_key: bytes | None = None
+) -> EnforcementPolicy:
+    """Контрольная сумма и подпись обязательны; подменённый или неподписанный пакет не принимается.
+
+    Режим выбирает узел, а не пакет. Узел с открытым ключом принимает только Ed25519 и отвергает HMAC: открытый ключ публичен,
+    и если бы узел принимал ещё и HMAC, подпись «секретом» из открытого ключа была бы подделкой. Узел без открытого ключа
+    принимает только HMAC.
+    """
     if hashlib.sha256(bundle.policy.encode()).hexdigest() != bundle.checksum:
         raise PolicyError("контрольная сумма пакета не совпала")
-    expected = hmac.new(
-        key, f"{bundle.checksum}|{bundle.issued_at.isoformat()}".encode(), hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(expected, bundle.signature):
-        raise PolicyError("подпись пакета недействительна")
+    if public_key is not None:
+        _verify_ed25519(bundle, public_key)
+    else:
+        _verify_hmac(bundle, key)
     policy = EnforcementPolicy.model_validate_json(bundle.policy)
     if policy.checksum() != bundle.checksum:
         raise PolicyError("пакет не в каноническом виде")
     return policy
+
+
+def _verify_hmac(bundle: PolicyBundle, key: bytes) -> None:
+    if bundle.algorithm != ALG_HMAC:
+        raise PolicyError("узел не настроен на асимметричную подпись, а пакет подписан иначе")
+    expected = hmac.new(
+        key, _message(ALG_HMAC, bundle.checksum, bundle.issued_at), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, bundle.signature):
+        raise PolicyError("подпись пакета недействительна")
+
+
+def _verify_ed25519(bundle: PolicyBundle, public_key: bytes) -> None:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    if len(public_key) != 32:
+        raise PolicyError("открытый ключ узла недействителен")
+    if bundle.algorithm != ALG_ED25519:
+        # Понижение до HMAC: узел с открытым ключом общего секрета не признаёт.
+        raise PolicyError("узел требует подпись Ed25519")
+    try:
+        signature = bytes.fromhex(bundle.signature)
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature, _message(ALG_ED25519, bundle.checksum, bundle.issued_at)
+        )
+    except (InvalidSignature, ValueError) as exc:
+        raise PolicyError("подпись пакета недействительна") from exc
 
 
 class PolicyStatus(StrEnum):
@@ -141,11 +249,13 @@ class PolicyCache:
         directory: Path,
         key: bytes,
         *,
+        public_key: bytes | None = None,
         soft_ttl: timedelta = timedelta(minutes=10),
         hard_ttl: timedelta = timedelta(hours=6),
     ) -> None:
         self.directory = Path(directory)
         self.key = key
+        self.public_key = public_key
         self.soft_ttl = soft_ttl
         self.hard_ttl = hard_ttl
 
@@ -159,7 +269,7 @@ class PolicyCache:
 
     def install(self, bundle: PolicyBundle, *, now: datetime | None = None) -> EnforcementPolicy:
         """Проверить пакет и сделать его действующим. Неверный пакет не затрагивает текущую копию."""
-        policy = verify_bundle(bundle, self.key)
+        policy = verify_bundle(bundle, self.key, public_key=self.public_key)
         self.directory.mkdir(parents=True, exist_ok=True)
         record = {"bundle": bundle.model_dump(mode="json"), "received_at": (now or utcnow()).isoformat()}
         tmp = self.directory / ".active.tmp"
@@ -173,7 +283,9 @@ class PolicyCache:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             bundle = PolicyBundle.model_validate(raw["bundle"])
-            return verify_bundle(bundle, self.key), datetime.fromisoformat(raw["received_at"])
+            return verify_bundle(bundle, self.key, public_key=self.public_key), datetime.fromisoformat(
+                raw["received_at"]
+            )
         except (OSError, ValueError, KeyError, PolicyError):
             return None
 

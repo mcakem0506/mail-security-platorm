@@ -40,7 +40,8 @@ APPROVERS: NOT_PROVIDED
 | **Дефект найден и исправлен:** один просмотр кандидата на отказ засчитывался дважды (скан и решение) и надувал выборку | `FIXED` (тест раньше исправления) | `enforcement.reviewed_rejects` |
 | Опрос журнального ящика по IMAP: перенос после фиксации, повтор, «Failed», большие и дубли | `IMPLEMENTED`; на поддельном ящике проверен, на настоящем Exchange `BLOCKED_EXTERNAL` | воркер `msp.poll_journal_mailbox`, `real_flow_feed.process_batch` |
 | Сборщик по EWS и приём `EWS_READONLY` по произвольным ящикам | `NOT_IMPLEMENTED` / `BLOCKED_EXTERNAL` | нужен настоящий Exchange |
-| Асимметричная подпись политики | `NOT_IMPLEMENTED`: для изолированного пилота допускается принятие риска (`policy_signing_risk_accept`) | см. [MSP_1_3P_INFRASTRUCTURE.md](MSP_1_3P_INFRASTRUCTURE.md) |
+| Асимметричная подпись политики Ed25519: закрытый ключ у панели, открытый на узле, узел с открытым ключом отвергает HMAC и сообщает режим проверки | `IMPLEMENTED`; режим по умолчанию остаётся HMAC и включается настройкой. На настоящих узлах `NOT_TESTED_REAL` | `msp_enforcement/policy.py`, `scripts/policy_keygen.py`, [MSP_1_3P_INFRASTRUCTURE.md](MSP_1_3P_INFRASTRUCTURE.md) |
+| **Дефект узла найден и исправлен:** отказ 403/404 без чтения тела запроса давал разрыв соединения (`ConnectionAbortedError` на Windows) вместо ответа | `FIXED` | `msp_enforcement/node.py` (`_drain`) |
 | Автоматическая смена ключа карантина | `NOT_IMPLEMENTED` (известное ограничение 1.3) | — |
 | Страница консоли «Пилот реального потока» | `IMPLEMENTED`: только чтение (итог, выборка, фазы, контроли, подтверждения); кнопок решений и переключения контролей нет | `apps/security-console/src/pages/PilotPage.tsx` |
 
@@ -180,9 +181,9 @@ EVIDENCE_ARCHIVE_SHA256:   NOT_PROVIDED
 
 Windows 11, Docker, Python 3.13:
 
-* `tests/unit tests/security tests/integration tests/e2e`: **2535 проверок, 0 провалов, 47 пропущено** (проверки, зависящие от Linux, выполняет CI). Было 2440 в приёмке 1.3;
+* `tests/unit tests/security tests/integration tests/e2e`: **2582 проверок, 0 провалов, 47 пропущено** (проверки, зависящие от Linux, выполняет CI). Было 2440 в приёмке 1.3;
   новые — статистика пилота (16), разбор журнального отчёта (15), проверка ключа карантина (11), гейты и разделение выборки (14), API пилота (38),
-  приём журнала (18), опрос журнального ящика (15), защита от действий пилота (12), дедупликация просмотров (2).
+  приём журнала (18), опрос журнального ящика (15), подпись Ed25519 и генератор ключей (38), защита от действий пилота (12), дедупликация просмотров (2).
 * `ruff check`, `ruff format --check`, `mypy packages apps/api/msp_api apps/worker providers` — без замечаний.
 * Миграция `a3f1c9d27b64` на PostgreSQL 16: `upgrade → downgrade → upgrade → alembic check` — чисто; миграция только добавляет таблицы.
 * Живой стенд принуждения 1.3 в этом этапе не менялся (изменения 1.3P его не затрагивают); его CI-задания сохранены.

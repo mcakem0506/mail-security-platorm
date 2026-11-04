@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -35,11 +35,17 @@ from msp_enforcement.model import (
     Readiness,
 )
 from msp_enforcement.policy import (
+    ALG_ED25519,
+    ALG_HMAC,
     ControlPolicy,
     EnforcementPolicy,
+    PolicyBundle,
     PolicyError,
     PolicyStatus,
+    decode_key,
+    public_key_from_private,
     sign_policy,
+    sign_policy_ed25519,
 )
 from msp_enforcement.readiness import (
     ReadinessInput,
@@ -415,11 +421,29 @@ def attest(control: EnforcementControlRecord, *, name: str, value: bool, actor_e
 # ---------------------------------------------------------------------------------------------
 # Политика
 # ---------------------------------------------------------------------------------------------
-def _signing_key(settings: Settings) -> bytes:
+def _signer(settings: Settings) -> Callable[[EnforcementPolicy], PolicyBundle]:
+    """Чем подписывать политику: закрытым ключом Ed25519, если он задан, иначе общим секретом HMAC.
+
+    Ed25519 предпочтительнее: узел хранит только открытый ключ и подделать пакет не может. Если закрытый ключ задан, но
+    испорчен, подпись не откатывается молча к HMAC: это ошибка настройки (503).
+    """
+    private = (settings.enforcement_policy_signing_private_key or "").strip()
+    if private:
+        try:
+            seed = decode_key(private)
+            public_key_from_private(seed)
+        except PolicyError as exc:
+            raise EnforcementError("закрытый ключ подписи политики недействителен", 503) from exc
+        return lambda policy: sign_policy_ed25519(policy, seed)
     key = (settings.enforcement_policy_signing_key or "").encode()
     if len(key) < 32:
         raise EnforcementError("ключ подписи политики принуждения не настроен", 503)
-    return key
+    return lambda policy: sign_policy(policy, key)
+
+
+def signing_algorithm(settings: Settings) -> str:
+    """Алгоритм, которым панель подписывает политику сейчас (для готовности пилота и отчётов)."""
+    return ALG_ED25519 if (settings.enforcement_policy_signing_private_key or "").strip() else ALG_HMAC
 
 
 def _next_version(session: Session, organization_id: str) -> str:
@@ -513,7 +537,7 @@ def publish(
     justification: str = "",
     groups: Mapping[str, Iterable[str]] | None = None,
 ) -> EnforcementPolicyRecord:
-    key = _signing_key(settings)
+    sign = _signer(settings)
     previous_groups = groups
     if previous_groups is None:
         current = current_policy(session, organization_id)
@@ -529,7 +553,7 @@ def publish(
             groups=previous_groups,
             notes=justification,
         )
-        bundle = sign_policy(policy, key)
+        bundle = sign(policy)
     except (PolicyError, ValueError) as exc:
         raise EnforcementError(f"политика не принята: {exc.__class__.__name__}", 422) from exc
     for old in session.execute(
@@ -740,7 +764,7 @@ def approve_activation(
         )
     if _open_incident(session, organization_id, kind) is not None:
         raise EnforcementError("по контролю есть незакрытый инцидент ложного срабатывания", 409)
-    _signing_key(settings)  # без ключа подписи включать нечего: узел не получит политику
+    _signer(settings)  # без ключа подписи включать нечего: узел не получит политику
     control.state = target.value
     control.canary_scope = request["scope"]
     control.thresholds = request["thresholds"]
@@ -783,7 +807,7 @@ def pause(
         raise EnforcementError("контроль уже приостановлен", 409)
     if ControlState.PAUSED not in TRANSITIONS[ControlState(control.state)]:
         raise EnforcementError(f"из состояния {control.state} приостановить нельзя", 409)
-    _signing_key(settings)
+    _signer(settings)
     control.state = ControlState.PAUSED.value
     control.paused_at = now()
     record = publish(
@@ -804,7 +828,7 @@ def rollback(
     """Вернуть политику к прежней версии: узлы получают ту же контрольную сумму, что и раньше (ТЗ §76)."""
     target_version = (to_version or control.rollback_version or "").strip()
     if not target_version or target_version == "SHADOW":
-        _signing_key(settings)
+        _signer(settings)
         control.state = ControlState.ROLLED_BACK.value
         control.canary_scope = {}
         control.rollback_version = ""
@@ -863,7 +887,7 @@ def return_to_shadow(
         raise EnforcementError("контроль уже в наблюдении", 409)
     if ControlState.SHADOW not in TRANSITIONS[current]:
         raise EnforcementError(f"из состояния {control.state} в наблюдение вернуться нельзя", 409)
-    _signing_key(settings)
+    _signer(settings)
     control.state = ControlState.SHADOW.value
     control.canary_scope = {}
     control.pending_request = {}
@@ -1615,6 +1639,7 @@ def note_node_state(session: Session, organization_id: str, node_id: str, state:
         "policy_checksum": str(state.get("policy_checksum", ""))[:64],
         "policy_version": str(state.get("policy_version", ""))[:64],
         "policy_status": str(state.get("policy_status", ""))[:16],
+        "policy_verification": str(state.get("policy_verification", ""))[:16],
         "local_bypass": current,
         "kill_switch_seen": bool(state.get("kill_switch_seen")),
         "decisions_total": int(state.get("decisions_total") or 0),

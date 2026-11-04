@@ -170,8 +170,8 @@ class SpamStack(Stack):
 
     def __init__(self, workdir: Path, **kwargs: object) -> None:
         super().__init__(workdir, **kwargs)  # type: ignore[arg-type]
-        self.ports["SPAM_DNS_CONTROL"] = _free_port()
-        self.ports["SPAM_METRICS_PORT"] = _free_port()
+        self.ports["SPAM_DNS_CONTROL"] = _free_port(self.ports.values())
+        self.ports["SPAM_METRICS_PORT"] = _free_port(self.ports.values())
         (workdir / "rspamd-bootstrap").mkdir(parents=True, exist_ok=True)
         (workdir / "secrets" / "rspamd").mkdir(parents=True, exist_ok=True)
         self.node_cfg = node_config()
